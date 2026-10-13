@@ -1,0 +1,122 @@
+[
+  {
+    "id": "harbor", "name": "Capitainerie", "icon": "harbor",
+    "desc": "Pilotes, rade et accostage : les navires arrivent plus vite à quai.",
+    "stat": "pilot_speed", "stat_label": "Pilotage", "unit": "s", "base": 1.0,
+    "cost": 100, "growth": 1.15,
+    "manager": {"name": "Capitaine Mathilde Roche", "title": "Capitaine de port", "cost": 1200, "amber": 8, "tier": 1,
+                "perk": "Accoste automatiquement les navires, pilotage ×2"},
+    "agent": "officier",
+    "stages": [
+      {"lv": 1, "name": "Un pilote et sa barque", "text": "Un vieux pilote rame jusqu'aux navires."},
+      {"lv": 10, "name": "Vedette de pilotage", "text": "Une vedette à moteur : le pilote monte à bord plus vite."},
+      {"lv": 25, "name": "Pilotes de jour et de nuit", "text": "Deux équipes se relaient : la rade ne dort plus."},
+      {"lv": 50, "name": "Station de pilotage", "text": "Radio, jumelles et café chaud : la rade est surveillée en continu."},
+      {"lv": 75, "name": "Remorqueurs d'escorte", "text": "Un remorqueur accompagne chaque grand navire."},
+      {"lv": 100, "name": "Radar de rade", "text": "Un radar suit chaque navire jusqu'au quai."},
+      {"lv": 150, "name": "Centre de trafic maritime", "text": "Les arrivées sont planifiées des heures à l'avance."},
+      {"lv": 200, "name": "Pilotage par satellite", "text": "Chaque navire suit une route calculée au mètre près."},
+      {"lv": 300, "name": "Capitainerie légendaire", "text": "Les capitaines du monde entier réclament tes pilotes."}
+    ]
+  },
+  {
+    "id": "berths", "name": "Quais", "icon": "berth",
+    "desc": "Lamaneurs et tablier : amarrage plus rapide, plus de place au pied des grues.",
+    "stat": "moor_speed", "stat_label": "Amarrage", "unit": "s", "base": 1.0,
+    "cost": 120, "growth": 1.15,
+    "manager": {"name": "Léon « Gros-Bras » Barbier", "title": "Chef de quai", "cost": 2500, "amber": 10, "tier": 1,
+                "perk": "Amarrage ×2, tablier agrandi"},
+    "agent": "docker",
+    "stages": [
+      {"lv": 1, "name": "Quai rafistolé", "text": "Des bollards rouillés et deux lamaneurs."},
+      {"lv": 10, "name": "Lamaneurs en équipe", "text": "Une équipe attend chaque navire au bord du quai."},
+      {"lv": 25, "name": "Bollards neufs", "text": "Les amarres tiennent du premier coup."},
+      {"lv": 50, "name": "Défenses en caoutchouc", "text": "Les navires accostent sans crainte pour leur coque."},
+      {"lv": 75, "name": "Canots de lamanage", "text": "Les amarres arrivent au quai par bateau."},
+      {"lv": 100, "name": "Tablier élargi", "text": "Plus de place au pied des grues."},
+      {"lv": 150, "name": "Amarrage assisté", "text": "Des treuils motorisés tiennent le navire en quelques minutes."},
+      {"lv": 200, "name": "Quai modèle", "text": "Les autres ports viennent copier ton quai."},
+      {"lv": 300, "name": "Quai d'exception", "text": "Un amarrage au cordeau, de jour comme de nuit."}
+    ]
+  },
+  {
+    "id": "customs", "name": "Douane", "icon": "customs",
+    "desc": "Finance la capacité d'inspection de l'État. Formalités plus courtes, lots inspectés plus vite.",
+    "stat": "inspect_rate", "stat_label": "Inspection", "unit": "EVP/min", "base": 3.0,
+    "cost": 120, "growth": 1.15,
+    "manager": {"name": "Inspecteur Paul Delmas", "title": "Chef du bureau des douanes", "cost": 400000, "amber": 15, "tier": 2,
+                "perk": "Inspection et formalités ×2"},
+    "agent": "douanier",
+    "stages": [
+      {"lv": 1, "name": "Un douanier et un tampon", "text": "Les papiers passent de main en main."},
+      {"lv": 10, "name": "Bureau des formalités", "text": "Un guichet rien que pour les capitaines."},
+      {"lv": 25, "name": "Brigade d'inspection", "text": "Une équipe ouvre les conteneurs suspects."},
+      {"lv": 50, "name": "Chiens renifleurs", "text": "Ils trouvent ce que les papiers cachent."},
+      {"lv": 75, "name": "Ciblage informatisé", "text": "Les lots à risque sont repérés avant l'arrivée."},
+      {"lv": 100, "name": "Laboratoire d'analyse", "text": "Les échantillons sont analysés sur place."},
+      {"lv": 150, "name": "Brigade d'élite", "text": "Les fraudeurs évitent désormais ton port."},
+      {"lv": 200, "name": "Douane modèle", "text": "Tes méthodes sont enseignées dans les écoles."},
+      {"lv": 300, "name": "Douane légendaire", "text": "Rien ne passe, et pourtant tout circule."}
+    ]
+  },
+  {
+    "id": "cranes", "name": "Portiques", "icon": "crane",
+    "desc": "Grutiers et grues : vitesse de déchargement par grue.",
+    "stat": "crane_rate", "stat_label": "Déchargement / grue", "unit": "EVP/min", "base": 3.0,
+    "cost": 80, "growth": 1.15,
+    "manager": {"name": "Yasmine Okafor", "title": "Cheffe des grutiers", "cost": 450, "amber": 6, "tier": 1,
+                "perk": "Déchargement ×2"},
+    "agent": "grutier",
+    "stages": [
+      {"lv": 1, "name": "Grue rouillée", "text": "Elle grince, mais elle soulève."},
+      {"lv": 10, "name": "Grue révisée", "text": "Graissée et repeinte : elle ne grince plus."},
+      {"lv": 25, "name": "Grutiers de jour et de nuit", "text": "Deux équipes se relaient aux commandes."},
+      {"lv": 50, "name": "Spreaders télescopiques", "text": "Le même crochet prend les 20 et les 40 pieds."},
+      {"lv": 75, "name": "Cabines climatisées", "text": "Les grutiers restent concentrés toute la journée."},
+      {"lv": 100, "name": "Double levage", "text": "Deux conteneurs à chaque mouvement."},
+      {"lv": 150, "name": "Levage assisté", "text": "L'ordinateur guide le spreader au centimètre."},
+      {"lv": 200, "name": "Grutiers champions", "text": "Ton équipe bat des records de cadence."},
+      {"lv": 300, "name": "Ballet des portiques", "text": "Les grues dansent, les navires se vident à vue d'œil."}
+    ]
+  },
+  {
+    "id": "yard_ops", "name": "Parc et manutention", "icon": "yard",
+    "desc": "Engins qui emportent les conteneurs du quai vers le parc.",
+    "stat": "transfer_rate", "stat_label": "Transfert", "unit": "EVP/min", "base": 4.5,
+    "cost": 100, "growth": 1.15,
+    "manager": {"name": "Nadia Benali", "title": "Cheffe de cour", "cost": 250000, "amber": 15, "tier": 2,
+                "perk": "Transfert ×2"},
+    "agent": "conducteur",
+    "stages": [
+      {"lv": 1, "name": "Un tracteur dans la boue", "text": "Un vieux tracteur fait des allers-retours."},
+      {"lv": 10, "name": "Chariots neufs", "text": "Plus rapides, ils ne s'embourbent plus."},
+      {"lv": 25, "name": "Reach stackers", "text": "Ils empilent les conteneurs sur trois hauteurs."},
+      {"lv": 50, "name": "Cavaliers", "text": "Les straddle carriers enjambent les piles."},
+      {"lv": 75, "name": "Plan de parc", "text": "Chaque conteneur a sa place réservée."},
+      {"lv": 100, "name": "Navettes en continu", "text": "Les engins ne roulent plus jamais à vide."},
+      {"lv": 150, "name": "Parc optimisé", "text": "Le logiciel range les conteneurs selon leur départ."},
+      {"lv": 200, "name": "Engins électriques", "text": "Silencieux et infatigables."},
+      {"lv": 300, "name": "Parc automatisé", "text": "Les engins se croisent sans jamais s'arrêter."}
+    ]
+  },
+  {
+    "id": "gate", "name": "Gate", "icon": "gate",
+    "desc": "Agents de porte et dispatcheurs : camions servis plus vite.",
+    "stat": "gate_rate", "stat_label": "Sortie", "unit": "EVP/min", "base": 5.5,
+    "cost": 100, "growth": 1.15,
+    "manager": {"name": "Tonio Ferrer", "title": "Chef de gate", "cost": 900000, "amber": 15, "tier": 2,
+                "perk": "Gate ×2"},
+    "agent": "agent de porte",
+    "stages": [
+      {"lv": 1, "name": "Une barrière et un cahier", "text": "Un agent note chaque camion à la main."},
+      {"lv": 10, "name": "Guérite chauffée", "text": "L'agent tient toute la journée."},
+      {"lv": 25, "name": "Dispatcheurs", "text": "Les camions sont appelés dans l'ordre."},
+      {"lv": 50, "name": "Rendez-vous camions", "text": "Chaque chauffeur arrive à son créneau."},
+      {"lv": 75, "name": "Lecture des plaques", "text": "Les caméras reconnaissent les camions."},
+      {"lv": 100, "name": "Gate en libre-service", "text": "Les chauffeurs badgent eux-mêmes."},
+      {"lv": 150, "name": "Gate de nuit", "text": "La porte ne ferme plus jamais."},
+      {"lv": 200, "name": "Gate express", "text": "Un camion passe en moins d'une minute."},
+      {"lv": 300, "name": "Gate légendaire", "text": "Les routiers se battent pour charger chez toi."}
+    ]
+  }
+]

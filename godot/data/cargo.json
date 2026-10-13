@@ -1,0 +1,67 @@
+[
+  {"id": "std", "name": "Standard", "short": "Sec", "value": 1.0, "zone": 0, "weight": 1.0, "unlocked": true,
+   "licence_cost": 120, "licence_growth": 1.2, "desc": "Conteneurs secs : vêtements, meubles, pièces détachées.", "color": "box_red",
+   "stages": [
+     {"lv": 1, "name": "Cartons en vrac", "text": "Ce qui se présente, au tarif du jour."},
+     {"lv": 10, "name": "Colis groupés", "text": "Les petits envois voyagent ensemble."},
+     {"lv": 20, "name": "Marchandises palettisées", "text": "Tout arrive filmé et étiqueté."},
+     {"lv": 30, "name": "Biens de consommation", "text": "Vêtements et meubles des grandes enseignes."},
+     {"lv": 50, "name": "Électroménager", "text": "Des cargaisons lourdes et bien payées."},
+     {"lv": 75, "name": "Électronique", "text": "Téléphones et ordinateurs : chaque boîte vaut cher."},
+     {"lv": 100, "name": "Pièces automobiles", "text": "Les usines attendent : livraison à l'heure."},
+     {"lv": 150, "name": "Machines-outils", "text": "Du matériel de précision, assuré au prix fort."},
+     {"lv": 200, "name": "Produits de luxe", "text": "Parfums et montres : le haut de gamme passe chez toi."}
+   ]},
+  {"id": "reefer", "name": "Frigorifique", "short": "Frigo", "value": 2.5, "zone": 1, "weight": 0.35, "unlocked": false,
+   "licence_cost": 40000, "licence_growth": 1.2, "desc": "Fruits, poisson, vaccins. Exige des prises électriques.", "color": "reefer",
+   "stages": [
+     {"lv": 1, "name": "Pommes de garde", "text": "Des fruits robustes qui supportent le voyage."},
+     {"lv": 10, "name": "Agrumes", "text": "Oranges et citrons à température contrôlée."},
+     {"lv": 20, "name": "Bananes", "text": "Mûries pendant la traversée, au degré près."},
+     {"lv": 30, "name": "Poisson congelé", "text": "Moins dix-huit degrés de bout en bout."},
+     {"lv": 50, "name": "Viandes", "text": "La chaîne du froid ne se rompt jamais."},
+     {"lv": 75, "name": "Fruits exotiques", "text": "Mangues et litchis, fragiles et précieux."},
+     {"lv": 100, "name": "Fleurs coupées", "text": "Elles doivent arriver fraîches au marché du matin."},
+     {"lv": 150, "name": "Fruits de mer vivants", "text": "Homards et huîtres voyagent en bassin."},
+     {"lv": 200, "name": "Vaccins", "text": "La cargaison la plus surveillée du port."}
+   ]},
+  {"id": "imo", "name": "Dangereux (IMO)", "short": "IMO", "value": 3.0, "zone": 2, "weight": 0.22, "unlocked": false,
+   "licence_cost": 2.0e6, "licence_growth": 1.2, "desc": "Chimie. Zone isolée, inspection obligatoire.", "color": "imo",
+   "stages": [
+     {"lv": 1, "name": "Peintures", "text": "Inflammables, mais bien emballées."},
+     {"lv": 10, "name": "Engrais", "text": "À tenir au sec et loin de la chaleur."},
+     {"lv": 20, "name": "Solvants", "text": "Des fûts étanches sous surveillance."},
+     {"lv": 30, "name": "Gaz en bouteilles", "text": "Rangés debout, sanglés, ventilés."},
+     {"lv": 50, "name": "Acides industriels", "text": "Des citernes doublées et des équipes formées."},
+     {"lv": 75, "name": "Produits pharmaceutiques", "text": "Les laboratoires paient pour la sécurité."},
+     {"lv": 100, "name": "Batteries au lithium", "text": "Le carburant des voitures électriques."},
+     {"lv": 150, "name": "Explosifs de chantier", "text": "Escortés de la cale jusqu'à la carrière."},
+     {"lv": 200, "name": "Isotopes médicaux", "text": "Quelques grammes, une valeur immense."}
+   ]},
+  {"id": "oog", "name": "Hors-gabarit", "short": "HG", "value": 4.0, "zone": 3, "weight": 0.12, "unlocked": false,
+   "licence_cost": 8.0e6, "licence_growth": 1.2, "desc": "Pales d'éolienne, machines. Aire plate dédiée.", "color": "oog",
+   "stages": [
+     {"lv": 1, "name": "Bateaux de plaisance", "text": "Sur des berceaux, sanglés avec soin."},
+     {"lv": 10, "name": "Engins agricoles", "text": "Tracteurs et moissonneuses sur plateau."},
+     {"lv": 20, "name": "Grues démontées", "text": "Des flèches de trente mètres en pièces détachées."},
+     {"lv": 30, "name": "Transformateurs", "text": "Cent tonnes de cuivre et d'acier d'un seul bloc."},
+     {"lv": 50, "name": "Turbines", "text": "Le cœur des centrales électriques."},
+     {"lv": 75, "name": "Pales d'éolienne", "text": "Quatre-vingts mètres de long, pas un de moins."},
+     {"lv": 100, "name": "Locomotives", "text": "Livrées sur rails provisoires jusqu'au train."},
+     {"lv": 150, "name": "Réacteurs d'usine", "text": "Un convoi exceptionnel à chaque escale."},
+     {"lv": 200, "name": "Étages de fusée", "text": "Direction la base de lancement."}
+   ]},
+  {"id": "empty", "name": "Vides", "short": "Vide", "value": 0.3, "zone": 0, "weight": 0.25, "unlocked": true,
+   "licence_cost": 200, "licence_growth": 1.2, "desc": "Conteneurs vides à repositionner. Faible valeur.", "color": "empty",
+   "stages": [
+     {"lv": 1, "name": "Vides cabossés", "text": "Des boîtes fatiguées qu'on repositionne à bas prix."},
+     {"lv": 10, "name": "Vides propres", "text": "Lavés et prêts à charger."},
+     {"lv": 20, "name": "Vides réparés", "text": "Portes et planchers remis à neuf."},
+     {"lv": 30, "name": "Vides inspectés", "text": "Chaque boîte a son certificat."},
+     {"lv": 50, "name": "Vides certifiés", "text": "Aptes au transport alimentaire."},
+     {"lv": 75, "name": "Vides réservés", "text": "Les armateurs les retiennent à l'avance."},
+     {"lv": 100, "name": "Réserve de vides", "text": "Un stock tampon pour toute la côte."},
+     {"lv": 150, "name": "Vides en flux tendu", "text": "Livrés là où on les attend, quand on les attend."},
+     {"lv": 200, "name": "Vides à la demande", "text": "Les armateurs louent ta réserve à prix d'or."}
+   ]}
+]

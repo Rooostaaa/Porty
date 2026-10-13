@@ -1,0 +1,94 @@
+{
+  "tick": 0.25,
+  "day_seconds": 90,
+  "start_money": 100,
+  "start_amber": 0,
+  "start_satisfaction": 0.55,
+  "seed": 12345,
+
+  "arrive_time": 7,
+  "depart_time": 7,
+  "pilot_time": 5,
+  "moor_time": 5,
+  "formal_time": 5,
+  "pilot_time_min": 2.5,
+  "moor_time_min": 1.5,
+  "formal_time_min": 1.5,
+  "auto_berth_delay": 12,
+  "manual": {"assist_seconds": 2.0, "assist_cooldown": 2.0, "express_pilot": 0.6},
+  "patience_base": 80,
+  "rade_places": 2,
+  "rade_places_per_10_levels": 1,
+
+  "apron_per_berth": 40,
+  "apron_per_level": 8,
+  "dwell_target": 20,
+  "yard_stack_per_level": 0.06,
+  "truck_evp": 2,
+  "truck_queue_max": 24,
+  "truck_honk_after": 12,
+  "fill_curve": [[0.0, 1.0], [0.65, 1.0], [0.9, 0.6], [1.0, 0.3]],
+
+  "dept_per_level": 0.15,
+  "dept_milestones": [10, 25, 50, 75, 100, 150, 200, 300],
+  "dept_milestone_mult": 2.0,
+  "manager_mult": 2.0,
+  "licence_per_level": 0.25,
+  "licence_milestones": [[10, 2], [20, 2], [30, 1.5], [50, 1.5], [75, 1.5], [100, 1.5], [150, 2], [200, 2]],
+  "licence_max": [25, 60, 100],
+
+  "boost": {"mult": 2.0, "duration": 60, "cooldown": 300, "amber_skip": 1},
+
+  "tariff_min": 0.7,
+  "tariff_max": 1.5,
+  "tariff_demand_exp": 1.6,
+
+  "rep_alpha": 0.12,
+  "rep_demand_min": 0.7,
+  "rep_demand_max": 1.4,
+
+  "gate_fee_ratio": 0.3,
+  "inspection_fee": 0.25,
+  "reefer_fee_per_day": 0.6,
+  "salary_per_agent_day": [3, 25, 160],
+  "agents_per_levels": 8,
+  "agents_max": [3, 5, 8],
+
+  "policies": [
+    {"name": "Minimale", "fraction": 0.03, "detect": 0.15, "method": "documentaire", "desc": "Contrôle documentaire, peu de retard, risque élevé."},
+    {"name": "Standard", "fraction": 0.10, "detect": 0.60, "method": "scanner", "desc": "Un équilibre raisonnable."},
+    {"name": "Renforcée", "fraction": 0.30, "detect": 0.80, "method": "scanner + fouille", "desc": "Moins de risques, plus de lots retenus."},
+    {"name": "Totale", "fraction": 0.80, "detect": 0.95, "method": "fouille physique", "desc": "Presque tout est ouvert : congestion assurée."}
+  ],
+  "imo_always_inspected": true,
+  "reefer_extra_fraction": 0.15,
+  "seizure_chance": 0.25,
+  "incident_fine_per_value": 40,
+
+  "renown": {"evp_scale": 100000, "per_point": 0.10, "throughput_per_point": 0.08, "amber": 10},
+
+  "offline_max_hours": 8,
+  "offline_base_yield": 0.5,
+
+  "event_interval": [110, 200],
+  "first_event_after": 240,
+  "contract_slots": 3,
+  "contract_active_max": 2,
+  "mission_visible": 3,
+  "mission_chest": {"every": 4, "amber": 2, "income_seconds": 30},
+
+  "contract_traffic": 2.0,
+  "contract_fill": 0.5,
+  "floor_per_level": 0.02,
+  "line_gain": 1.5,
+  "lines_per_owner": [0, 3, 4],
+  "line_cost": [400, 1000000, 7.5e7],
+  "line_cost_growth": 2.0,
+  "line_contract_discount": 0.5,
+  "campaigns": [
+    {"id": "posters", "name": "Affiches sur le port", "tier": 1, "mult": 1.5, "duration": 150, "cooldown": 300, "income_seconds": 20, "min_cost": 40,
+     "desc": "Des affiches dans les ports voisins : plus de navires pendant 2 min 30."},
+    {"id": "journal", "name": "Annonce au journal maritime", "tier": 1, "require": "customs1", "mult": 2.0, "duration": 240, "cooldown": 600, "income_seconds": 60, "min_cost": 300,
+     "desc": "Une pleine page dans le journal des armateurs : trafic ×2 pendant 4 min."}
+  ]
+}

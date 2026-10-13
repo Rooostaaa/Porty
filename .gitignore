@@ -1,0 +1,9 @@
+# caches
+.godot/
+__pycache__/
+*.pyc
+# copies de modèles pour les rendus avant/après
+docs/previews/_avant/
+# exports
+build/
+*.apk

@@ -1,0 +1,6 @@
+[
+  {"id": "mini", "name": "Petit porte-conteneurs", "evp": [16, 30], "depth": 1, "dues": 5, "traffic": [0.7, 0.02, 0.0], "model": "ship_mini", "patience": 1.2, "time_scale": 0.4},
+  {"id": "coaster", "name": "Caboteur", "evp": [60, 150], "depth": 2, "dues": 15, "traffic": [2.0, 0.15, 0.03], "model": "ship_coaster", "patience": 1.0, "time_scale": 0.7, "arrival": "Le quai allongé attire les caboteurs : 60 à 150 conteneurs par escale. Le trafic grimpe, prépare tes grues !"},
+  {"id": "feeder", "name": "Feeder", "evp": [400, 1200], "depth": 3, "dues": 60, "traffic": [2.0, 2.0, 0.6], "model": "ship_feeder", "patience": 1.1, "arrival": "Le chenal dragué laisse entrer les feeders : jusqu'à 1 200 conteneurs par escale !"},
+  {"id": "panamax", "name": "Panamax", "evp": [2500, 4500], "depth": 4, "dues": 400, "traffic": [0.0, 0.0, 1.0], "model": "ship_panamax", "patience": 1.25, "arrival": "Le quai profond accueille son premier Panamax : un géant de 4 500 conteneurs."}
+]

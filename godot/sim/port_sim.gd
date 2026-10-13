@@ -1,0 +1,1972 @@
+class_name PortSim
+extends RefCounted
+## Simulation complète du terminal. Aucune dépendance aux nœuds : la vue s'abonne aux signaux.
+## Flux : rade → pilotage → quai (amarrage, formalités, déchargement) → tablier → parc (à inspecter / dédouané) → gate.
+
+signal ship_spawned(ship: Ship)
+signal ship_state_changed(ship: Ship)
+signal ship_removed(ship: Ship)
+signal revenue(amount: float, source: String)
+signal notify(text: String, kind: String)
+signal purchased(kind: String, id: String)
+signal truck_served(wait: float)
+signal inspection_result(outcome: String, owner: String)
+signal tier_changed(tier: int)
+signal event_started(ev: Dictionary)
+signal event_ended(id: String)
+signal contracts_changed()
+signal mission_ready(id: String)
+signal feature_unlocked(id: String)          # une fonction de jeu se révèle (data/unlocks.json)
+signal ship_class_first(ship: Ship)          # premier navire d'une nouvelle classe : moment marquant
+
+const NCARGO := 5
+const NZONE := 4
+const DEPTS := ["harbor", "berths", "customs", "cranes", "yard_ops", "gate"]
+
+var db: DataDB
+var rng := RandomNumberGenerator.new()
+var mods := Modifiers.new()
+
+# --- état du joueur ---
+var time: float = 0.0
+var money: float = 0.0
+var amber: int = 0
+var tier: int = 1
+var finished: bool = false
+var satisfaction: float = 0.55
+var levels: Dictionary = {}
+var managers: Dictionary = {}
+var licences: PackedInt32Array = PackedInt32Array()
+var built: Array[String] = []
+var policy: int = 1
+var tariff: float = 1.0
+var boost_until: float = -1.0
+var boost_ready_at: float = 0.0
+var relations: Dictionary = {}
+var counters: Dictionary = {}
+var missions_claimed: Array[String] = []
+var mission_flags: Dictionary = {}     # missions déjà signalées (non sauvegardé)
+var renown: int = 0                    # prestige : points de Renom (bonus permanent de revenus)
+var prestiges: int = 0                 # nombre de concessions déjà menées à terme
+var lifetime: Dictionary = {}          # compteurs cumulés des concessions précédentes
+var features: Dictionary = {}          # fonctions déjà révélées (id -> true) ; voir `feature()`
+var owners_on: Dictionary = {}         # armateurs démarchés (salon maritime) : id -> true
+var lines: Dictionary = {}             # lignes régulières signées : armateur -> nombre
+var line_offers: Array[String] = []    # armateurs qui proposent une ligne (après un contrat réussi)
+var campaign_ready_at: Dictionary = {} # campagne de démarchage -> fin de recharge
+var legacy_notice: String = ""         # sauvegarde ancienne mise à niveau : l'interface l'explique une fois (non sauvegardé)
+var last_claim: Dictionary = {}          # dernière mission réclamée : Ambre, argent, coffre (pour les effets d'interface ; non sauvegardé)
+
+# --- flux ---
+var ships: Array[Ship] = []
+var next_ship_id: int = 1
+var arrival_accum: float = 0.0
+var pending_arrival: Dictionary = {}
+var apron: PackedFloat64Array = PackedFloat64Array()
+var yard_pending: PackedFloat64Array = PackedFloat64Array()
+var yard_cleared: PackedFloat64Array = PackedFloat64Array()
+var delivered: PackedFloat64Array = PackedFloat64Array()
+var arrived_total: float = 0.0
+var sailed_away: float = 0.0       # EVP repartis avec un navire furieux
+var truck_queue: float = 0.0        # EVP de camions en attente à la gate
+var truck_visual_accum: float = 0.0
+
+# --- infrastructure (dérivée des bâtiments) ---
+var berths: Array[Dictionary] = []     # {depth, cranes:[{factor, kind}], ship:int}
+var yard_cap: PackedFloat64Array = PackedFloat64Array()
+var gate_lanes: int = 1
+var customs_open: bool = false
+var parking_slots: int = 0              # places de l'aire d'attente poids lourds
+var patience_mult: float = 1.0          # services aux navires (avitaillement…)
+var ship_fee: float = 0.0               # services facturés à chaque escale (part des droits de port)
+var time_min_mults: Dictionary = {}     # "pilot" | "moor" | "formal" -> multiplicateur du temps minimal
+var unlocked: PackedByteArray = PackedByteArray()
+var building_mults: Array[Dictionary] = []
+
+# --- aléas, contrats ---
+var active_event: Dictionary = {}
+var next_event_at: float = 0.0
+var contract_offers: Array[Dictionary] = []
+var contracts_active: Array[Dictionary] = []
+var next_contract_refresh: float = 0.0
+
+# --- indicateurs ---
+var stat_rade_wait: float = 0.0
+var stat_truck_wait: float = 0.0
+var stat_berth_busy: float = 0.0
+var income_buckets: PackedFloat64Array = PackedFloat64Array()
+var evp_buckets: PackedFloat64Array = PackedFloat64Array()
+var ship_buckets: PackedFloat64Array = PackedFloat64Array()
+var bucket_index: int = 0
+var bucket_time: float = 0.0
+var analysis: Dictionary = {}
+var _analysis_timer: float = 0.0
+var _second_timer: float = 0.0
+var _last_full_notice: float = -100.0
+var last_income: Dictionary = {}       # source -> montant sur la dernière minute (pour l'explicabilité)
+
+
+func _init(data: DataDB = null, seed_value: int = -1) -> void:
+	db = data if data != null else DataDB.new()
+	rng.seed = seed_value if seed_value >= 0 else int(db.cfg("seed", 1))
+	reset()
+	_spawn_initial()
+
+
+## Nouvelle partie : un premier navire est déjà en vue du port.
+func _spawn_initial() -> void:
+	pending_arrival = _roll_arrival()
+	arrival_accum = float(pending_arrival.evp)
+	_arrivals(0.0)
+	if not ships.is_empty():
+		ships[0].timer = 1.5
+
+
+func reset() -> void:
+	time = 0.0
+	money = float(db.cfg("start_money", 0))
+	amber = int(db.cfg("start_amber", 0))
+	tier = 1
+	finished = false
+	satisfaction = float(db.cfg("start_satisfaction", 0.5))
+	levels.clear()
+	managers.clear()
+	for d in db.departments:
+		levels[d.id] = 1
+		managers[d.id] = false
+	licences = PackedInt32Array()
+	licences.resize(NCARGO)
+	for i in NCARGO:
+		licences[i] = 1
+	built.clear()
+	policy = 1
+	tariff = 1.0
+	boost_until = -1.0
+	boost_ready_at = 0.0
+	relations.clear()
+	for o in db.owners:
+		relations[o.id] = 50.0
+	counters.clear()
+	missions_claimed.clear()
+	mission_flags.clear()
+	features.clear()
+	owners_on.clear()
+	lines.clear()
+	line_offers.clear()
+	campaign_ready_at.clear()
+	legacy_notice = ""
+	ships.clear()
+	next_ship_id = 1
+	arrival_accum = 0.0
+	pending_arrival = {}
+	apron = _zeros(NCARGO)
+	yard_pending = _zeros(NCARGO)
+	yard_cleared = _zeros(NCARGO)
+	delivered = _zeros(NCARGO)
+	arrived_total = 0.0
+	sailed_away = 0.0
+	truck_queue = 0.0
+	truck_visual_accum = 0.0
+	active_event = {}
+	next_event_at = float(db.cfg("first_event_after", 240))
+	contract_offers.clear()
+	contracts_active.clear()
+	next_contract_refresh = 0.0
+	income_buckets = _zeros(60)
+	evp_buckets = _zeros(60)
+	ship_buckets = _zeros(60)
+	bucket_index = 0
+	bucket_time = 0.0
+	# état temporaire et prestige : `from_dict` sur une instance déjà utilisée ne doit rien garder de l'ancienne partie
+	renown = 0
+	prestiges = 0
+	lifetime = {}
+	last_income.clear()
+	stat_rade_wait = 0.0
+	stat_truck_wait = 0.0
+	stat_berth_busy = 0.0
+	_assist_at.clear()
+	_last_full_notice = -100.0
+	_second_timer = 0.0
+	_analysis_timer = 0.0
+	_cache.clear()
+	rebuild_infra()
+	_refresh_analysis()
+
+
+static func _zeros(n: int) -> PackedFloat64Array:
+	var a := PackedFloat64Array()
+	a.resize(n)
+	a.fill(0.0)
+	return a
+
+
+# =====================================================================
+# Infrastructure
+# =====================================================================
+
+func rebuild_infra() -> void:
+	berths = [{"depth": 1, "cranes": [{"factor": 1.0, "kind": "mobile"}], "ship": -1}]
+	yard_cap = _zeros(NZONE)
+	yard_cap[0] = 300.0
+	gate_lanes = 1
+	parking_slots = 0
+	patience_mult = 1.0
+	ship_fee = 0.0
+	customs_open = false
+	time_min_mults.clear()
+	unlocked = PackedByteArray()
+	unlocked.resize(NCARGO)
+	for i in NCARGO:
+		unlocked[i] = 1 if bool(db.cargo[i].unlocked) else 0
+	building_mults.clear()
+	for bid in built:
+		var b: Dictionary = db.building_by_id.get(bid, {})
+		for e in b.get("effects", []):
+			_apply_effect(e)
+	# réassocie les navires déjà à quai
+	for s in ships:
+		if s.berth >= 0 and s.berth < berths.size() and s.state >= Ship.State.PILOTING and s.state <= Ship.State.UNLOADING:
+			berths[s.berth].ship = s.id
+
+
+func _apply_effect(e: Dictionary) -> void:
+	match String(e.type):
+		"yard_cap":
+			yard_cap[int(e.zone)] += float(e.amount)
+		"add_crane":
+			var bi := int(e.berth)
+			if bi < berths.size():
+				berths[bi].cranes.append({"factor": float(e.factor), "kind": String(e.get("kind", "mobile"))})
+		"berth_depth":
+			var bj := int(e.berth)
+			if bj < berths.size():
+				berths[bj].depth = maxi(int(berths[bj].depth), int(e.depth))
+		"add_berth":
+			var cr: Array = []
+			for c in e.cranes:
+				cr.append({"factor": float(c.factor), "kind": String(c.get("kind", "mobile"))})
+			berths.append({"depth": int(e.depth), "cranes": cr, "ship": -1})
+		"gate_lanes":
+			gate_lanes += int(e.amount)
+		"unlock_cargo":
+			unlocked[int(db.cargo_index[e.cargo])] = 1
+		"stat_mult":
+			building_mults.append({"stat": String(e.stat), "mult": float(e.mult), "label": String(e.get("label", "Bâtiment"))})
+		"customs_open":
+			customs_open = true
+		"parking":
+			parking_slots += int(e.amount)
+		"patience":
+			patience_mult *= float(e.mult)
+		"ship_fee":
+			ship_fee += float(e.amount)
+		"time_min":
+			# raccourcit le temps minimal de pilotage / amarrage / formalités (le plancher qui plafonne le débit)
+			var k := String(e.kind)
+			time_min_mults[k] = float(time_min_mults.get(k, 1.0)) * float(e.mult)
+
+
+func max_depth() -> int:
+	var d := 1
+	for b in berths:
+		d = maxi(d, int(b.depth))
+	return d
+
+
+func apron_capacity() -> float:
+	var per := float(db.cfg("apron_per_berth", 40)) + float(db.cfg("apron_per_level", 8)) * float(levels.berths)
+	if managers.berths:
+		per *= 1.5
+	return per * berths.size()
+
+
+func rade_places() -> int:
+	return int(db.cfg("rade_places", 4)) + floori(float(levels.harbor) / 10.0) * int(db.cfg("rade_places_per_10_levels", 1))
+
+
+func pilots() -> int:
+	return 1 + floori(float(levels.harbor) / 10.0)
+
+
+func agents(dept: String) -> int:
+	var cap: int = int(db.cfg("agents_max")[tier_index()])
+	return mini(cap, 1 + floori(float(levels[dept]) / float(db.cfg("agents_per_levels", 8))))
+
+
+func agents_max() -> int:
+	return int(db.cfg("agents_max")[tier_index()])
+
+
+func tier_index() -> int:
+	return clampi(tier - 1, 0, 2)
+
+
+func stars() -> float:
+	return 1.0 + 4.0 * clampf(satisfaction, 0.0, 1.0)
+
+
+func yard_stock_zone(z: int) -> float:
+	var s := 0.0
+	for c in NCARGO:
+		if int(db.cargo[c].zone) == z:
+			s += yard_pending[c] + yard_cleared[c]
+	return s
+
+
+func yard_stock() -> float:
+	var s := 0.0
+	for c in NCARGO:
+		s += yard_pending[c] + yard_cleared[c]
+	return s
+
+
+## Empilage : plus le Parc et manutention progresse, plus on empile haut (gerbeurs, puis portiques de cour).
+func stack_factor() -> float:
+	return 1.0 + float(db.cfg("yard_stack_per_level", 0.15)) * float(int(levels.yard_ops) - 1)
+
+
+func yard_zone_capacity(z: int) -> float:
+	return yard_cap[z] * stack_factor()
+
+
+func yard_capacity() -> float:
+	var s := 0.0
+	for v in yard_cap:
+		s += v
+	return s * stack_factor()
+
+
+func yard_fill() -> float:
+	return yard_stock() / maxf(1.0, yard_capacity())
+
+
+func apron_stock() -> float:
+	var s := 0.0
+	for v in apron:
+		s += v
+	return s
+
+
+func boost_active() -> bool:
+	return time < boost_until
+
+
+# =====================================================================
+# Statistiques et explicabilité
+# =====================================================================
+
+## Bonus permanent de prestige : +10 % de revenus par point de Renom.
+func renown_mult() -> float:
+	return 1.0 + float(db.cfg("renown").per_point) * float(renown)
+
+
+## Effet d'un niveau de département : +x % par niveau (le débit physique reste lisible).
+func level_mult(lv: int) -> float:
+	return 1.0 + float(db.cfg("dept_per_level")) * float(lv - 1)
+
+
+func dept_milestone_mult(lv: int) -> float:
+	var m := 1.0
+	for l in db.cfg("dept_milestones"):
+		if lv >= int(l):
+			m *= float(db.cfg("dept_milestone_mult"))
+	return m
+
+
+## Nombre de paliers de niveau franchis par un département (le monde montre un élément de plus à chacun).
+func dept_stage(dept: String) -> int:
+	var n := 0
+	for l in db.cfg("dept_milestones"):
+		if int(levels[dept]) >= int(l):
+			n += 1
+	return n
+
+
+func next_dept_milestone(lv: int) -> int:
+	for l in db.cfg("dept_milestones"):
+		if int(l) > lv:
+			return int(l)
+	return 0
+
+
+## Effet d'une licence : +x % par niveau et des paliers finis (`licence_milestones` : [[niveau, mult], …]).
+func licence_mult(lv: int) -> float:
+	return (1.0 + float(db.cfg("licence_per_level")) * float(lv - 1)) * Progression.step_mult(lv, db.cfg("licence_milestones"))
+
+
+## Niveau maximal des licences au palier courant (`licence_max` par palier ; le palier suivant est le vrai saut).
+func licence_cap() -> int:
+	var caps: Array = db.cfg("licence_max", [])
+	if caps.is_empty():
+		return 1 << 30
+	return int(caps[clampi(tier - 1, 0, caps.size() - 1)])
+
+
+## Niveaux de licence encore achetables avant le plafond du palier.
+func licence_room(ci: int) -> int:
+	return maxi(0, licence_cap() - int(licences[ci]))
+
+
+func _dept_terms(dept: String, out: Array[Dictionary], sqrt_mode: bool = false) -> void:
+	var d: Dictionary = db.dept_by_id[dept]
+	var lv: int = levels[dept]
+	var lm := level_mult(lv)
+	var m := dept_milestone_mult(lv)
+	if sqrt_mode:
+		out.append({"label": "Niveau %d" % lv, "value": sqrt(lm * m)})
+	else:
+		out.append({"label": "Base", "value": float(d.base)})
+		if lv > 1:
+			out.append({"label": "Niveau %d" % lv, "value": lm})
+		if m > 1.0:
+			out.append({"label": "Paliers de niveau", "value": m})
+	if managers[dept]:
+		out.append({"label": "Responsable", "value": float(db.cfg("manager_mult", 2.0))})
+
+
+## Statistiques de débit que le Renom améliore (le terminal est mieux rodé, la réputation attire les navires).
+const RENOWN_THROUGHPUT_STATS := ["demand", "crane_rate", "transfer_rate", "inspect_rate", "gate_rate"]
+
+
+func renown_throughput_mult() -> float:
+	return 1.0 + float(db.cfg("renown").throughput_per_point) * float(renown)
+
+
+func _common_terms(stat: String, out: Array[Dictionary], boosted: bool) -> void:
+	for bm in building_mults:
+		if bm.stat == stat:
+			out.append({"label": bm.label, "value": bm.mult})
+	if renown > 0 and RENOWN_THROUGHPUT_STATS.has(stat):
+		out.append({"label": "Renom ✦ %d" % renown, "value": renown_throughput_mult()})
+	if boosted and boost_active():
+		out.append({"label": "Heures sup", "value": float(db.cfg("boost").mult)})
+	out.append_array(mods.factors(stat))
+
+
+## Liste des facteurs d'une statistique (le joueur voit « pourquoi ×3,2 »).
+func breakdown(stat: String, cargo_i: int = 0) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	match stat:
+		"demand":
+			# base : ce que les navires que les quais peuvent recevoir apportent (EVP/s) — quai allongé, chenal dragué…
+			out.append({"label": "Navires accueillis (gabarit %d)" % max_depth(), "value": class_traffic()})
+			var tm := float(db.tier_def(tier).get("traffic_mult", 1.0))
+			if tm != 1.0:
+				out.append({"label": "Statut : %s" % db.tier_def(tier).name, "value": tm})
+			var n_own := 0
+			var n_lines := 0
+			for o in db.owners:
+				if owner_present(o):
+					n_own += 1
+					n_lines += int(lines.get(o.id, 0))
+			out.append({"label": "Armateurs (%d) et lignes (%d)" % [n_own, n_lines], "value": owners_traffic()})
+			out.append({"label": "Réputation %.1f ★" % stars(), "value": lerpf(float(db.cfg("rep_demand_min")), float(db.cfg("rep_demand_max")), satisfaction)})
+			if not is_equal_approx(tariff, 1.0):
+				out.append({"label": "Tarifs %d %%" % roundi(tariff * 100.0), "value": pow(1.0 / tariff, float(db.cfg("tariff_demand_exp")))})
+			_common_terms(stat, out, false)
+		"crane_rate":
+			_dept_terms("cranes", out)
+			_common_terms(stat, out, true)
+		"transfer_rate":
+			_dept_terms("yard_ops", out)
+			var eff := Progression.curve(db.cfg("fill_curve"), yard_fill())
+			if eff < 0.999:
+				out.append({"label": "Parc rempli à %d %%" % roundi(yard_fill() * 100.0), "value": eff})
+			_common_terms(stat, out, true)
+		"inspect_rate":
+			_dept_terms("customs", out)
+			_common_terms(stat, out, true)
+		"gate_rate":
+			_dept_terms("gate", out)
+			if gate_lanes > 1:
+				out.append({"label": "%d voies" % gate_lanes, "value": float(gate_lanes)})
+			_common_terms(stat, out, true)
+		"moor_speed":
+			_dept_terms("berths", out, true)
+			_common_terms(stat, out, true)
+		"formal_speed":
+			_dept_terms("customs", out, true)
+			_common_terms(stat, out, false)
+		"pilot_speed":
+			_dept_terms("harbor", out, true)
+			_common_terms(stat, out, false)
+		"value":
+			var c: Dictionary = db.cargo[cargo_i]
+			out.append({"label": "Valeur " + String(c.short), "value": float(c.value)})
+			var lv: int = licences[cargo_i]
+			if lv > 1:
+				out.append({"label": "Licence niv. %d" % lv, "value": 1.0 + float(db.cfg("licence_per_level", 0.25)) * float(lv - 1)})
+			var m := Progression.step_mult(lv, db.cfg("licence_milestones"))
+			if m > 1.0:
+				out.append({"label": "Paliers de licence", "value": m})
+			var tv := float(db.tier_def(tier).get("value_mult", 1.0))
+			if tv > 1.0:
+				out.append({"label": "Palier T%d" % tier, "value": tv})
+			if renown > 0:
+				out.append({"label": "Renom ✦ %d" % renown, "value": renown_mult()})
+			if not is_equal_approx(tariff, 1.0):
+				out.append({"label": "Tarifs", "value": tariff})
+			_common_terms(stat, out, false)
+	return out
+
+
+var _cache: Dictionary = {}
+
+
+## Vide le cache des statistiques (appelé à chaque pas et après chaque décision).
+func invalidate() -> void:
+	_cache.clear()
+
+
+func stat(name: String, cargo_i: int = 0) -> float:
+	var key := name + ":" + str(cargo_i)
+	if _cache.has(key):
+		return _cache[key]
+	var v := 1.0
+	for f in breakdown(name, cargo_i):
+		v *= float(f.value)
+	_cache[key] = v
+	return v
+
+
+func pilot_duration() -> float:
+	var sp := stat("pilot_speed")
+	return INF if sp <= 0.0 else maxf(min_time("pilot"), float(db.cfg("pilot_time")) / sp / renown_throughput_mult())
+
+
+## Temps plancher d'une étape d'escale (« pilot », « moor », « formal ») : c'est lui qui plafonne le débit en fin de palier.
+## Il baisse avec les bâtiments (remorqueur, bollards, guichet) et avec le Renom.
+func min_time(kind: String) -> float:
+	var lv := int(levels[FLOOR_DEPT[kind]])
+	var soft := 1.0 + float(db.cfg("floor_per_level", 0.0)) * float(lv - 1)
+	return float(db.cfg(kind + "_time_min")) * float(time_min_mults.get(kind, 1.0)) / renown_throughput_mult() / soft
+
+
+## Le service qui raccourcit chaque temps plancher (un peu à chaque niveau : le plancher n'est plus un mur).
+const FLOOR_DEPT := {"pilot": "harbor", "moor": "berths", "formal": "customs"}
+
+
+func moor_duration() -> float:
+	return maxf(min_time("moor"), float(db.cfg("moor_time")) / maxf(0.001, stat("moor_speed")) / renown_throughput_mult())
+
+
+func formal_duration() -> float:
+	return maxf(min_time("formal"), float(db.cfg("formal_time")) / maxf(0.001, stat("formal_speed")) / renown_throughput_mult())
+
+
+func berth_crane_factor(bi: int) -> float:
+	var f := 0.0
+	for c in berths[bi].cranes:
+		f += float(c.factor)
+	return f
+
+
+func inspect_fraction(c: int) -> float:
+	if not customs_open:
+		return 0.0
+	var f := float(db.cfg("policies")[policy].fraction)
+	if db.cargo[c].id == "imo" and bool(db.cfg("imo_always_inspected", true)):
+		return 1.0
+	if db.cargo[c].id == "reefer":
+		f += float(db.cfg("reefer_extra_fraction", 0.0))
+	return clampf(f, 0.0, 1.0)
+
+
+# =====================================================================
+# Pas de simulation
+# =====================================================================
+
+func step(dt: float) -> void:
+	if dt <= 0.0:
+		return
+	time += dt
+	invalidate()
+	Hazards.update(self, dt)
+	_arrivals(dt)
+	_update_ships(dt)
+	_assign_berths()
+	_unload(dt)
+	_transfer(dt)
+	_inspect(dt)
+	_gate(dt)
+	_fees_and_costs(dt)
+	_buckets(dt)
+	_second_timer += dt
+	if _second_timer >= 1.0:
+		_second_timer -= 1.0
+		check_unlocks()
+		Objectives.update(self)
+	_analysis_timer += dt
+	if _analysis_timer >= 0.5:
+		_analysis_timer = 0.0
+		_refresh_analysis()
+
+
+func _earn(amount: float, source: String) -> void:
+	if amount == 0.0:
+		return
+	money += amount
+	income_buckets[bucket_index] += amount
+	last_income[source] = float(last_income.get(source, 0.0)) + amount
+	revenue.emit(amount, source)
+
+
+func add_counter(key: String, v: float = 1.0) -> void:
+	counters[key] = float(counters.get(key, 0.0)) + v
+
+
+func counter(key: String) -> float:
+	return float(counters.get(key, 0.0))
+
+
+## Compteurs qui ne s'additionnent pas d'une concession à l'autre (série en cours, étoiles).
+const RUN_ONLY_COUNTERS := ["happy_streak", "stars_x10"]
+
+
+## Compteur cumulé sur toutes les concessions (missions long terme) ; la partie en cours seule : `counter`.
+func counter_total(key: String) -> float:
+	if RUN_ONLY_COUNTERS.has(key):
+		return counter(key)
+	return counter(key) + float(lifetime.get(key, 0.0))
+
+
+# --- arrivées ---------------------------------------------------------
+
+func _roll_arrival() -> Dictionary:
+	# armateur
+	var ow_ids: Array = []
+	var ow_w: Array = []
+	for o in db.owners:
+		if int(o.tier) <= tier and owner_ok(o):
+			var w := owner_factor(o) * (0.5 + float(relations[o.id]) / 100.0)
+			ow_ids.append(o.id)
+			ow_w.append(w)
+	var owner: String = ow_ids[_pick(ow_w)]
+	# classe de navire (limitée par le tirant d'eau disponible)
+	var cl_ids: Array = []
+	var cl_w: Array = []
+	var md := max_depth()
+	for s in db.ships:
+		var w2 := class_freq(s)
+		if int(s.depth) <= md and w2 > 0.0:
+			cl_ids.append(s.id)
+			cl_w.append(w2)
+	var cls: String = cl_ids[_pick(cl_w)]
+	var sd: Dictionary = db.ship_by_id[cls]
+	var evp := float(rng.randi_range(int(sd.evp[0]), int(sd.evp[1])))
+	return {"owner": owner, "cls": cls, "evp": evp}
+
+
+func _pick(weights: Array) -> int:
+	var tot := 0.0
+	for w in weights:
+		tot += float(w)
+	var r := rng.randf() * tot
+	for i in weights.size():
+		r -= float(weights[i])
+		if r <= 0.0:
+			return i
+	return weights.size() - 1
+
+
+func cargo_mix(owner: String) -> PackedFloat64Array:
+	var od: Dictionary = db.owner_by_id[owner]
+	var w := _zeros(NCARGO)
+	var tot := 0.0
+	for c in NCARGO:
+		if unlocked[c] == 0:
+			continue
+		var cid: String = db.cargo[c].id
+		var v := float(db.cargo[c].weight) * float(od.bias.get(cid, 1.0))
+		for ct in contracts_active:
+			if ct.owner == owner and ct.cargo == cid:
+				v *= 2.0
+		w[c] = v
+		tot += v
+	for c in NCARGO:
+		w[c] = w[c] / maxf(0.0001, tot)
+	return w
+
+
+## Plus longue attente en rade (s) : le tutoriel attend un vrai bouchon visible avant de parler du goulot.
+func longest_wait() -> float:
+	var w := 0.0
+	for s in ships:
+		if s.state == Ship.State.ANCHORED:
+			w = maxf(w, s.wait_time)
+	return w
+
+
+func waiting_ships() -> int:
+	var n := 0
+	for s in ships:
+		if s.state == Ship.State.ARRIVING or s.state == Ship.State.ANCHORED:
+			n += 1
+	return n
+
+
+func _arrivals(dt: float) -> void:
+	if pending_arrival.is_empty():
+		pending_arrival = _roll_arrival()
+	var need := float(pending_arrival.evp)
+	arrival_accum = minf(arrival_accum + stat("demand") * dt, need * 1.5)
+	if arrival_accum < need:
+		return
+	arrival_accum -= need
+	if waiting_ships() >= rade_places():
+		add_counter("turned_away")
+		if time - _last_full_notice > 30.0:
+			_last_full_notice = time
+			notify.emit("Rade pleine : des navires sont déroutés vers d'autres ports.", "bad")
+		pending_arrival = {}
+		return
+	var s := Ship.new()
+	s.id = next_ship_id
+	next_ship_id += 1
+	s.cls = pending_arrival.cls
+	s.owner = pending_arrival.owner
+	s.evp_total = need
+	var mix := cargo_mix(s.owner)
+	s.left = _zeros(NCARGO)
+	for c in NCARGO:
+		s.left[c] = need * mix[c]
+	var od: Dictionary = db.owner_by_id[s.owner]
+	var sd: Dictionary = db.ship_by_id[s.cls]
+	s.patience_max = float(db.cfg("patience_base")) * float(sd.patience) * float(od.patience) \
+		* (0.7 + 0.6 * float(relations[s.owner]) / 100.0) * patience_mult
+	s.patience = s.patience_max
+	s.state = Ship.State.ARRIVING
+	s.timer = float(db.cfg("arrive_time"))
+	s.anchor_slot = _free_anchor_slot()
+	ships.append(s)
+	arrived_total += need
+	pending_arrival = {}
+	ship_spawned.emit(s)
+	if counter("arrived_" + s.cls) == 0.0 and s.cls != String(db.ships[0].id):
+		ship_class_first.emit(s)
+	add_counter("arrived_" + s.cls)
+
+
+func _free_anchor_slot() -> int:
+	var used := {}
+	for s in ships:
+		if s.anchor_slot >= 0 and (s.state == Ship.State.ARRIVING or s.state == Ship.State.ANCHORED):
+			used[s.anchor_slot] = true
+	var i := 0
+	while used.has(i):
+		i += 1
+	return i
+
+
+# --- navires ----------------------------------------------------------
+
+func _set_state(s: Ship, st: int, timer: float = 0.0) -> void:
+	s.state = st
+	s.timer = timer
+	ship_state_changed.emit(s)
+
+
+func _update_ships(dt: float) -> void:
+	var removed: Array[Ship] = []
+	for s in ships:
+		match s.state:
+			Ship.State.ARRIVING:
+				s.timer -= dt
+				if s.timer <= 0.0:
+					_set_state(s, Ship.State.ANCHORED)
+			Ship.State.ANCHORED:
+				s.wait_time += dt
+				s.patience -= dt
+				if s.patience <= 0.0:
+					_ship_leaves_angry(s)
+			Ship.State.PILOTING:
+				s.timer -= dt
+				if s.timer <= 0.0:
+					_set_state(s, Ship.State.MOORING, moor_duration() * time_scale(s.cls))
+			Ship.State.MOORING:
+				s.timer -= dt
+				if s.timer <= 0.0:
+					var dues := float(db.ship_by_id[s.cls].dues) * float(db.tier_def(tier).get("dues_mult", 1.0)) * tariff \
+						* float(db.owner_by_id[s.owner].pay) * renown_mult()
+					_earn(dues, "dues")
+					if ship_fee > 0.0:
+						_earn(dues * ship_fee, "services")
+					_set_state(s, Ship.State.FORMALITIES, formal_duration() * time_scale(s.cls))
+			Ship.State.FORMALITIES:
+				s.timer -= dt
+				if s.timer <= 0.0:
+					_set_state(s, Ship.State.UNLOADING)
+			Ship.State.UNLOADING:
+				if s.evp_left() <= 0.0001:
+					_ship_done(s)
+			Ship.State.DEPARTING, Ship.State.LEAVING:
+				s.timer -= dt
+				if s.timer <= 0.0:
+					removed.append(s)
+	for s in removed:
+		ships.erase(s)
+		ship_removed.emit(s)
+
+
+func _record_satisfaction(score: float) -> void:
+	satisfaction = lerpf(satisfaction, score, float(db.cfg("rep_alpha")))
+
+
+func _ship_leaves_angry(s: Ship) -> void:
+	sailed_away += s.evp_left()
+	_record_satisfaction(0.0)
+	relations[s.owner] = clampf(float(relations[s.owner]) - 6.0, 0.0, 100.0)
+	counters["happy_streak"] = 0.0
+	add_counter("ships_angry")
+	notify.emit("Un %s de %s repart furieux !" % [String(db.ship_by_id[s.cls].name).to_lower(), db.owner_by_id[s.owner].name], "bad")
+	_set_state(s, Ship.State.LEAVING, float(db.cfg("depart_time")))
+
+
+func _ship_done(s: Ship) -> void:
+	berths[s.berth].ship = -1
+	var mood := s.mood_at_berth
+	var score: float = [1.0, 0.6, 0.25][mood]
+	_record_satisfaction(score)
+	relations[s.owner] = clampf(float(relations[s.owner]) + [2.0, 0.5, -3.0][mood], 0.0, 100.0)
+	if mood == Ship.Mood.ANGRY:
+		counters["happy_streak"] = 0.0
+	else:
+		add_counter("happy_streak")
+	add_counter("ships")
+	add_counter("ships_" + s.cls)
+	ship_buckets[bucket_index] += 1.0
+	_compliance_roll(s)
+	_set_state(s, Ship.State.DEPARTING, float(db.cfg("depart_time")))
+
+
+## Conformité : la douane (l'État) inspecte selon la politique ; le joueur ne décide pas des issues.
+func _compliance_roll(s: Ship) -> void:
+	if not customs_open:
+		return
+	var od: Dictionary = db.owner_by_id[s.owner]
+	var pol: Dictionary = db.cfg("policies")[policy]
+	var fraud := float(od.fraud)
+	var detect_eff := clampf(float(pol.detect) * minf(1.0, float(pol.fraction) * 3.0), 0.0, 0.99)
+	if rng.randf() < fraud:
+		if rng.randf() < detect_eff:
+			add_counter("seizures")
+			relations[s.owner] = clampf(float(relations[s.owner]) - 5.0, 0.0, 100.0)
+			_record_satisfaction(0.9)   # les autorités apprécient
+			inspection_result.emit("saisie", s.owner)
+			notify.emit("Saisie ! La douane a intercepté une marchandise illicite chez %s." % od.name, "info")
+		else:
+			add_counter("incidents")
+			var fine := avg_value_per_evp() * float(db.cfg("incident_fine_per_value", 40))
+			money = maxf(0.0, money - fine)
+			_record_satisfaction(0.1)
+			inspection_result.emit("incident", s.owner)
+			notify.emit("Incident non détecté (%s) : amende de %s." % [od.name, Fmt.money(fine)], "bad")
+	else:
+		add_counter("compliant")
+		inspection_result.emit("conforme", s.owner)
+
+
+func _assign_berths() -> void:
+	if stat("pilot_speed") <= 0.0:
+		return   # brouillard : pas de nouveau pilotage
+	var busy := 0
+	for s in ships:
+		if s.state == Ship.State.PILOTING:
+			busy += 1
+	if busy >= pilots():
+		return
+	var cands: Array[Ship] = []
+	var auto := bool(managers.harbor)
+	for s in ships:
+		if s.state == Ship.State.ANCHORED and (auto or s.priority or s.wait_time >= float(db.cfg("auto_berth_delay"))):
+			cands.append(s)
+	cands.sort_custom(_ship_order)
+	for s in cands:
+		if busy >= pilots():
+			return
+		var need := int(db.ship_by_id[s.cls].depth)
+		var best := -1
+		for bi in berths.size():
+			if int(berths[bi].ship) == -1 and int(berths[bi].depth) >= need:
+				if best == -1 or int(berths[bi].depth) < int(berths[best].depth):
+					best = bi
+		if best == -1:
+			continue
+		berths[best].ship = s.id
+		s.berth = best
+		s.mood_at_berth = s.mood()
+		stat_rade_wait = lerpf(stat_rade_wait, s.wait_time, 0.2)
+		busy += 1
+		# accostage « en priorité » demandé par le joueur : le pilote file plus vite
+		var pd := pilot_duration() * time_scale(s.cls)
+		if s.priority and not auto:
+			pd *= float(db.cfg("manual").express_pilot)
+		_set_state(s, Ship.State.PILOTING, pd)
+
+
+static func _ship_order(a: Ship, b: Ship) -> bool:
+	if a.priority != b.priority:
+		return a.priority
+	return a.id < b.id
+
+
+## Le joueur choisit le prochain navire à accoster.
+func prioritize_ship(ship_id: int) -> bool:
+	for s in ships:
+		if s.id == ship_id and s.state == Ship.State.ANCHORED:
+			for o in ships:
+				o.priority = false
+			s.priority = true
+			add_counter("priority")
+			return true
+	return false
+
+
+func ship_by_id(ship_id: int) -> Ship:
+	for s in ships:
+		if s.id == ship_id:
+			return s
+	return null
+
+
+# --- déchargement -----------------------------------------------------
+
+func berth_unload_rate(bi: int) -> float:
+	return stat("crane_rate") * berth_crane_factor(bi)
+
+
+func _unload(dt: float) -> void:
+	var crane := stat("crane_rate")
+	for s in ships:
+		if s.state != Ship.State.UNLOADING:
+			continue
+		if apron_capacity() - apron_stock() <= 0.0:
+			return
+		_unload_ship(s, crane * berth_crane_factor(s.berth) * dt)
+
+
+## Décharge jusqu'à `want` EVP du navire vers le tablier (borné par le reste du navire et la place disponible).
+## Renvoie les EVP réellement déchargés.
+func _unload_ship(s: Ship, want: float) -> float:
+	var free := apron_capacity() - apron_stock()
+	var tot := s.evp_left()
+	var amount := minf(minf(want, tot), free)
+	if amount <= 0.0:
+		return 0.0
+	var pay := float(db.owner_by_id[s.owner].pay)
+	var earned := 0.0
+	for c in NCARGO:
+		if s.left[c] <= 0.0:
+			continue
+		var a := amount * s.left[c] / tot
+		a = minf(a, s.left[c])
+		s.left[c] -= a
+		apron[c] += a
+		earned += a * stat("value", c) * pay
+		add_counter("evp_" + String(db.cargo[c].id), a)
+		Objectives.on_unloaded(self, s.owner, String(db.cargo[c].id), a)
+	add_counter("evp", amount)
+	evp_buckets[bucket_index] += amount
+	_earn(earned, "handling")
+	return amount
+
+
+# --- gestes manuels du début (les responsables les automatisent) -------------
+
+var _assist_at: Dictionary = {}     # poste -> instant où le prochain coup de main est possible
+
+
+## Le coup de main est possible : un navire est en déchargement à ce poste, la recharge est finie,
+## et le chef des grutiers n'est pas encore embauché (il fait ce geste à ta place).
+func assist_ready(bi: int) -> bool:
+	if managers.cranes or bi < 0 or bi >= berths.size():
+		return false
+	var s := ship_by_id(int(berths[bi].ship))
+	return s != null and s.state == Ship.State.UNLOADING and time >= float(_assist_at.get(bi, 0.0))
+
+
+## Coup de main sur la grue d'un poste : décharge d'un coup quelques secondes de travail. Renvoie les EVP déchargés.
+func assist_unload(bi: int) -> float:
+	if not assist_ready(bi):
+		return 0.0
+	var m: Dictionary = db.cfg("manual")
+	_assist_at[bi] = time + float(m.assist_cooldown)
+	var s := ship_by_id(int(berths[bi].ship))
+	var moved := _unload_ship(s, stat("crane_rate") * berth_crane_factor(bi) * float(m.assist_seconds))
+	if moved > 0.0:
+		add_counter("assists")
+	return moved
+
+
+func missions_claimable() -> int:
+	return Objectives.claimable_count(self)
+
+
+# --- révélation progressive (data/unlocks.json) ------------------------------
+# Les fonctions du jeu apparaissent une à une. La simulation les respecte aussi (achat, aléas, contrats) :
+# ce que le joueur ne voit pas encore n'agit pas encore, et le bot d'équilibrage vit la même partie.
+
+## Une fonction absente du registre est toujours disponible.
+func feature(id: String) -> bool:
+	return features.has(id) or not db.unlock_by_id.has(id)
+
+
+func unlock_ok(when: Dictionary) -> bool:
+	if when.has("ships") and counter("ships") < float(when.ships):
+		return false
+	if when.has("evp") and counter("evp") < float(when.evp):
+		return false
+	if when.has("building") and not built.has(String(when.building)):
+		return false
+	if when.has("amber") and amber < int(when.amber):
+		return false
+	if when.has("tier") and tier < int(when.tier):
+		return false
+	return true
+
+
+## Condition lisible d'une fonction encore cachée (« après 4 escales (2/4) »), pour les cartes verrouillées.
+func unlock_text(id: String) -> String:
+	var u: Dictionary = db.unlock_by_id.get(id, {})
+	var w: Dictionary = u.get("when", {})
+	if w.has("building"):
+		return "avec « %s » (Gestion → Bâtiments)" % db.building_by_id[String(w.building)].name
+	if w.has("ships"):
+		return "après %d escales (%d/%d)" % [int(w.ships), mini(int(counter("ships")), int(w.ships)), int(w.ships)]
+	if w.has("evp"):
+		return "après %s EVP déchargés" % Fmt.num(float(w.evp))
+	if w.has("tier"):
+		return "au palier T%d" % int(w.tier)
+	if w.has("amber"):
+		return "au premier Ambre gagné"
+	return ""
+
+
+func check_unlocks() -> void:
+	for u in db.unlocks:
+		var id := String(u.id)
+		if features.has(id) or not unlock_ok(u.get("when", {})):
+			continue
+		features[id] = true
+		if id == "events":
+			next_event_at = maxf(next_event_at, time + 60.0)   # le premier aléa laisse une minute de répit
+		elif id == "contracts":
+			next_contract_refresh = time
+		feature_unlocked.emit(id)
+
+
+## Sauvegarde d'avant la révélation progressive : le joueur connaissait déjà tout, et ses caboteurs
+## accostaient au vieux quai et passaient la douane. On lui donne l'allongement du quai et le bureau de douane.
+func _upgrade_legacy_save() -> void:
+	for u in db.unlocks:
+		features[String(u.id)] = true
+	for bid in ["customs1", "quay_ext"]:      # insérés en tête, dans l'ordre de la liste des bâtiments
+		if db.building_by_id.has(bid) and not built.has(bid):
+			built.insert(0, bid)
+
+
+## Sauvegarde d'avant le Commerce (version 2) : la Capitainerie faisait venir les navires. Les armateurs déjà présents
+## restent (marqués « démarchés »), le Commerce est révélé tout de suite et l'interface explique la baisse de trafic.
+func _upgrade_commerce_save() -> void:
+	for o in db.owners:
+		if Commerce.needs_recruit(o) and int(o.tier) <= tier:
+			owners_on[String(o.id)] = true
+	features["commerce"] = true
+	legacy_notice = "commerce"
+
+
+## Licences au-delà du plafond du palier (sauvegarde d'avant les plafonds, version 3) : le niveau est ramené au plafond
+## et l'excédent remboursé au prix d'achat. Sans effet sur une partie déjà conforme (appelé à chaque chargement).
+func _clamp_licences() -> float:
+	var refund := 0.0
+	for ci in NCARGO:
+		var extra := int(licences[ci]) - licence_cap()
+		if extra > 0:
+			var c: Dictionary = db.cargo[ci]
+			refund += Progression.bulk_cost(float(c.licence_cost), float(c.licence_growth), licence_cap() - 1, extra)
+			licences[ci] = licence_cap()
+	if refund > 0.0:
+		money += refund
+		legacy_notice = "licences:%s" % Fmt.money(refund)
+	return refund
+
+
+# --- transfert quai → parc --------------------------------------------
+
+func _transfer(dt: float) -> void:
+	var tot := apron_stock()
+	if tot <= 0.0:
+		return
+	var budget := minf(stat("transfer_rate") * dt, tot)
+	var zone_free := _zeros(NZONE)
+	for z in NZONE:
+		zone_free[z] = maxf(0.0, yard_zone_capacity(z) - yard_stock_zone(z))
+	for c in NCARGO:
+		if apron[c] <= 0.0:
+			continue
+		var z: int = int(db.cargo[c].zone)
+		var a := minf(minf(budget * apron[c] / tot, apron[c]), zone_free[z])
+		if a <= 0.0:
+			continue
+		zone_free[z] -= a
+		apron[c] -= a
+		var f := inspect_fraction(c)
+		yard_pending[c] += a * f
+		yard_cleared[c] += a * (1.0 - f)
+
+
+# --- inspection --------------------------------------------------------
+
+func pending_total() -> float:
+	var s := 0.0
+	for v in yard_pending:
+		s += v
+	return s
+
+
+func _inspect(dt: float) -> void:
+	var tot := pending_total()
+	if tot <= 0.0:
+		return
+	var a := minf(stat("inspect_rate") * dt, tot)
+	var fee := 0.0
+	for c in NCARGO:
+		if yard_pending[c] <= 0.0:
+			continue
+		var x := minf(a * yard_pending[c] / tot, yard_pending[c])
+		yard_pending[c] -= x
+		yard_cleared[c] += x
+		fee += x * float(db.cfg("inspection_fee")) * float(db.tier_def(tier).get("value_mult", 1.0)) * renown_mult()
+	add_counter("inspected", a)
+	_earn(fee, "inspection")
+
+
+# --- gate -------------------------------------------------------------
+
+func cleared_total() -> float:
+	var s := 0.0
+	for v in yard_cleared:
+		s += v
+	return s
+
+
+## Un camion affiché représente « une seconde de débit de gate » (au moins truck_evp EVP).
+func truck_lot() -> float:
+	return maxf(float(db.cfg("truck_evp")), stat("gate_rate"))
+
+
+func trucks_waiting() -> int:
+	return mini(int(db.cfg("truck_queue_max")), ceili(truck_queue / truck_lot() - 0.001))
+
+
+func truck_wait_estimate() -> float:
+	return truck_queue / maxf(0.001, stat("gate_rate"))
+
+
+func _gate(dt: float) -> void:
+	var qmax := float(db.cfg("truck_queue_max")) * truck_lot()
+	var ready := cleared_total() - truck_queue
+	if ready > 0.0:
+		truck_queue = minf(truck_queue + minf(ready, ready / float(db.cfg("dwell_target")) * dt), maxf(qmax, truck_queue))
+	var served := minf(minf(truck_queue, stat("gate_rate") * dt), cleared_total())
+	if served <= 0.0:
+		return
+	truck_queue -= served
+	var tot := cleared_total()
+	var fee := 0.0
+	for c in NCARGO:
+		if yard_cleared[c] <= 0.0:
+			continue
+		var x := minf(served * yard_cleared[c] / tot, yard_cleared[c])
+		yard_cleared[c] -= x
+		delivered[c] += x
+		fee += x * stat("value", c) * float(db.cfg("gate_fee_ratio"))
+	add_counter("trucks", served / float(db.cfg("truck_evp")))
+	stat_truck_wait = lerpf(stat_truck_wait, truck_wait_estimate(), 0.02)
+	truck_visual_accum += served
+	var lot := truck_lot()
+	var n := 0
+	while truck_visual_accum >= lot and n < 4:
+		truck_visual_accum -= lot
+		n += 1
+		truck_served.emit(truck_wait_estimate())
+	truck_visual_accum = minf(truck_visual_accum, lot)
+	_earn(fee, "gate")
+
+
+func trucks_honking() -> int:
+	return trucks_waiting() if truck_wait_estimate() > float(db.cfg("truck_honk_after")) else 0
+
+
+# --- frais et coûts ----------------------------------------------------
+
+func salaries_per_day() -> float:
+	var n := 0
+	for d in DEPTS:
+		n += agents(d)
+	return float(n) * float(db.cfg("salary_per_agent_day")[tier_index()])
+
+
+func _fees_and_costs(dt: float) -> void:
+	var day := float(db.cfg("day_seconds"))
+	var ri: int = db.cargo_index["reefer"]
+	var reefer := yard_pending[ri] + yard_cleared[ri]
+	if reefer > 0.0:
+		_earn(reefer * float(db.cfg("reefer_fee_per_day")) * float(db.tier_def(tier).get("value_mult", 1.0)) * renown_mult() * dt / day, "reefer")
+	var cost := salaries_per_day() * dt / day
+	money = maxf(0.0, money - cost)
+	income_buckets[bucket_index] -= cost
+	last_income["salaries"] = float(last_income.get("salaries", 0.0)) - cost
+
+
+func _buckets(dt: float) -> void:
+	bucket_time += dt
+	var busy := 0.0
+	for b in berths:
+		if int(b.ship) != -1:
+			busy += 1.0
+	stat_berth_busy = lerpf(stat_berth_busy, busy / float(berths.size()), dt * 0.05)
+	while bucket_time >= 1.0:
+		bucket_time -= 1.0
+		bucket_index = (bucket_index + 1) % 60
+		income_buckets[bucket_index] = 0.0
+		evp_buckets[bucket_index] = 0.0
+		ship_buckets[bucket_index] = 0.0
+		if bucket_index == 0:
+			last_income.clear()
+
+
+func _sum(a: PackedFloat64Array) -> float:
+	var s := 0.0
+	for v in a:
+		s += v
+	return s
+
+
+## Revenu net sur la dernière minute (fenêtre glissante).
+func income_per_min() -> float:
+	return _sum(income_buckets) * 60.0 / clampf(time, 1.0, 60.0)
+
+
+func evp_per_min() -> float:
+	return _sum(evp_buckets) * 60.0 / clampf(time, 1.0, 60.0)
+
+
+func ships_per_hour() -> float:
+	return _sum(ship_buckets) * 3600.0 / clampf(time, 1.0, 60.0)
+
+
+func day() -> int:
+	return 1 + floori(time / float(db.cfg("day_seconds")))
+
+
+# =====================================================================
+# Analyse du goulot
+# =====================================================================
+
+func avg_ship_evp() -> float:
+	var md := max_depth()
+	var tw := 0.0
+	var te := 0.0
+	for s in db.ships:
+		var w := class_freq(s)
+		if int(s.depth) <= md and w > 0.0:
+			tw += w
+			te += w * (float(s.evp[0]) + float(s.evp[1])) * 0.5
+	return te / maxf(0.001, tw)
+
+
+## Trafic (EVP/s) qu'une classe de navire apporte au palier courant.
+func class_flow(s: Dictionary) -> float:
+	return float(s.traffic[tier_index()])
+
+
+## Fréquence relative des escales d'une classe (trafic ÷ taille moyenne).
+func class_freq(s: Dictionary) -> float:
+	return class_flow(s) / ((float(s.evp[0]) + float(s.evp[1])) * 0.5)
+
+
+## Somme du trafic des classes que les quais peuvent recevoir.
+func class_traffic() -> float:
+	var md := max_depth()
+	var t := 0.0
+	for s in db.ships:
+		if int(s.depth) <= md:
+			t += class_flow(s)
+	return t
+
+
+## Somme des poids des armateurs qui fréquentent le port.
+func owners_traffic() -> float:
+	var t := 0.0
+	for o in db.owners:
+		if owner_present(o):
+			t += owner_factor(o)
+	return t
+
+
+## Poids d'un armateur dans la demande : ses lignes régulières et son contrat en cours le font venir plus souvent.
+func owner_factor(o: Dictionary) -> float:
+	var f := float(o.weight) * (1.0 + float(db.cfg("line_gain", 1.0)) * float(lines.get(o.id, 0)))
+	for ct in contracts_active:
+		if ct.owner == o.id:
+			f *= float(db.cfg("contract_traffic", 3.0))
+			break
+	return f
+
+
+func owner_present(o: Dictionary) -> bool:
+	return int(o.tier) <= tier and owner_ok(o)
+
+
+func time_scale(cls: String) -> float:
+	return float(db.ship_by_id[cls].get("time_scale", 1.0))
+
+
+func owner_ok(o: Dictionary) -> bool:
+	var r := String(o.get("require", ""))
+	if r != "" and not built.has(r):
+		return false
+	return not Commerce.needs_recruit(o) or owners_on.has(o.id)
+
+
+func avg_time_scale() -> float:
+	var md := max_depth()
+	var tw := 0.0
+	var te := 0.0
+	for s in db.ships:
+		var w := class_freq(s)
+		if int(s.depth) <= md and w > 0.0:
+			tw += w
+			te += w * float(s.get("time_scale", 1.0))
+	return te / maxf(0.001, tw)
+
+
+## Part de chaque cargaison dans les EVP déchargés (moyenne des armateurs présents) : le « panier » du port.
+func cargo_shares() -> PackedFloat64Array:
+	var mix := _zeros(NCARGO)
+	var n := 0
+	for o in db.owners:
+		if int(o.tier) <= tier and owner_ok(o):
+			var m := cargo_mix(o.id)
+			for c in NCARGO:
+				mix[c] += m[c]
+			n += 1
+	for c in NCARGO:
+		mix[c] /= maxi(1, n)
+	return mix
+
+
+func avg_value_per_evp() -> float:
+	var mix := cargo_shares()
+	var v := 0.0
+	for c in NCARGO:
+		v += mix[c] * stat("value", c)
+	return v
+
+
+func _avg_inspect_fraction() -> float:
+	var f := 0.0
+	var n := 0
+	for o in db.owners:
+		if int(o.tier) <= tier and owner_ok(o):
+			var m := cargo_mix(o.id)
+			for c in NCARGO:
+				f += m[c] * inspect_fraction(c)
+			n += 1
+	return f / maxi(1, n)
+
+
+## Capacité de chaque maillon en EVP/s et identification du goulot.
+func capacities() -> Dictionary:
+	var avg := avg_ship_evp()
+	var caps := {}
+	caps["traffic"] = stat("demand")
+	var ts := avg_time_scale()
+	var pd := pilot_duration() * ts
+	caps["pilotage"] = 0.0 if pd == INF else float(pilots()) * avg / maxf(0.01, pd)
+	var crane := stat("crane_rate")
+	var t_moor := moor_duration() * ts
+	var t_form := formal_duration() * ts
+	var berth_cap := 0.0
+	var t_unload_sum := 0.0
+	for bi in berths.size():
+		var tu := avg / maxf(0.0001, crane * berth_crane_factor(bi))
+		t_unload_sum += tu
+		berth_cap += avg / (tu + t_moor + t_form + (0.0 if pd == INF else pd))
+	caps["berth_cycle"] = berth_cap
+	caps["unload_share"] = t_unload_sum / float(berths.size())
+	caps["moor_share"] = t_moor
+	caps["formal_share"] = t_form
+	caps["transfer"] = stat("transfer_rate")
+	caps["inspection"] = stat("inspect_rate") / maxf(0.001, _avg_inspect_fraction())
+	caps["gate"] = stat("gate_rate")
+	caps["yard_space"] = yard_capacity() * 0.65 / float(db.cfg("dwell_target"))
+	return caps
+
+
+## Ce que le port sait traiter (EVP/s) : le plus faible des maillons, trafic exclu.
+func service_capacity() -> float:
+	if analysis.is_empty():
+		_refresh_analysis()
+	var caps: Dictionary = analysis.caps
+	var v := INF
+	for k in ["pilotage", "berth_cycle", "transfer", "inspection", "gate", "yard_space"]:
+		v = minf(v, float(caps.get(k, INF)))
+	return v
+
+
+## Part du trafic (EVP/s) qu'apporte un armateur présent.
+func owner_traffic(oid: String) -> float:
+	var o: Dictionary = db.owner_by_id[oid]
+	if not owner_present(o):
+		return 0.0
+	return stat("demand") * owner_factor(o) / maxf(0.0001, owners_traffic())
+
+
+const HINTS := {
+	"harbor": "Pas assez de navires : démarche des armateurs, signe des lignes ou lance une campagne (Commerce).",
+	"fog": "Brouillard : le pilotage est suspendu, la rade se remplit.",
+	"pilotage": "Les pilotes sont débordés : améliore la Capitainerie.",
+	"cranes": "Les navires attendent la grue : améliore les Portiques.",
+	"berths": "L'amarrage est trop lent : améliore les Quais.",
+	"berth_count": "Tous les postes à quai sont occupés : construis un nouveau quai.",
+	"customs": "Les formalités traînent : améliore la Douane.",
+	"inspection": "Les lots attendent l'inspection : améliore la Douane ou assouplis la politique.",
+	"yard_ops": "Le tablier déborde : améliore le Parc et manutention.",
+	"yard_space": "Le parc sature : améliore Parc et manutention (empilage) ou agrandis-le (Bâtiments).",
+	"gate": "Les camions font la queue : améliore la Gate ou construis une aire d'attente.",
+	"min_time": "Les escales sont au plancher : un remorqueur, des bollards rapides ou un guichet numérique les raccourcissent (Bâtiments).",
+	"tier": "Les quais tournent à plein régime : vise le palier suivant pour de plus gros navires.",
+}
+
+const HINT_DEPT := {
+	"harbor": "", "attract": "", "fog": "harbor", "pilotage": "harbor", "cranes": "cranes", "berths": "berths",
+	"berth_count": "berths", "customs": "customs", "inspection": "customs", "yard_ops": "yard_ops",
+	"yard_space": "yard_ops", "gate": "gate", "tier": "berths", "min_time": "berths",
+}
+
+
+func _refresh_analysis() -> void:
+	analysis = _compute_analysis()
+
+
+func _compute_analysis() -> Dictionary:
+	invalidate()
+	var caps := capacities()
+	var cands := {
+		"harbor": caps.traffic,
+		"pilotage": caps.pilotage,
+		"berth_cycle": caps.berth_cycle,
+		"yard_ops": caps.transfer,
+		"inspection": caps.inspection,
+		"gate": caps.gate,
+		"yard_space": caps.yard_space,
+	}
+	var best := "harbor"
+	var bv := INF
+	for k in cands:
+		if float(cands[k]) < bv:
+			bv = float(cands[k])
+			best = k
+	var key: String = best
+	if best == "pilotage" and caps.pilotage <= 0.0:
+		key = "fog"
+	elif best == "berth_cycle":
+		var u: float = caps.unload_share
+		var mo: float = caps.moor_share
+		var fo: float = caps.formal_share
+		if u >= mo and u >= fo:
+			key = "cranes"
+		elif mo >= fo:
+			key = "berths"
+		else:
+			key = "customs"
+		# amarrage/formalités déjà au minimum : seul un nouveau quai (ou un palier) aide
+		var ts := avg_time_scale()      # les petits navires ont des escales plus courtes, plancher compris
+		var at_min := (key == "berths" and mo <= min_time("moor") * ts + 0.01) \
+			or (key == "customs" and fo <= min_time("formal") * ts + 0.01)
+		if (at_min or waiting_ships() >= 2) and _next_building_with("add_berth") != "":
+			key = "berth_count"
+		elif at_min and _next_building_with("time_min") != "":
+			key = "min_time"
+		# sinon : chaque niveau du service (Quais, Douane) abaisse encore un peu le plancher
+		# pas encore de bureau de douane : les formalités ne s'améliorent pas, on désigne le maillon suivant
+		if key == "customs" and not feature("dept_customs"):
+			key = "cranes" if u >= mo else "berths"
+	var hint: String = HINTS.get(key, "")
+	var bid := ""
+	# manque de navires : l'équipement qui en attire (quai plus long, douane, chenal…) passe avant la Capitainerie
+	if key == "harbor":
+		bid = traffic_building()
+		if bid != "":
+			key = "attract"
+			var bdef: Dictionary = db.building_by_id[bid]
+			hint = String(bdef.get("hint", "Construis « %s » pour attirer plus de navires." % bdef.name))
+			if building_state(bid) == "locked":
+				var first := _first_available_building()
+				if first != "":
+					hint += " Construis d'abord « %s »." % db.building_by_id[first].name
+	return {"key": key, "dept": HINT_DEPT.get(key, "harbor"), "hint": hint, "caps": caps, "flow": bv, "building": bid}
+
+
+## Prochain bâtiment du palier qui fait venir plus de navires : plus grands (quai, chenal), ou d'autres armateurs (douane).
+func traffic_building() -> String:
+	var md := max_depth()
+	for b in db.buildings:
+		if built.has(b.id) or int(b.tier) > tier:
+			continue
+		for e in b.effects:
+			var t := String(e.type)
+			if (t == "berth_depth" or t == "add_berth") and int(e.depth) > md:
+				return b.id
+			if t == "customs_open" and not customs_open:
+				return b.id
+			if t == "stat_mult" and String(e.stat) == "demand":
+				return b.id
+	return ""
+
+
+func _first_available_building() -> String:
+	for b in db.buildings:
+		if building_state(b.id) == "available":
+			return b.id
+	return ""
+
+
+func _next_building_with(effect_type: String) -> String:
+	for b in db.buildings:
+		if built.has(b.id) or int(b.tier) > tier:
+			continue
+		for e in b.effects:
+			if e.type == effect_type:
+				return b.id
+	return ""
+
+
+## Débit soutenable estimé (EVP/s) : sert au hors-ligne et au dimensionnement des contrats.
+func sustainable_flow() -> float:
+	if analysis.is_empty():
+		_refresh_analysis()
+	return float(analysis.get("flow", 0.0))
+
+
+func income_rate_estimate() -> float:
+	var flow := sustainable_flow()
+	var v := avg_value_per_evp() * (1.0 + float(db.cfg("gate_fee_ratio")))
+	return maxf(0.0, flow * v - salaries_per_day() / float(db.cfg("day_seconds")))
+
+
+## Revenu net estimé (par seconde) si `n` niveaux de plus étaient achetés : un département (`dept`)
+## ou une licence de cargaison (`cargo_i` >= 0). Ne modifie pas l'état (niveaux rétablis, cache vidé).
+func income_estimate_with(dept: String, n: int, cargo_i: int = -1) -> float:
+	if cargo_i >= 0:
+		licences[cargo_i] += n
+	else:
+		levels[dept] = int(levels[dept]) + n
+	invalidate()
+	var flow := float(_compute_analysis().flow)
+	var v := avg_value_per_evp() * (1.0 + float(db.cfg("gate_fee_ratio")))
+	var r := maxf(0.0, flow * v - salaries_per_day() / float(db.cfg("day_seconds")))
+	if cargo_i >= 0:
+		licences[cargo_i] -= n
+	else:
+		levels[dept] = int(levels[dept]) - n
+	invalidate()
+	return r
+
+
+## Gain de revenu (par seconde) d'un achat de `n` niveaux (département ou licence).
+## `base` : revenu estimé sans achat (`income_estimate_with(dept, 0)`), à fournir quand on évalue plusieurs achats d'affilée.
+func upgrade_gain(dept: String, n: int, cargo_i: int = -1, base: float = -1.0) -> float:
+	var b := base if base >= 0.0 else income_estimate_with(dept, 0, cargo_i)
+	return income_estimate_with(dept, n, cargo_i) - b
+
+
+# =====================================================================
+# Achats
+# =====================================================================
+
+func dept_cost(dept: String, n: int) -> float:
+	var d: Dictionary = db.dept_by_id[dept]
+	return Progression.bulk_cost(float(d.cost), float(d.growth), int(levels[dept]) - 1, n)
+
+
+func dept_max_affordable(dept: String) -> int:
+	var d: Dictionary = db.dept_by_id[dept]
+	return Progression.max_affordable(float(d.cost), float(d.growth), int(levels[dept]) - 1, money)
+
+
+func buy_dept(dept: String, n: int) -> bool:
+	if not feature("dept_" + dept):
+		return false
+	if n < 0:
+		n = dept_max_affordable(dept)
+	if n <= 0:
+		return false
+	var c := dept_cost(dept, n)
+	if c > money:
+		return false
+	money -= c
+	levels[dept] = int(levels[dept]) + n
+	purchased.emit("dept", dept)
+	_refresh_analysis()
+	return true
+
+
+func licence_cost(ci: int, n: int) -> float:
+	var c: Dictionary = db.cargo[ci]
+	return Progression.bulk_cost(float(c.licence_cost), float(c.licence_growth), licences[ci] - 1, n)
+
+
+func licence_max_affordable(ci: int) -> int:
+	var c: Dictionary = db.cargo[ci]
+	return mini(licence_room(ci), Progression.max_affordable(float(c.licence_cost), float(c.licence_growth), licences[ci] - 1, money))
+
+
+func buy_licence(ci: int, n: int) -> bool:
+	if unlocked[ci] == 0 or not feature("licences"):
+		return false
+	if n < 0:
+		n = licence_max_affordable(ci)
+	n = mini(n, licence_room(ci))
+	if n <= 0:
+		return false
+	var cost := licence_cost(ci, n)
+	if cost > money:
+		return false
+	money -= cost
+	licences[ci] += n
+	invalidate()      # la valeur par EVP change tout de suite (sinon l'écran affiche l'ancienne jusqu'au prochain pas)
+	purchased.emit("licence", db.cargo[ci].id)
+	return true
+
+
+func manager_available(dept: String) -> bool:
+	return int(db.dept_by_id[dept].manager.tier) <= tier
+
+
+func hire_manager(dept: String, with_amber: bool = false) -> bool:
+	if managers[dept] or not feature("managers"):
+		return false
+	var m: Dictionary = db.dept_by_id[dept].manager
+	if with_amber:
+		if amber < int(m.amber):
+			return false
+		amber -= int(m.amber)
+	else:
+		if not manager_available(dept) or money < float(m.cost):
+			return false
+		money -= float(m.cost)
+	managers[dept] = true
+	add_counter("managers")
+	purchased.emit("manager", dept)
+	notify.emit("%s rejoint le port !" % m.name, "good")
+	_refresh_analysis()
+	return true
+
+
+func managers_count() -> int:
+	var n := 0
+	for d in managers:
+		if managers[d]:
+			n += 1
+	return n
+
+
+## Prochain bâtiment constructible (liste séquentielle, comme dans la référence).
+func building_state(bid: String) -> String:
+	if built.has(bid):
+		return "built"
+	var b: Dictionary = db.building_by_id[bid]
+	if int(b.tier) > tier:
+		return "tier"
+	for o in db.buildings:
+		if o.id == bid:
+			break
+		if int(o.tier) <= tier and not built.has(o.id):
+			return "locked"
+	return "available"
+
+
+func build(bid: String) -> bool:
+	if building_state(bid) != "available":
+		return false
+	var b: Dictionary = db.building_by_id[bid]
+	if money < float(b.cost):
+		return false
+	money -= float(b.cost)
+	built.append(bid)
+	rebuild_infra()
+	add_counter("buildings")
+	purchased.emit("building", bid)
+	notify.emit("Construit : %s" % b.name, "good")
+	check_unlocks()
+	_refresh_analysis()
+	return true
+
+
+func tier_requirements(t: int) -> Dictionary:
+	return db.tier_def(t).get("req", {})
+
+
+## Renvoie la liste des conditions et leur état pour le palier suivant.
+func tier_check() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var req := tier_requirements(tier + 1)
+	if req.is_empty():
+		return out
+	out.append({"label": "EVP traités", "have": counter("evp"), "need": float(req.evp), "ok": counter("evp") >= float(req.evp)})
+	out.append({"label": "Réputation", "have": stars(), "need": float(req.stars), "ok": stars() >= float(req.stars)})
+	for bid in req.get("buildings", []):
+		out.append({"label": String(db.building_by_id[bid].name), "have": 1.0 if built.has(bid) else 0.0, "need": 1.0, "ok": built.has(bid), "building": true})
+	out.append({"label": "Coût", "have": money, "need": float(req.money), "ok": money >= float(req.money), "money": true})
+	return out
+
+
+## Avancement (0–1) vers le palier suivant : moyenne des conditions.
+func tier_progress() -> float:
+	if finished:
+		return 1.0
+	var chk := tier_check()
+	if chk.is_empty():
+		return 1.0
+	var tot := 0.0
+	for c in chk:
+		tot += clampf(float(c.have) / maxf(0.0001, float(c.need)), 0.0, 1.0)
+	return tot / float(chk.size())
+
+
+# --- prestige : nouvelle concession ------------------------------------------
+
+## Points de Renom gagnés si on repart maintenant (racine des EVP traités dans cette concession).
+func prestige_gain() -> int:
+	var r: Dictionary = db.cfg("renown")
+	return floori(sqrt(counter("evp") / float(r.evp_scale)))
+
+
+func can_prestige() -> bool:
+	return finished and prestige_gain() >= 1
+
+
+## Reprend d'une concession terminée ce qui est permanent : Renom, Ambre, missions réclamées, compteurs cumulés.
+## À appeler sur une partie neuve (`PortSim.new`) ; l'ancienne partie n'est pas modifiée.
+func carry_over(old: PortSim) -> void:
+	var r: Dictionary = db.cfg("renown")
+	renown = old.renown + old.prestige_gain()
+	prestiges = old.prestiges + 1
+	amber = old.amber + int(r.amber)
+	missions_claimed.clear()
+	for m in old.missions_claimed:
+		missions_claimed.append(m)
+	lifetime = old.lifetime.duplicate()
+	features = old.features.duplicate()
+	for k in old.counters:
+		if not RUN_ONLY_COUNTERS.has(k):
+			lifetime[k] = float(lifetime.get(k, 0.0)) + float(old.counters[k])
+	invalidate()
+	_refresh_analysis()
+
+
+func can_tier_up() -> bool:
+	if finished:
+		return false
+	var chk := tier_check()
+	if chk.is_empty():
+		return false
+	for c in chk:
+		if not c.ok:
+			return false
+	return true
+
+
+func tier_up() -> bool:
+	if not can_tier_up():
+		return false
+	var nt := db.tier_def(tier + 1)
+	money -= float(nt.req.money)
+	tier += 1
+	amber += int(nt.get("amber", 0))
+	check_unlocks()
+	if bool(nt.get("final", false)):
+		finished = true
+		tier = 3
+		notify.emit("Concession nationale obtenue !", "good")
+		tier_changed.emit(4)
+	else:
+		notify.emit("Nouveau palier : %s" % nt.name, "good")
+		tier_changed.emit(tier)
+	Objectives.rescale_offers(self)
+	if feature("contracts"):
+		Objectives.refresh_offers(self)
+	_refresh_analysis()
+	return true
+
+
+func set_policy(p: int) -> void:
+	policy = clampi(p, 0, db.cfg("policies").size() - 1)
+	_refresh_analysis()
+
+
+func set_tariff(t: float) -> void:
+	tariff = clampf(t, float(db.cfg("tariff_min")), float(db.cfg("tariff_max")))
+	_refresh_analysis()
+
+
+func boost_ready() -> bool:
+	return time >= boost_ready_at
+
+
+func start_boost() -> bool:
+	if not boost_ready() or not feature("boost"):
+		return false
+	var b: Dictionary = db.cfg("boost")
+	boost_until = time + float(b.duration)
+	boost_ready_at = boost_until + float(b.cooldown)
+	invalidate()
+	purchased.emit("boost", "")
+	return true
+
+
+func skip_boost_cooldown() -> bool:
+	var cost := int(db.cfg("boost").amber_skip)
+	if boost_ready() or boost_active() or amber < cost:
+		return false
+	amber -= cost
+	boost_ready_at = time
+	return true
+
+
+# =====================================================================
+# Hors-ligne
+# =====================================================================
+
+## Rattrapage agrégé (pas de boucle tick par tick). Renvoie le détail pour l'écran « Bon retour ».
+func apply_offline(seconds: float) -> Dictionary:
+	var cap := float(db.cfg("offline_max_hours")) * 3600.0
+	var t := clampf(seconds, 0.0, cap)
+	var base := float(db.cfg("offline_base_yield"))
+	var yield_ratio := base + (1.0 - base) * float(managers_count()) / float(DEPTS.size())
+	var flow := sustainable_flow()
+	var gain := income_rate_estimate() * t * yield_ratio
+	var evp := flow * t * yield_ratio
+	money += gain
+	add_counter("evp", evp)
+	add_counter("offline_evp", evp)
+	return {"seconds": t, "capped": seconds > cap, "yield": yield_ratio, "money": gain, "evp": evp, "managers": managers_count()}
+
+
+# =====================================================================
+# Sauvegarde
+# =====================================================================
+
+func to_dict() -> Dictionary:
+	var sh: Array = []
+	for s in ships:
+		sh.append(s.to_dict())
+	return {
+		"time": time, "money": money, "amber": amber, "tier": tier, "finished": finished,
+		"satisfaction": satisfaction, "levels": levels.duplicate(), "managers": managers.duplicate(),
+		"licences": Array(licences), "built": built.duplicate(), "policy": policy, "tariff": tariff,
+		"boost_until": boost_until, "boost_ready_at": boost_ready_at, "relations": relations.duplicate(),
+		"counters": counters.duplicate(), "missions_claimed": missions_claimed.duplicate(),
+		"renown": renown, "prestiges": prestiges, "lifetime": lifetime.duplicate(), "features": features.keys(), "owners_on": owners_on.keys(), "lines": lines.duplicate(),
+		"line_offers": line_offers.duplicate(), "campaign_ready_at": campaign_ready_at.duplicate(),
+		"ships": sh, "next_ship_id": next_ship_id, "arrival_accum": arrival_accum,
+		"apron": Array(apron), "yard_pending": Array(yard_pending), "yard_cleared": Array(yard_cleared),
+		"delivered": Array(delivered), "arrived_total": arrived_total, "sailed_away": sailed_away,
+		"truck_queue": truck_queue, "truck_visual_accum": truck_visual_accum,
+		"active_event": active_event.duplicate(true), "next_event_at": next_event_at,
+		"contract_offers": contract_offers.duplicate(true), "contracts_active": contracts_active.duplicate(true),
+		"next_contract_refresh": next_contract_refresh, "mods": mods.to_array(),
+		"stat_rade_wait": stat_rade_wait, "stat_truck_wait": stat_truck_wait,
+		"rng_state": str(rng.state), "pending_arrival": pending_arrival.duplicate(),
+		"t_second": _second_timer, "t_analysis": _analysis_timer, "bucket_time": bucket_time, "bucket_index": bucket_index,
+	}
+
+
+func from_dict(d: Dictionary) -> void:
+	reset()
+	time = float(d.get("time", 0.0))
+	money = float(d.get("money", 0.0))
+	amber = int(d.get("amber", 0))
+	tier = int(d.get("tier", 1))
+	finished = bool(d.get("finished", false))
+	satisfaction = float(d.get("satisfaction", 0.55))
+	for k in d.get("levels", {}):
+		if levels.has(k):
+			levels[k] = int(d.levels[k])
+	for k in d.get("managers", {}):
+		if managers.has(k):
+			managers[k] = bool(d.managers[k])
+	var li: Array = d.get("licences", [])
+	for i in mini(li.size(), NCARGO):
+		licences[i] = int(li[i])
+	built.clear()
+	for b in d.get("built", []):
+		if db.building_by_id.has(b):
+			built.append(String(b))
+	policy = int(d.get("policy", 1))
+	tariff = float(d.get("tariff", 1.0))
+	boost_until = float(d.get("boost_until", -1.0))
+	boost_ready_at = float(d.get("boost_ready_at", 0.0))
+	for k in d.get("relations", {}):
+		relations[k] = float(d.relations[k])
+	counters = d.get("counters", {}).duplicate()
+	renown = int(d.get("renown", 0))
+	prestiges = int(d.get("prestiges", 0))
+	lifetime = d.get("lifetime", {}).duplicate()
+	for f in d.get("features", []):
+		features[String(f)] = true
+	for o in d.get("owners_on", []):
+		owners_on[String(o)] = true
+	for k in d.get("lines", {}):
+		lines[String(k)] = int(d.lines[k])
+	for o in d.get("line_offers", []):
+		line_offers.append(String(o))
+	for k in d.get("campaign_ready_at", {}):
+		campaign_ready_at[String(k)] = float(d.campaign_ready_at[k])
+	missions_claimed.clear()
+	for m in d.get("missions_claimed", []):
+		missions_claimed.append(String(m))
+	ships.clear()
+	for sd in d.get("ships", []):
+		ships.append(Ship.from_dict(sd))
+	next_ship_id = int(d.get("next_ship_id", 1))
+	arrival_accum = float(d.get("arrival_accum", 0.0))
+	apron = PackedFloat64Array(d.get("apron", Array(_zeros(NCARGO))))
+	yard_pending = PackedFloat64Array(d.get("yard_pending", Array(_zeros(NCARGO))))
+	yard_cleared = PackedFloat64Array(d.get("yard_cleared", Array(_zeros(NCARGO))))
+	delivered = PackedFloat64Array(d.get("delivered", Array(_zeros(NCARGO))))
+	arrived_total = float(d.get("arrived_total", 0.0))
+	sailed_away = float(d.get("sailed_away", 0.0))
+	truck_queue = 0.0
+	truck_queue = float(d.get("truck_queue", 0.0))
+	truck_visual_accum = float(d.get("truck_visual_accum", 0.0))
+	active_event = d.get("active_event", {})
+	next_event_at = float(d.get("next_event_at", time + 120.0))
+	contract_offers.clear()
+	for c in d.get("contract_offers", []):
+		contract_offers.append(c)
+	contracts_active.clear()
+	for c in d.get("contracts_active", []):
+		contracts_active.append(c)
+	next_contract_refresh = float(d.get("next_contract_refresh", 0.0))
+	mods.from_array(d.get("mods", []))
+	stat_rade_wait = float(d.get("stat_rade_wait", 0.0))
+	stat_truck_wait = float(d.get("stat_truck_wait", 0.0))
+	if d.has("rng_state"):
+		rng.state = int(String(d.rng_state))
+	pending_arrival = d.get("pending_arrival", {})
+	_second_timer = float(d.get("t_second", 0.0))
+	_analysis_timer = float(d.get("t_analysis", 0.0))
+	bucket_time = float(d.get("bucket_time", 0.0))
+	bucket_index = int(d.get("bucket_index", 0))
+	if not d.has("features"):
+		_upgrade_legacy_save()
+	if not d.has("owners_on"):
+		_upgrade_commerce_save()
+	_clamp_licences()
+	rebuild_infra()
+	_refresh_analysis()

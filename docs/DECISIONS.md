@@ -1,0 +1,355 @@
+# Décisions et état du projet
+
+## Lancer / vérifier
+Double-clic sur `C:\Nadir\tycoon\jouer.bat` pour jouer. Dans PowerShell, un chemin entre guillemets doit être précédé de `&` : `& "C:\Nadir\Godot\Godot.exe" --path "C:\Nadir\tycoon\godot"`.
+```
+$g = 'C:\Nadir\Godot\Godot.exe'          # l'exe « console » fourni ne marche pas seul (il cherche Godot_v4.7.1-stable_win64.exe)
+$b = 'C:\Program Files\Blender Foundation\Blender 5.2\blender.exe'
+& $g --path C:\Nadir\tycoon\godot                                              # jouer
+& $g --headless --path C:\Nadir\tycoon\godot --script res://tests/run_all.gd   # 124 contrôles
+& $g --headless --path C:\Nadir\tycoon\godot res://tests/ui_smoke.tscn         # interface (scène, 60 contrôles)
+& $g --headless --path C:\Nadir\tycoon\godot --script res://tests/pacing_probe.gd -- --seeds=1,2,3,4 [--brief] [--set=config.licence_max=[25,60,100]]
+& $g --headless --path C:\Nadir\tycoon\godot --script res://tests/balance.gd   # chronologie d'équilibrage
+& $g --path C:\Nadir\tycoon\godot res://scenes/gallery.tscn                    # galerie d'assets
+& $g --path C:\Nadir\tycoon\godot res://tests/swatch_test.tscn                 # test sRGB/linéaire
+& $b -b -P C:\Nadir\tycoon\blender\build_assets.py [-- --only nom1,nom2]
+& $b -b -P C:\Nadir\tycoon\blender\preview.py -- equipment C:\Nadir\tycoon\docs\previews\equipment.png
+```
+Arguments de jeu (après `--`) : `--fresh` (partie neuve, pas de sauvegarde), `--speed=10`, `--tier=3`, `--build-all`, `--hire-all`,
+`--debug-money=1e6`, `--look=x,z`, `--zoom=80`, `--build=quay_ext,gravel2`, `--unlock-all`, `--levels=60`, `--tuto --tuto-step=N`, `--open=upgrades|manage|missions|contracts|debug`, `--tab=0..3`, `--capture=img.png --delay=6`.
+F1 en jeu : outils de debug.
+
+## Couleurs
+- Blender écrit les couleurs de sommet en **linéaire** (attribut FLOAT_COLOR « Color », palette sRGB convertie).
+- Test du nuancier (`tests/swatch_test.tscn`) : rendu non éclairé = palette à ±1/255 avec `vertex_is_srgb = 0`
+  (erreur totale 0,067 contre 5,78 en mode sRGB). Matériau partagé : `assets/vcol.gdshader` ; MultiMesh : `vcol_tint.gdshader` (teinte par instance via INSTANCE_CUSTOM).
+
+## Économie (écarts assumés par rapport au prompt)
+- **Débit physique lisible, valeur exponentielle** (comme les produits de la référence) :
+  un niveau de département = +15 % de débit, paliers ×2 aux niveaux 10, 25, 50, 75, 100… ; coût `base × 1,15^niveau`.
+  Le moteur exponentiel est la **licence de cargaison** : +25 %/niveau, ×2 tous les 10 niveaux, coût ×1,2/niveau.
+  *(Remplacé le 13/10, voir « Écarts ISM » : paliers finis, ×81 au total, et niveau maximal par palier.)*
+  Raison : avec ×niveau sur le débit, les navires défilaient plusieurs fois par seconde et la courbe faisait « explosion puis plateau ».
+- Durées minimales d'escale (pilotage 2,5 s, amarrage 1,5 s, formalités 1,5 s) : à haut niveau, le goulot devient le **nombre de postes à quai** → construire un quai ou changer de palier.
+- Empilage du parc proportionnel au niveau de Parc et manutention (capacité = surface × empilage).
+- La gate est un flux continu (1 camion affiché ≈ 1 s de débit de gate).
+- Navires déroutés quand la rade est pleine : manque à gagner, pas de pénalité de réputation (seuls les navires qui attendent puis repartent furieux en coûtent).
+
+## Équilibrage mesuré (bot « actif raisonnable », 3 graines)
+| Mesure | Cible | Mesuré |
+|---|---|---|
+| Premier achat | < 20 s | 1 s (argent de départ) |
+| Achat abordable (5 premières minutes) | 15–40 s | 14–18 s (limite basse) |
+| Premier responsable | 3–4 min | 2 min 18 – 4 min 59 |
+| T1 → T2 | 8–12 min | 9 min 51 – 10 min 38 |
+| T2 → T3 | 35–50 min | 37–38 min |
+| Fin du MVP | 1 h – 1 h 30 | 1 h 19 – 1 h 26 |
+| Impasse | aucune | plus long intervalle sans achat : 1 min 01 |
+| Hors-ligne | 50 % → 100 % | 50 % + 50 % × responsables/6, plafond 8 h |
+
+## Non fait / limites connues
+- Pas de police Fredoka sur la machine : repli sur Segoe UI (SystemFont). Déposer `Fredoka-Bold.ttf` dans `godot/assets/fonts/` suffit.
+- T4/T5, prestige, jour/nuit : hors MVP. Responsables T3 (Dr Lambert, Ing. Mori) non utilisés.
+- Personnages : silhouettes statiques (pas de marche), quelques dockers, douanier, responsables embauchés devant leur département.
+- Le clic/tap n'a été testé que par le code (pas de session de jeu humaine) ; captures automatiques uniquement.
+
+## Réglages du 12/10
+- T1 trop long (11 min 30 – 15 min) : la cause était le plateau de revenu entre 5 et 11 min (tous les maillons à 6–9 EVP/s).
+  Correctifs : T1 `value_mult`/`dues_mult` 1,0 → 1,3 ; coût du palier T2 6 000 → 4 000 $ ; Extension gravier 6 000 → 4 000 $ ;
+  Dragage 3 000 → 2 000 $ ; Deuxième grue 1 500 → 1 200 $. Baisser les EVP ou les étoiles requis n'avait aucun effet.
+- Diorama : une chaussée (route sur digue, `Layout.CAUSEWAY_Z1`) relie la gate au continent ; avant, la file et les camions sortants
+  roulaient sur l'eau. Camions sortants affichés : un toutes les 0,7 s au plus, 16 maximum (en ×10 ils formaient un mur).
+- Caméra : le recul dépend du zoom (`CameraRig.dist()`), sinon le bas de l'écran partait sous l'eau en dézoom et montrait le fond.
+- Surcouche : en fort dézoom, la jauge du parc et la pastille de la gate ne s'affichent que si elles signalent un problème.
+- Pas de git pour ce projet (choix de l'utilisateur).
+- Contrats : les offres en attente sont revalorisées chaque jour portuaire et à chaque palier (`Objectives.rescale_offers`, jamais à la baisse) ;
+  avant, une offre affichée 4 min 30 en T2 pouvait valoir 100× moins que le revenu courant. Test ajouté (26 tests).
+- Surcouche : l'alerte « Tablier plein » est dessinée après la jauge du parc (elle était masquée en dézoom).
+- `Capture` affiche aussi la position de la caméra (`CAMERA target=…`). Ne pas lancer plusieurs captures en parallèle :
+  les fenêtres se gênent (clics parasites, caméra déplacée).
+
+## Tranche 2 (12/10) — boucle idle complète : prestige, objectifs, retours visuels
+Copie de sécurité avant la tranche : `C:\Nadir\tycoon_backups\port_horizon_avant_tranche2_*.zip` (pas de git).
+- **Prestige « Nouvelle concession »** (Gestion → Port) : disponible après la Concession nationale, gain `floor(√(EVP de la concession / 100 000))` points de **Renom ✦**
+  (≈ 5 à la fin d'une 1ʳᵉ partie). Chaque point : revenus +10 %, débit +8 % (demande, grues, engins, inspection, gate) **et** temps minimaux
+  de pilotage/amarrage/formalités ÷ (1 + 0,08 × Renom). Conservés : Renom, Ambre (+10), missions réclamées, compteurs cumulés. Tout le reste repart de zéro.
+  Réglages dans `config.json` → `renown`. Code : `PortSim.carry_over`, `GameState.prestige`.
+- **Pourquoi le Renom touche aussi le débit et les temps minimaux** (mesuré avec `tests/prestige_curve.gd`) : un simple bonus de revenus ne change presque rien
+  (20 points de Renom → seulement −10 min), parce que le coût est exponentiel et l'effet linéaire, et que la fin de partie est limitée par les EVP à traiter.
+  Courbe actuelle (bot) : 1 h 23 → 1 h 07 → 1 h 02 → 55 min → 51 min.
+- **Constat d'équilibrage (non corrigé)** : en T2 le débit plafonne à ~13,4 K EVP/min de 23 à 47 min (« goulot = palier ») car les temps minimaux d'escale fixent
+  un plafond que seul le palier suivant relève, et le palier T3 exige 500 K EVP. Il n'y a rien à acheter pendant ~25 min. Pistes : bâtiments qui abaissent ces
+  temps minimaux (remorqueur, amarrage rapide, guichet numérique), parking/aire d'attente, 3ᵉ quai en T2.
+- **Objectifs de carrière** : une fois les 17 missions écrites épuisées, `Objectives.generated_mission(i)` fournit une suite sans fin (EVP, escales, camions, contrats),
+  comptée sur toutes les concessions (`PortSim.counter_total`).
+- **Rentabilité** : chaque carte affiche « +X $/min · rentabilisé en … » (`PortSim.upgrade_gain`, sans modifier l'état) et la carte la plus rentable porte « ★ MEILLEUR ACHAT ».
+- **Interface** : revenu net par seconde (masqué tant que rien n'est déchargé) · barre de progression du palier sous l'argent (touche : onglet Port) ·
+  pastille du nombre d'améliorations abordables · légendes sous les icônes · compteur d'argent animé · gerbes de particules, « pop » de carte et texte flottant
+  à l'achat (`scripts/ui/fx.gd`), fanfare + secousse aux paliers ×2.
+- **Premier contact** : message de bienvenue unique (drapeau `intro_seen` dans `settings.cfg`, forçable par `--intro`) ; « Bon retour » en fenêtre seulement
+  au-delà de 5 min d'absence (sinon un toast) ; cadrage de départ décalé vers la rade (`CameraRig.START`).
+- **Tests** : `run_all.gd` (43 contrôles, dont prestige, rentabilité, objectifs) · `ui_smoke.tscn` (scène, 17 contrôles : achats, bâtiments, responsables, missions,
+  prestige complet) · `prestige_curve.gd` · `tier_debug.gd`. Le test d'interface se lance comme une scène :
+  `& $g --headless --path C:\Nadir\tycoon\godot res://tests/ui_smoke.tscn` (en `--script`, les autoloads n'existent pas à la compilation).
+- Après l'ajout d'une classe (`class_name`), lancer `--headless --import` pour mettre à jour le cache des classes.
+- **Reste à faire** (voir `ANALYSE.md`) : terre ferme + aire d'attente poids lourds, tutoriel guidé, corvées manuelles du début, mise en page paysage, ambiances sonores.
+
+## Tranche 3 (12/10) — le monde, les gestes manuels, le tutoriel, le paysage, l'ambiance
+- **Terre ferme** : un continent au sud du port (`Layout.GROUNDS`/`PROPS`/`scatter`) — plages, autoroute (`HIGHWAY_*`), village de pêcheurs, zone logistique,
+  collines et ~150 arbres/rochers en MultiMesh. Le modèle `road` est orienté selon X ; `road_z` est le même tourné de 90° (types de sol `road_x` / `road_z`).
+  Nouveaux modèles Blender dans `blender/parts/world.py` : `ground_parking`, `house_a/b`, `shop`, `silo`, `hill`, `car_a/b`, `stack`
+  (planche : `docs/previews/world.png`, commande `preview.py -- world …`).
+- **Aire d'attente poids lourds** (bâtiments `parking1` 5 M$, `parking2` 40 M$) : 8 places chacune, gate ×1,4 puis ×1,3. Les camions arrivent par l'autoroute,
+  attendent sur la route (5 places) puis dans l'aire, la gate les appelle, ils repartent chargés vers l'autoroute (`TrafficView`, itinéraires par la route d'accès).
+  Pastille « Aire d'attente n/N ». Des voitures civiles circulent sur l'autoroute.
+- **Leviers sur le plafond d'escale** (le plateau T2 de la tranche 2) : `tug2` (pilotage min ×0,7), `quickmoor` (amarrage ×0,7), `ewindow` (formalités ×0,7),
+  effet `time_min` ; `PortSim.min_time(kind)`. Nouvelle clé de goulot `min_time` (« Les escales sont au plancher… », bouton CONSTRUIRE).
+  Résultat mesuré : T2→T3 ≈ 31–33 min (cible 35–50, légèrement en dessous), fin du MVP 1 h 11 – 1 h 16, 1ʳᵉ→5ᵉ concession 1 h 12 → 47 min.
+- **Gestes manuels du début** (`config.json` → `manual`, `auto_berth_delay` 4 → 12 s) :
+  1. toucher un navire en rade l'accoste en priorité (pilotage ×0,6) ; sans geste il attend 12 s ;
+  2. toucher la grue qui décharge = « coup de main » (2 s de déchargement, recharge 2 s) tant que la cheffe des grutiers n'est pas embauchée.
+  Les responsables remplacent ces gestes (Capitainerie : accostage automatique ; Portiques : coup de main automatique en plus du ×2).
+  Le joueur automatique les exécute (`Bot.use_manual`) : l'équilibrage reste mesuré sur un joueur actif.
+- **Tutoriel guidé** (`data/tutorial.json`, `scripts/ui/tutorial.gd`) : 9 étapes, conditions `when`/`done` en expressions sur `sim`, flèche + anneau sur la cible,
+  caméra recentrée sur le navire/la grue, bouton « Passer le tutoriel », progression dans `settings.cfg` (`tuto/step`). Une partie déjà avancée (> 5 min) ne le voit pas.
+  Arguments de test : `--tuto` (actif même en capture), `--tuto-step=N`. Les parties `--fresh` ne l'enregistrent pas.
+- **Paysage / PC** : l'interface est une colonne centrée de 1080 px (`Hud._apply_column`), le monde reste visible de chaque côté ; la caméra garde la hauteur
+  visible (`KEEP_HEIGHT`) sur les fenêtres plus larges que le portrait. La surcouche monde et le tutoriel sont `top_level` (coordonnées écran) ;
+  la surcouche est masquée quand un écran est ouvert.
+- **Ambiance sonore** (toujours synthétisée, aucun fichier) : mer en boucle, mouettes, corne de navire à chaque arrivée, claquement de grue, klaxon de camion.
+- **Tests** : `run_all.gd` 59 contrôles (gestes manuels, leviers, tutoriel) · `ui_smoke.tscn` 21 contrôles (tutoriel, toucher un navire, achats, prestige).
+- **Reste à faire** : jour/nuit, personnages qui marchent, météo visible (pluie), import/export (chargement des navires), maintenance/énergie (T3), nouveau port à
+  chaque concession, mise en page tactile réelle (non testée sur appareil), musique.
+
+## Revue de code (12/10) — correctifs
+Relecture complète (simulation, autoloads, interface, vue 3D) + fuzzer d'invariants (5 parties de 40–90 min : achats aléatoires, aléas forcés, sauvegarde/rechargement
+en cours de route, hors-ligne, prestige) : **aucune violation** (conservation des EVP, quais ↔ navires, stocks, NaN). Les défauts trouvés étaient dans la périphérie :
+- **Sauvegarde** : les tests `--headless` chargeaient la vraie sauvegarde par l'autoload `Save` puis la réécrivaient à la sortie (hors-ligne crédité au passage).
+  `Save` ne lit ni n'écrit plus rien en headless. `load_game` vérifie que `sim` est un dictionnaire (sinon copie de secours).
+- **Hors-ligne à la reprise** : une application suspendue (veille, arrière-plan mobile) ne rattrapait pas le temps — le pas de simulation est plafonné à 0,25 s.
+  `Save._process` détecte un trou d'horloge > 60 s entre deux images et appelle `GameState.credit_offline` (signal `offline_applied`, l'interface montre « Bon retour »).
+- **Heures sup** : un toucher en recharge dépensait de l'Ambre sans demander ; il ouvre maintenant une confirmation (`show_popup(..., ok_text)`).
+- **Contrats** : un contrat refusé pouvait être reproposé aussitôt (`refresh_offers(sim, skip)`) ; la fiche d'une offre revalorisée en place n'était pas rafraîchie.
+- **Tutoriel** : `done` est évalué avant `when` (un geste déjà fait fait passer l'étape) ; l'étape « coup de main » se termine aussi si la cheffe des grutiers est
+  embauchée (sinon impossible à franchir) ; « Nouvelle partie » relance le tutoriel.
+- **Écran Port** : la liste des conditions du palier suivant ne bougeait plus après l'ouverture (bouton actif, liste « en attente ») : mise à jour en direct.
+- **Licences** : la barre de palier supposait « tous les 10 niveaux » (faux après le dernier palier) : lue dans `licence_milestones`. `buy_licence` vide le cache.
+- **Formatage** : `999,7` → « 1K » (et non « 1000 »), `999 700` → « 1M » (et non « 1000K »), `119,7 s` → « 2 min 00 s » (et non « 1 min 00 s »).
+- **Performance** : l'écran Améliorations rejouait 22 analyses de goulot 5 fois par seconde (≈ 4,7 ms par rafraîchissement sur PC) : une estimation de référence
+  partagée, recalculée une fois par seconde et après un achat (`PortSim.upgrade_gain(..., base)`). Le HUD ne recrée plus les styles de boutons à chaque rafraîchissement.
+- **Vue** : le train restait figé sur la voie après une nouvelle concession ; la caméra restait « accrochée » si un écran s'ouvrait pendant un glissement ;
+  `PortSim.reset()` oubliait Renom / compteurs temporaires ; table anti-doublon des notifications sans purge ; tween de notification lié à la notification.
+- **Tests** : `run_all.gd` 72 contrôles (+13) · `ui_smoke.tscn` 27 contrôles (+6).
+- **À savoir, non modifié** : F1 (outils de débogage) et les arguments `--debug-money`, `--tier`… restent actifs en version exportée — à couper (`OS.is_debug_build()`)
+  avant toute publication ; la ligne « F1 : outils de débogage » de l'écran Réglages est affichée aux joueurs.
+
+## Début de partie doux (12/10) — petits navires, gabarits de quai, révélation progressive
+Copie de sécurité : `C:\Nadir\tycoon_backups\port_horizon_avant_debut_doux_20261012_1703.zip`. Analyse et mesures du prototype : `ANALYSE.md` §10–11.
+- **Échelle des navires** (`ships.json`) : petit porte-conteneurs 16–30 EVP (gabarit 1, nouveau modèle `ship_mini`) → caboteur 60–150 (gabarit 2,
+  **Allongement du quai** 250 $) → feeder (gabarit 3, dragage) → Panamax (gabarit 4, quais profonds). Escales plus courtes pour les petits
+  navires (`time_scale` ×0,4 / ×0,7). Au départ, le quai n°1 est plus court d'un segment, que l'allongement ajoute (`Diorama.rebuild`).
+- **Demande** = trafic des classes que les quais peuvent recevoir (`traffic` par palier, EVP/s) × armateurs présents (somme des poids)
+  × Capitainerie (+15 %/niveau) × réputation × tarifs. Agrandir le quai ou ouvrir la douane **fait venir du monde** (×4, puis ×1,8) :
+  c'est ce qui crée l'alternance « manque de navires → manque de capacité ». Le détail « Pourquoi ? » du trafic le montre ligne par ligne.
+- **Bureau de douane** (800 $, effet `customs_open`) : avant lui, ni inspection, ni amende, ni contrôle surprise (`require_building`) ;
+  il fait venir Grand Large Cargo (`owners.json` → `require`), ses contrats et la politique de contrôle.
+- **Rade** : 2 places au départ. **Valeur T1** ×1,8 (au lieu de ×1,3) pour garder le rythme d'achat avec de petits volumes.
+- **Conseil « pas assez de navires »** (clé `attract`) : quand un équipement peut attirer du trafic (quai, douane, chenal, quai profond),
+  le conseil le nomme (champ `hint` du bâtiment) et son bouton CONSTRUIRE ouvre les Bâtiments. Sans cela, le joueur (et le bot) dépensait
+  tout en petits niveaux et n'allongeait le quai qu'à 12 min.
+- **Révélation progressive** (`data/unlocks.json`, `PortSim.feature/check_unlocks`) : 14 fonctions apparaissent une à une (Gestion après
+  2 escales, Missions, Parc et Gate, réputation, licences, barre de palier, stats, responsables après 9 escales, Heures sup après 12,
+  Douane et Contrats avec le bureau de douane, aléas après 16 escales, Ambre). La simulation les respecte aussi (achats, aléas, contrats,
+  missions) : le bot vit la même partie que le joueur. Chaque révélation : rebond du bouton + bandeau « Nouveau : … » non bloquant
+  (file d'attente, toucher pour fermer). Cartes encore verrouillées visibles, grisées, avec leur condition (« après 9 escales (4/9) »).
+  Carte de prestige seulement à partir de T3. Une nouvelle concession garde ce qui a été révélé.
+- **Moments marquants** : premier navire d'une nouvelle classe (`ship_class_first`) → corne, caméra sur la rade, bandeau (`arrival` du navire).
+- **Sauvegardes** : version 2. Une partie d'avant (sans `features`) reçoit tout ce qui a été révélé + l'allongement du quai et le bureau de douane
+  (`PortSim._upgrade_legacy_save`) ; vérifié sur une copie de la partie réelle du joueur (19 min, T1) : ses caboteurs accostent normalement.
+- **Tutoriel** : nouvelle étape « Allongement du quai » (après le goulot), étapes responsable / mission / contrats calées sur les révélations.
+- **Bot** : respecte les révélations et économise pour l'équipement que le conseil désigne.
+- **Mesures (bot, 3 graines)** : quai allongé 2 min 46 – 3 min 08 · 1ᵉʳ responsable 5 min 41 – 6 min 29 · douane 7 min 14 – 8 min 07 ·
+  T2 12 min 40 – 13 min 42 · T3 47–49 min · fin 1 h 21 – 1 h 24 · 9–12 achats dans les 5 premières minutes.
+- **Tests** : `run_all.gd` 90 contrôles (+18 : début doux, gabarits, douane, révélations, ancienne sauvegarde) · `ui_smoke.tscn` 35 contrôles.
+- **Reste (chantier C, `ANALYSE.md` §11)** : demande en excès en T2/T3 (Capitainerie qui multiplie sans limite), explosion de revenus au début
+  de T2, plateau de 25 min en T2, bâtiments T3 trop bon marché ; démarchage, lignes régulières, services aux navires.
+
+## Chantier C (12/10) — faire venir les navires : commerce, plancher assoupli, milieu de partie
+Copie de sécurité : `C:\Nadir\tycoon_backups\port_horizon_avant_chantier_c_20261012_2044.zip`. Analyse, essais et mesures : `ANALYSE.md` §12.
+- **La Capitainerie ne fait plus venir de navires** : elle pilote (vitesse du pilote, pilotes, places en rade, plancher de pilotage).
+  Responsable : accostage automatique + pilotage ×2. Carte Améliorations : « Pilotage X s », détail « plancher ».
+- **Demande** (`PortSim.breakdown("demand")`) = navires accueillis × **statut du port** (`tiers.json` → `traffic_mult` : 1 / 3 / 35)
+  × **armateurs** (`owner_factor` : poids × (1 + 1,5 × lignes), ×2 pendant un contrat) × **services** (bâtiments `stat_mult demand`)
+  × réputation × tarifs × **campagnes** (modificateurs `camp_*`) × Renom.
+- **Commerce** (`sim/commerce.gd`, écran `CommerceSheet`, bouton COMMERCE à la place de CONTRATS, révélé après 10 escales) :
+  - *Trafic* : demande et capacité de service (`PortSim.service_capacity`), « Pourquoi ? », campagnes (`config.json` → `campaigns` :
+    Affiches ×1,5 / 2 min 30 / recharge 5 min ; Annonce au journal ×2 / 4 min / recharge 10 min, après le bureau de douane ; prix en secondes
+    de revenu), équipements qui attirent ;
+  - *Armateurs* : Nordhaven 60 K$, Sakura 400 K$, Chimex 500 M$ à démarcher (`owners.json` → `recruit`) ; **lignes régulières** à partir du
+    T2 (`lines_per_owner` 0/3/4, `line_cost` 200 K$ / 500 M$, ×2 par ligne, −50 % après un contrat réussi : `line_offers`) ; relation ;
+  - *Contrats* : l'objectif vaut 50 % de ce que l'armateur apportera pendant le contrat (`Objectives.owner_rate`) au lieu de « n s du débit de
+    tout le port » (seul Corsaire y arrivait) ; le champ `evp_seconds` des modèles a disparu. Nouveau contrat Chimex sans cargaison imposée.
+- **Services aux navires** (bâtiments) : Ponton d'avitaillement T1 1 000 $ (trafic +20 %, patience +30 %, effet `patience`) ; Atelier de
+  réparation T2 400 K$ (trafic +20 %, +50 % de droits par escale, effet `ship_fee`) ; Station GNL T3 400 M$ (+25 %, +50 %).
+- **Plancher assoupli** : `PortSim.min_time` ÷ (1 + `floor_per_level` 0,02 × (niveau − 1)) du service concerné (`FLOOR_DEPT` : Capitainerie,
+  Quais, Douane). Le goulot « attendre le palier » (`tier`) n'est plus produit par l'analyse.
+- **T3** : Pilotage à distance, Amarrage automatique, Douane dématérialisée (temps minimal ×0,6) ; prix T3 de 200 M$ à 8 Md$ ;
+  Concession nationale 8 Md$.
+- **Conseil** : « Pas assez de navires » ouvre le Commerce (`HINT_DEPT` → "" pour `harbor`/`attract`) ; « attirer » désigne aussi les services.
+- **Sauvegarde version 3** : une partie sans `owners_on` garde ses armateurs (marqués démarchés), reçoit le Commerce et un message unique
+  (`legacy_notice` → `Hud._commerce_notice`). Sur la partie réelle (T1, 21 min) : trafic 1 305 → 246 EVP/min (12 niveaux de Capitainerie
+  qui ne comptent plus), avec 87 K$ en caisse pour l'avitaillement, le dragage et les campagnes.
+- **Incident pendant le chantier** : une capture lancée avant la réimportation de la nouvelle classe a fait échouer `main.gd`. Or c'est lui qui
+  désactivait la sauvegarde pour `--fresh` : la vraie partie a été chargée, a tourné environ 2 minutes et a été réenregistrée (déjà migrée en
+  version 3, donc sans le message). Correctif : `Save._ready` lit lui-même `--fresh`.
+- **3D** : vedette d'avitaillement près du quai (`supply`), deux cuves GNL près du terminal rail (`lng`). Les autres nouveaux bâtiments
+  n'ont pas d'objet, comme le remorqueur ou les bollards.
+- **Bot** : campagnes quand les navires manquent, démarchage, lignes ; il économise aussi pour les lignes et les armateurs.
+  **Sonde** `tests/pacing_probe.gd` : demande/capacité, goulots, achats, conditions de palier, revenu après chaque palier.
+- **Mesures (bot, 4 graines, vrai projet)** : T2 11 min 17 – 13 min 02 · T3 36 min 21 – 39 min 47 · fin **1 h 12 – 1 h 30** · demande
+  > 1,5 × capacité 8–17 % du temps en T2 (100 % avant) · « attendre le palier » 0 % (T2 26–34 %, T3 84–88 % avant) · bâtiments T3 étalés
+  sur 20–30 min · contrats réussis ≈ 70 %. Prestige : 1 h 25 → 1 h 00 → 51 min → 51 min → 43 min.
+- **Tests** : `run_all.gd` 108 contrôles (+18 : commerce, plancher, contrat atteignable, migration) · `ui_smoke.tscn` 45 contrôles
+  (+7 : écran Commerce, campagne, démarchage, ligne, message d'ancienne partie). Correctif au passage : la confirmation de « Nouvelle
+  concession » pouvait s'effacer si une fonction se révélait entre les deux appuis.
+- **Limites connues** (`ANALYSE.md` §12) : l'emballement des revenus au début du T2 est atténué, pas supprimé (licences) ; avec le bot, la
+  demande est le goulot la moitié du temps en T2/T3 ; les relations plafonnent vite à 100 ; Chimex échoue souvent ses contrats IMO.
+
+## Écarts ISM (13/10) — licences, entrée du T3, paliers nommés, achat maintenu, missions sur le HUD, tutoriel, statistiques
+Copie de sécurité : `C:\Nadir\tycoon_backups\port_horizon_avant_ecarts_ism_20261012_2211.zip`. Cahier des charges :
+`docs/PROMPT_ECARTS_ISM.md`. Essais, leçons et réglages : `ANALYSE.md` §13.
+- **É1 Licences** : paliers lus dans `config.json` → `licence_milestones` (`[[niveau, mult], …]`, `Progression.step_mult/next_step` ;
+  `milestone_mult` reste celui des départements) : ×2 aux niveaux 10 et 20, ×1,5 à 30, 50, 75, 100, ×2 à 150 et 200, soit ×81 puis
+  plus rien. **Niveau maximal par palier** `licence_max` 25 / 60 / 100 (`PortSim.licence_cap/licence_room`) : achat, MAX et bot s'y
+  arrêtent ; la carte affiche « PLAFOND » et le palier suivant le relève. +25 %/niveau et coût ×1,2 inchangés : le T1 est identique.
+  Le second moteur de l'emballement était les **lignes régulières** (les 12 lignes du T2 signées en 4 min 30) : 1 M$ au lieu de 200 K$.
+- **É2 Entrée et rythme du T3** : prix de fin du T2 ÷2 environ ; bâtiments T3 de 200 à 700 M$ (au lieu de 200 M$ → 8 Md$) ;
+  valeur T3 ×18 ; lignes T3 75 M$ ; Chimex 75 M$ ; Concession nationale 2,2 M EVP et 700 M$.
+- **Sauvegarde version 4** : une licence au-delà du plafond de son palier est ramenée au plafond et l'excédent **remboursé** au prix
+  d'achat (`PortSim._clamp_licences`, à chaque chargement, sans effet sur une partie conforme) ; message unique « Licences : nouveaux
+  plafonds ». Choix : rembourser plutôt que plafonner l'affichage, pour qu'aucun bonus caché ne survive. La vraie partie du joueur
+  (T1, 21 min, licences au niveau 1) n'est pas concernée ; une copie s'en charge et tourne 10 min dans `run_all` (variable `PH_SAVE_COPY`).
+- **É3 Paliers nommés** : `departments.json` et `cargo.json` → `stages` (une étape par palier, ex. Portiques « Grue rouillée » →
+  « Grue révisée » → « Grutiers de jour et de nuit »…). La carte montre l'étape actuelle et la suivante ; le bouton **« i »** ouvre la
+  frise de toutes les étapes (niveau, multiplicateur, nom, phrase ; actuelle et suivante surlignées). **Le monde change** :
+  `Layout.STAGE_PROPS`, un élément de plus par palier franchi et par département (vedettes et remorqueur, lamaneurs, douaniers,
+  grutiers et lampadaires, engins de parc, agents de gate), qui surgit avec un nuage de poussière quand on revient au port
+  (`Diorama._build_stage_props`, `fx_paused` tant qu'un écran couvre le monde). Argument de capture `--levels=N`.
+- **É4 Achat maintenu** : `scripts/ui/hold_repeat.gd` (`HoldRepeat.attach`) sur AMÉLIORER et LICENCE : après 0,4 s, l'achat se répète
+  de 0,35 s à 0,05 s d'intervalle et s'arrête au relâchement ou à court d'argent ; un son sur 3, pas de gerbe pendant la rafale, une
+  gerbe « +N niveaux » à la fin, fanfare seulement sur un palier. Souris et toucher (signaux du bouton). Mode ×1/×10/×100/MAX inchangé.
+- **É5 Missions visibles** : bandeau compact sous la barre du haut (coffre n/4, les 2 missions en cours avec leur barre, bouton ▲/▼
+  pour le replier), masqué tant que les missions ne sont pas révélées ; toucher une mission terminée la réclame, sinon ouvre Missions.
+  Missions de guidage `t1` quai, `t2` affiches, `t3` douane (type `building`) : Ambre + **30–45 s de revenu réel** ; coffre toutes les
+  4 missions (+2 Ambre, +30 s ; `config.json` → `mission_chest`). Les 60–120 s du prompt avançaient le T2 de 1 à 3 min (essai mesuré).
+- **É6 Retour immédiat** : le HUD garde le revenu réel ; après un achat, une pastille « +X/s » (gain estimé avant/après, cumulé pendant
+  une rafale) s'efface en 3 s, et le chiffre rejoint le nouveau rythme en 3 s (le complément s'efface à mesure que la fenêtre de 60 s
+  se remplit : il reste honnête).
+- **É7 Tutoriel** : narratrice Capitaine Mathilde Roche (portrait dessiné, `scripts/ui/narrator.gd`, poses accueil / réflexion /
+  inquiétude / bravo, champ `pose`) ; les 4 premières étapes (`lock`) assombrissent et bloquent le reste de l'interface, la cible reste
+  touchable (voile en shader, trou rond ou arrondi), « Passer le tutoriel » reste actif. L'étape **goulot** vient après l'allongement
+  du quai et attend un navire qui patiente en rade depuis 6 s (`PortSim.longest_wait`), cadre la caméra dessus (pose inquiète), puis
+  « appuie sur le bouton de la carte rouge » (compteur `hint_used`). Mesuré : ce bouchon apparaît 2 min 45 après le quai.
+  La progression enregistrée avec l'ancienne liste d'étapes est convertie par nom (`Settings.tuto_rev`).
+- **É8 Statistiques** : « Gain moyen par EVP », carte **Panier du port** (valeur et part de chaque cargaison, `PortSim.cargo_shares`),
+  étiquettes « ★ Maillon le plus rentable » (le niveau qui se rembourse le plus vite) et « ▼ Maillon le plus faible » (le goulot).
+- **Surcouche** : rien n'est plus dessiné sous les cartes du haut (un navire caché derrière la carte du goulot ne montre pas sa bulle).
+- **Bot** : économise pour le palier quand toutes les autres conditions sont remplies (avant, il gagnait l'argent du palier par hasard).
+- **Optionnel non fait** : le « Pli de la capitainerie » (prime toutes les 4–6 min). Il crée une raison de rester devant l'écran, et les
+  primes de mission ont montré combien le début de partie est sensible à l'argent gratuit.
+
+### Mesures (bot, 4 graines, vrai projet)
+| Mesure | Avant | Après | Cible |
+|---|---|---|---|
+| T1 → T2 | 11 min 17 – 13 min 02 | 11 min 14 – 12 min 06 | 12–15 min (rythme d'avant conservé) |
+| Durée du T2 | 24–28 min | 27–31 min | 25–35 min |
+| Fin du MVP | 1 h 12 – 1 h 30 | **1 h 17 – 1 h 30** | 1 h 15 – 1 h 30 |
+| Revenu à 1 / 5 / 10 min (moyenne) | 111 / 776 / 8,8 K$ par min | 117 / 837 / 10,5 K$ | ±15 % (+5 / +8 / +19 %) |
+| T2 +3 / +6 / +10 min (revenu d'exploitation) | ×3,9–12 / ×65–128 / ×379–954 | ×4,1–16 / ×18–67 / ×62–152 | ≤ ×6 / ×25 / ×80 |
+| Plus forte croissance par minute en T2 (moyenne 3 min) | ×2,5–3,3 | ×2,0–2,9 | ≤ ×1,6 |
+| Licence Standard fin T2 / fin (multiplicateur) | 74 / 90 (×2 460 / ×11 900) | 60 / 75 (×142 / ×263) | — |
+| T3 +10 min | ×2,5–7,3 | ×7,3–8,6 | ×2–5 |
+| 1ᵉʳ / 4ᵉ bâtiment du T3 | +0–20 s / +44 s – 1 min 27 | **+1 min 22 – 4 min 04 / +5 min 39 – 7 min 19** | ≥ +1 / ≥ +6 min |
+| Plus long trou d'achat en T3 | 2 min 08 – 3 min 28 | 2 min 18 – 3 min 02 | ≤ 90 s |
+| Pire baisse du revenu en T3 (moyenne 3 min) | 42–69 % | 30–61 % | ≤ 30 % |
+| Rentabilité du meilleur achat (médiane) T1 / T2 / T3 | ≈ 2 min / 5–12 min / 2–3,5 min | 1,5 min / 7–12,5 min / 3–4,5 min | 20 s – 5 min |
+| Prestige (1ʳᵉ → 5ᵉ concession) | 1 h 25 → 1 h 00 → 51 → 51 → 43 min | 1 h 22 → 1 h 04 → 59 → 52 → 50 min | — |
+
+- **Tests** : `run_all.gd` 124 contrôles (+16 : paliers finis, plafond, remboursement unique, missions de guidage et coffre, étapes
+  cohérentes avec la config, éléments du monde, bouchon visible pour le tutoriel, copie de la vraie sauvegarde) ; `ui_smoke.tscn`
+  60 contrôles (+15 : voile du tutoriel, narratrice, pastille de gain, appui maintenu jusqu'à court d'argent, étapes et frise,
+  PLAFOND, bandeau de missions, éléments du monde, statistiques, message sur les plafonds). Correctif : le test « l'aléa se termine »
+  pouvait tomber sur un nouvel aléa tiré au hasard.
+- **Captures** : `docs/captures/ism_*.png` (tutoriel verrouillé, HUD avec bandeau en portrait et en paysage, Améliorations,
+  Statistiques, monde au niveau 300).
+- **Limites qui restent** (détail `ANALYSE.md` §13) : le saut d'entrée du T2 dépasse ×6 en 3 min (c'est le palier lui-même) ; la
+  rentabilité en T2 reste à 7–12 min (la demande limite le port la moitié du temps, et une rentabilité courte relancerait
+  l'emballement) ; à-coups du revenu en T3 (Panamax, brouillard) ; rien n'a été joué par un humain ; l'appui long n'a pas été essayé
+  sur un écran tactile réel.
+
+## Direction visuelle D (13/10) — décision de direction de projet
+Copie de sécurité : `C:\Nadir\tycoon_backups\V2_avant_direction_D_20261013.zip`. Revue : `docs/REVUE_CHEF_DE_PROJET.md` ; étude : `docs/ETUDE_STYLE.md`
+et `docs/previews/style_variantes.png` (script `blender/preview_variants.py`).
+- **`tycoon_V2` est le seul projet de travail** ; `C:\Nadir\tycoon` est gelé (validé par l'utilisateur).
+- **Direction D = B + C** (tranchée par le chef de projet sur délégation de l'utilisateur) : registre « port nordique jouet » (bois clair,
+  toits colorés à pente, chanfreins, bandeau marine) pour le village, le T1 et les bâtiments de service ; « B en dur » (façades claires,
+  toit plat à casquette claire, grandes baies) pour le T2 ; registre « industriel pop » (bardage nervuré, portes roulantes, toits
+  techniques, bandes jaune-noir) pour le T3, les hangars, les engins, les conteneurs et les navires. Sol du terminal : asphalte violet sombre.
+- **Chaque bâtiment est identifiable sans lire** : un objet emblème + la couleur de son département. Le texte 3D n'est plus porteur
+  d'information (enseignes décoratives ou supprimées).
+- **L'environnement doit être vraiment portuaire** : bollards, défenses, échelles de quai, rails de portique, bouées, brise-lames,
+  bateaux de pêche, filets, caisses, mouettes, marquages de parc, voies de gate, trottoirs et passages piétons côté village.
+- Règles communes (héritées d'ISM) : socle sombre, accessoires et personnages ×1,35, ombrage marqué et ombres nettes non noires,
+  information de jeu posée sur le décor, bâtiments fermés par défaut, face principale en −Y, couleurs via `palette.json` uniquement,
+  budget ≤ 2 500 triangles par bâtiment et ≤ 600 par accessoire.
+- Exécution : lot A (expert Blender, `docs/ORDRE_BLENDER_D.md`) et lot B (développeur Godot, `docs/ORDRE_GODOT_B.md`) en parallèle ;
+  lot C (lots fantômes) ensuite ; puis test humain de 20 min avant toute nouvelle mécanique.
+
+## Lot B (13/10) — rendu, cadrage, environnement (développeur Godot, `docs/ORDRE_GODOT_B.md`)
+Copie de sécurité préalable : `C:\Nadir\tycoon_backups\V2_avant_direction_D_20261013.zip`. Fait avec les modèles livrés par la phase 1 du lot A
+(bollard, défense, échelle, rails, brise-lames, bateaux de pêche, filets, caisses, mouettes, bouées sur poteau, trottoirs, passages piétons,
+voies de gate, marquages de parc, totem P) ; `blender/`, `godot/assets/models/` et `assets_meta.json` n'ont pas été touchés.
+- **Lumière** (`Diorama.make_environment / make_sun`, partagés avec `tests/swatch_test.tscn`) : ambiance **0,67** teinte (0,96 ; 0,94 ; 1,0),
+  soleil dirigé selon (−0,243 ; −0,85 ; 0,467) — en haut à droite derrière la caméra, les ombres tombent en bas à gauche comme dans ISM —,
+  énergie et couleur du soleil **calculées** pour que ambiance + soleil = blanc exact sur un dessus (≈ 0,44, teinte linéaire (0,96 ; 1 ; 0,89)) :
+  un toit au soleil rend la teinte de `palette.json` **sans dérive** (nuancier éclairé = nuancier non éclairé à ±1/255 ; à savoir : Godot
+  convertit `light_color` et `ambient_light_color` de sRGB en linéaire, les valeurs linéaires voulues lui sont donc passées via `linear_to_srgb`) ; flanc +X ≈ 75 %, flanc +Z ≈ 65 % (ambiance seule), ombres portées
+  `shadow_opacity` 0,5 → −18 % légèrement bleu-violet, `shadow_blur` 1,5 → **0,4** (nettes). Correction linéaire conservée ;
+  saturation/contraste ajoutés (1,08 / 1,04) **retirés**. Shaders `vcol` / `vcol_tint` / `water` sans brillant (rugosité 1, spéculaire 0).
+  Pourquoi pas « ambiance 0,35 / soleil 1,3 » : avec ces valeurs dessus et flancs dépassent 1,0 et sont écrêtés, ce qui donnait
+  justement le rendu plat constaté (`v2b_lumiere_avant.png`) ; la règle « dessus 100 %, flancs 65–75 % » se tient sans écrêtage.
+- **Cadrage** (`CameraRig`) : zoom par défaut 52 → **40 u**, `START` (−26, −13) → **(−34,5 ; −5,5)** : en portrait 540×960, capitainerie,
+  quai n°1, parc et navire en rade tiennent sous les cartes du HUD ; bornes et zoom minimal inchangés. En capture, la souris ne peut plus
+  déplacer la caméra (`input_enabled` coupé) et `--look` verrouille le cadrage (`rig.locked`) contre les recentrages du jeu.
+- **Eau** (`water.gdshader`) : dégradé selon la **distance au rivage** (rectangles de terre transmis par `Diorama._update_water_land`,
+  mis à jour avec le palier) : liseré clair au contact, eau côtière sur 7 u, puis teinte du large de 14 à 70 u ; écume des quais conservée.
+- **Surcouche** (`world_overlay.gd`, classe pure `Bubbles`) : bulles de bâtiment posées **au-dessus** de `anchor_y` (lu dans
+  `assets_meta.json`, sinon sommet de la boîte englobante + 0,4 — `Assets.anchor_y`), douane, gate (guérite ou barrière), grues ;
+  deux bulles qui se chevauchent sont décalées latéralement (`Bubbles.settle`), la pastille de la gate n'est plus coupée par le bord.
+- **Débogage coupé en export** (`scripts/util/debug_args.gd`) : `--speed`, `--debug-money`, `--tier`, `--levels`, `--build-all`,
+  `--hire-all`, `--build`, `--unlock-all`, `--open=debug` et F1 seulement si `OS.is_debug_build()` ; la ligne « F1 » des Réglages aussi.
+  `--fresh`, `--capture`, `--delay`, `--look`, `--zoom`, `--tuto` restent disponibles partout.
+- **Entrepôts du village** : gardés dès le T1 (la zone logistique est un vrai tampon entre le port et les maisons, et le continent
+  resterait vide sans eux) mais **gris neutre** (`desat` 0,85 du shader `vcol`, clé `neutral: "t3"` dans `Layout.PROPS`) tant que le
+  département logistique n'existe pas ; au T3 ils prennent la couleur du département. Choix : la révélation progressive porte sur la
+  couleur (ce qui identifie un département), pas sur la présence du bâtiment.
+- **Personnages** (`TrafficView.add_walker`) : aller-retour en ligne droite entre deux points (dockers tablier ↔ parc, douanier
+  table ↔ porte du bureau, responsables selon `Layout.MANAGER_WALK` : capitainerie ↔ quai, gate ↔ guérite…, personnages des paliers
+  avec la clé `walk`), 1,7 u/s, pause 1,2 s à chaque bout, demi-tour instantané, balancement vertical de 7 cm ; en pause quand un
+  écran couvre le monde (`walk_paused` = `fx_paused`). Pas de pathfinding.
+- **Environnement portuaire** : `Layout.quay_props` (bollards tous les 4 u, défenses entre eux, échelles aux extrémités de chaque poste,
+  rails de portique 12 × 1,2 sur le tablier T2+, mouettes sur un bollard sur cinq), `Layout.street_props` (brise-lames de 3 segments de
+  12 u à l'ouest de la rade, trottoirs et passages piétons du village, marquages de parc 12 × 6 sur l'asphalte T2+ / RTG T3),
+  `PROPS` (bateaux de pêche, filets et caisses en T1 seulement — nouvelle condition `t1` —, mouettes sur le toit du hangar via la clé
+  `on`, bouées sur poteau, voies de gate, totem P avec `parking1`, voitures garées `car_c`). Chargeur **tolérant** (`Assets.scene`) :
+  un modèle absent donne un nœud vide, un seul avertissement par nom, les MultiMesh l'ignorent ; `car_c` est le seul encore absent.
+- **Tests** : `run_all.gd` **129 contrôles** (+6 : modèle absent, emplacements préparés, bulle au-dessus de `anchor_y`, décalage
+  latéral, triches ignorées hors debug, appliquées en debug ; 130 avec `PH_SAVE_COPY`) · `ui_smoke.tscn` **62 contrôles** (+2 : bulle
+  « À inspecter » au-dessus de l'ancre dans la vraie scène, monde construit malgré un modèle absent avec des personnages qui marchent).
+  Correctif de fiabilité : les contrôles qui comptent les fenêtres ouvertes ne comptent plus les effets transitoires (gerbes, textes)
+  de la même couche, dont la durée de vie dépendait de la vitesse de la machine. `swatch_test.tscn` mesure aussi un dessus au soleil.
+- **Captures** : `docs/captures/v2b_lumiere_avant.png` / `v2b_lumiere_apres.png` (même cadrage 52 u), `v2b_portrait_t1.png`,
+  `v2b_paysage_t1.png` (1280×720), `v2b_portrait_t3.png`, `v2b_zoom_capitainerie.png` (zoom 28).
+- **Limites** : les ombres en T3 sur les portiques sont nettes mais longues de 0,6 × la hauteur ; le dégradé de l'eau ignore les îlots (rochers du phare approchés
+  par un rectangle) ; les marquages de parc ne sont pas alignés sur les travées de 4,4 u des conteneurs (dalle de 12 u) ; `ghost_lot`
+  attend le lot C.
