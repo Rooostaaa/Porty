@@ -1,0 +1,3 @@
+Prototype autonome du plan « La baie et le terre-plein » (13/10/2026). Pour le lancer : copier godot/assets/models/, godot/assets/vcol.gdshader, foam.gdshader et data/palette.json dans assets/, puis
+& C:\Nadir\Godot\Godot.exe --headless --path <ce dossier> --import
+& C:\Nadir\Godot\Godot.exe --path <ce dossier> -- --tier=1 --zoom=40 --look=-34.5,-5.5 --capture=C:/.../x.png --delay=2

@@ -514,3 +514,182 @@ en T2 et les trous d'achat du T3.
   Le meilleur achat est souvent une ligne ou un bâtiment à 5–15 min de rentabilité : c'est voulu pour étaler le contenu.
 - **Baisse ≤ 30 % et trou ≤ 90 s en T3** : les Panamax déchargent par à-coups et le brouillard arrête le pilotage ; le bot économise
   2–3 min pour un bâtiment T3 ou pour l'argent du palier final.
+
+## 14. Plan de la baie : chapitres du palier 1, essais et mesures (13/10/2026)
+Méthode : copie du projet dans le scratchpad, sonde `pacing_probe.gd` 4 graines (`--brief`), puis report et nouvelle mesure dans
+le vrai projet (identique). La sonde mesure en plus : premier achat, secondes où le parc ou la gate sont le goulot avant d'être
+présentés, dates des chapitres, plus longue attente au T1 sans aucun achat abordable. La référence « avant » vient de la
+sauvegarde `V2_avant_plan_baie_20261013_1950.zip` avec la même sonde.
+
+### Essais
+| Essai | T1 → T2 | Trou T1 (bot) | Gate goulot avant son chapitre | Fin |
+|---|---|---|---|---|
+| Avant (révélation au nombre d'escales) | 11:14 – 12:06 | 1:22 – 1:34 | — | 1 h 17 – 1 h 30 |
+| A. Chapitres au niveau 10, licences au palier 2 | 13:49 – 14:56 | 1:54 – 2:58 | 180 – 250 s | 1 h 14 – 1 h 30 |
+| B. A + gate ouverte aussi quand elle devient le goulot (et le parc de même) + licences au chapitre 2 + bot qui suit le tutoriel (1er achat : un niveau de Portiques) | **12:34 – 13:29** | **2:08 – 2:24** | **0 s** | **1 h 19 – 1 h 25** |
+
+### Ce qui a marché, ce qui n'a pas marché
+- Fermer les chapitres au niveau 10 du service ne bloque rien : le niveau 10 des Portiques arrive à 7–8 min 30, la gate suit
+  30 s à 1 min après le parc (elle devient vite le goulot), les navires à 10–12 min, le T2 à 12 min 30 – 13 min 30.
+- Sans licences au T1 (essai A), le revenu à 5–10 min chute de moitié et le palier 2 arrive 2–3 min plus tard : les licences
+  restent présentées au chapitre 2 (c'est un seuil de chapitre, pas l'économie).
+- Une gate au niveau 1 ne suffit pas jusqu'au niveau 10 du parc (essai A : elle est le goulot 3–4 min avant d'être présentée).
+  Plutôt que de relever son débit (l'économie), son chapitre s'ouvre aussi dès qu'elle devient le goulot.
+- **Non tenu** : aucun trou d'achat > 90 s au T1. Le plus long trou est l'ouverture (rien d'abordable pendant ≈ 2 min après le
+  premier niveau de Portiques, avec 100 $ de départ et des petits navires à ≈ 1 $/s) ; il existait déjà sous une autre forme
+  (1 min 22 – 1 min 34, premier achat lui aussi au-delà de 20 s). Les deux cibles « premier achat < 20 s » et « aucun trou > 90 s »
+  demandent de toucher l'argent de départ ou la valeur des petits navires : options dans `JOURNAL_PLAN_BAIE.md`.
+
+### Mesures finales (vrai projet)
+Premier achat 1 s · T1 → T2 12:53 / 12:48 / 13:29 / 12:34 · durée du T2 27:29 / 27:47 / 29:10 / 29:15 (avant 31:09 / 27:38 / 29:40 /
+26:54) · fin 1 h 25 / 1 h 19 / 1 h 25 / 1 h 20 (avant 1 h 19 / 1 h 17 / 1 h 30 / 1 h 23) · trou T1 2:11 / 2:08 / 2:20 / 2:24 · parc et
+gate goulots avant leur chapitre : 0 s · invariants de `run_all` (conservation, stocks, sauvegarde) : aucune violation.
+
+### Corrections après la revue du 13/10 : départ 260 $, quai d'abord, un sujet par seuil (prototype puis vrai projet)
+Méthode identique (copie `scratchpad/c/proto`, sonde 4 graines `--brief`, report à l'identique, sonde relancée dans le vrai projet).
+La sonde mesure en plus la **plus longue attente au T1 sans rien d'abordable, seconde par seconde** (`Bot.dry_t1`, avant la décision
+du bot : l'ancienne mesure, par pas de 10 s, voyait « rien d'abordable » chaque fois que le bot venait de dépenser) et liste les révélations
+avec le plus petit écart entre deux d'entre elles. `--set=unlocks.<id>.when=…` permet d'essayer un seuil sans toucher aux fichiers.
+
+| Essai (départ 260 $, quai d'abord, écart de 20 s entre révélations) | T1 → T2 | Durée du T2 | Fin |
+|---|---|---|---|
+| a. licences 25 s après Yasmine (≈ 6 min 30 – 7 min 30) | 11:12 – 11:28 | 27:04 – 30:47 | 1 h 11 – 1 h 25 |
+| c. licences au niveau 5 de la gate (8:22 – 9:03) | 11:24 – 12:20 | 26:51 – 29:43 | 1 h 16 – 1 h 25 |
+| e. niveau 7 de la gate (≈ 11 min) | 12:24 – 13:04 | 26:09 – 33:24 | 1 h 17 – 1 h 26 |
+| f. niveau 6 de la gate (≈ 11 min) | 12:24 – 12:44 | 28:01 – 30:29 | 1 h 17 – 1 h 21 |
+| **g. 3 min après l'ouverture de la gate (9:33 – 10:00), retenu** | **12:13 – 12:45** | **27:24 – 30:55** | **1 h 12 – 1 h 24** |
+| h. 2 min 30 après la gate | 12:05 – 12:44 | 27:36 – 30:54 | 1 h 17 – 1 h 28 |
+
+**Ce qu'on en tire.** 260 $ et le quai en premier raccourcissent le T1 d'≈ 1 min 20 (le niveau 10 des Portiques, donc le chapitre 2, arrive
+1 min 30 plus tôt) ; c'est le seuil des licences, et non l'économie, qui le ramène dans 12–20 min. Un seuil au niveau de la gate est trop
+brutal (le bot monte la gate d'un coup vers 11 min) ; un délai après l'ouverture de la gate se règle finement. Sur la durée du T2, la
+dispersion d'un essai à l'autre (±12 % par graine sans rien changer au T2) est du même ordre que l'écart toléré : la moyenne reste à ±3 %.
+
+**Mesures finales (vrai projet)** — avant le chantier / après M3 / après les corrections :
+| Mesure | Cible | Avant | Après M3 | Après corrections |
+|---|---|---|---|---|
+| Premier achat | < 20 s | 1:22 – 1:34 | 1 s | 1 s (le quai), 2e achat ≈ 20 s |
+| Trou d'achat du bot au T1 | ≤ 90 s | 1:22 – 1:34 | 2:08 – 2:24 | 1:37 / 2:20 / 2:04 / 2:20 |
+| Attente sans rien d'abordable au T1 (à la seconde) | ≤ 90 s | — | — | 1:16 / 0:38 / 1:00 / 0:59 |
+| T1 → T2 | 12–20 min | 11:14 – 12:06 | 12:34 – 13:29 | 12:45 / 12:13 / 12:41 / 12:20 |
+| Durée du T2 | ±10 % | 31:09 / 27:38 / 29:40 / 26:54 | 27:29 / 27:47 / 29:10 / 29:15 | 27:24 / 30:55 / 30:03 / 28:58 (−12,0 / +11,9 / +1,3 / +7,7 %) |
+| Fin du MVP | ±10 % | 1 h 19 / 1 h 17 / 1 h 30 / 1 h 23 | 1 h 25 / 1 h 19 / 1 h 25 / 1 h 20 | 1 h 12 / 1 h 21 / 1 h 21 / 1 h 24 (−8,9 / +5,2 / −10,0 / +1,2 %) |
+| Parc / gate goulots avant leur chapitre | 0 | — | 0 s | 0 s (à la seconde) |
+| Révélations simultanées | 0 | — | 4 + 4 | 0 (≥ 20 s entre deux révélations ordinaires) |
+| Chapitres (parc · gate · navires) | — | — | 7:23–8:35 · 8:03–8:56 · 10:23–11:55 | 5:42–6:21 · 6:33–7:00 · 11:08–11:31 |
+
+**Non tenu, et pourquoi.** Le trou d'achat du **bot** reste au-dessus de 90 s : il ne vient plus de l'ouverture mais de sa règle
+d'épargne (jusqu'à 150 s pour l'équipement qui attire du trafic quand c'est le goulot : le bureau de douane, 800 $). La mesure à la
+seconde montre que le jeu offre toujours un achat en moins de 76 s. Durée du T2 : deux graines à −12,0 % et +11,9 % (dispersion, voir plus
+haut). Rien n'a été changé dans l'économie hormis l'argent de départ (décision 1 de la revue).
+
+### Seconde revue (14/10) : rythme des révélations, chapitre 2, Douane — essais et mesures (lot C6)
+**Critère du T2 adopté** (seconde revue, chef de projet) : la durée du T2 se juge sur **la moyenne des 4 graines (±5 %)** et **chaque
+graine à ±15 %** (la dispersion d'une graine d'un essai à l'autre, sans rien changer au T2, est de l'ordre de ±12 %).
+
+| Essai (prototype `scratchpad/c/proto2`) | T1 → T2 | Fin | Remarque |
+|---|---|---|---|
+| a. bureau de douane masqué jusqu'au chapitre 4 (N5) + N5 bis dans l'analyse + N7 + N8 | 27:16 – 29:07 | 1 h 37 – 1 h 44 | sans la douane vers 5 min, la grue atteint le niveau 10 deux fois plus tard : tout glisse |
+| b. douane masquée jusqu'au chapitre 3 | 24:38 – 25:36 | 1 h 31 – 1 h 37 | idem |
+| c. sans N5 (N5 bis dans l'analyse) | 13:28 – 15:08 | 1 h 18 – 1 h 28 | le bot change d'achats quand la rade est pleine : fin +14 % pour une graine |
+| d. c + carte Douane retardée au chapitre 4 (bâtiment libre) | 20:52 – 22:49 | 1 h 25 – 1 h 40 | la Douane reste au niveau 1 : les formalités bloquent |
+| **e. N5 bis en présentation seulement + N7 (lissé) + N8 (retenu)** | **12:38 – 13:15** | **1 h 14 – 1 h 25** | — |
+
+**Mesures finales (vrai projet)** : 1er achat 1 s · T1 → T2 13:15 / 12:46 / 12:38 / 13:03 · durée du T2 28:36 / 28:21 / 29:43 / 28:03
+(−8,2 / +2,6 / +0,2 / +4,3 % ; moyenne −0,5 % : **tenu** au nouveau critère) · fin 1 h 14 / 1 h 15 / 1 h 20 / 1 h 25 (−6,3 / −2,6 / −11,1 /
++2,4 % ; moyenne −4,6 % ; graine 3 hors ±10 % de 1,1 point) · attente sans rien d'abordable au T1 ≤ 1 min 16 · chapitre 2 (parc → gate)
+1 min 11 – 1 min 52 (≈ 50 s avant) · révélations ordinaires espacées de 60 s, ou de 20 s quand la précédente a servi.
+
+**Non fait, et pourquoi** : N5 (masquer le bureau de douane jusqu'au chapitre 4) — le bâtiment porte le trafic du T1 ; toute façon de le
+retarder repousse le palier 2 à 21–29 min. Options dans `JOURNAL_PLAN_BAIE.md` (palier C6b).
+
+
+---
+
+## 15. Rythme et récompense (lot D-Éco, 14/10/2026) : essais et mesures
+Ordre `docs/ORDRE_D_ECO.md`, source `REVUE_CRITIQUE_PORT.md` (axe 3). Méthode des § 11–14 : copie du projet dans le scratchpad,
+sonde `pacing_probe.gd` une graine par processus (4 graines en parallèle, ≈ 75 s par lot de 4 essais), réglages en mémoire
+(`--set` / `--mul`), puis report à l'identique et nouvelle mesure dans le vrai projet (résultat identique au prototype).
+
+### Ce que la sonde mesure en plus
+- Rentabilité : part des relevés **sans achat rentable en moins de 5 min** (> 5 min ou aucun gain) ; `--curve` imprime la rentabilité
+  et le revenu toutes les 30 s (meilleur achat, goulot, argent).
+- Revenu du T2 : rapport en fin de palier (`fin ×`) et variante **lissée** (moyenne de 3 fenêtres d'une minute) : la minute isolée
+  varie de ×2–3 au passage du palier (gros navires ; creux d'une minute en fin de T1 : 376 $/min pour la graine 3 d'avant).
+- Entrée des paliers 2 et 3 : revenu à −1 min et à +1 min (minute glissante), trou d'achat des 10 premières minutes et son objet.
+- Plus long trou de chaque palier **avec son objet** (ce que le bot attendait) ; instant exact des paliers (signal `tier_changed`).
+- Bandeaux (révélations et « premier navire d'une classe ») dans les 6 min **centrées** sur le T2 (mesure de la revue : 7) et au
+  pire sur une fenêtre de 6 min qui contient le T2 ; révélations dans les 60 s qui suivent un palier ; instant de la barre de palier.
+- Part du temps où la carte Goulot est en **alerte** (rouge), par palier et par raison. `--maxh=2` arrête un essai qui s'enlise ;
+  `--bot-save=90` règle l'épargne du bot (essais seulement, défaut 150 s inchangé).
+
+### Les essais (≈ 25 lots de 4 graines, résumés)
+| Essai | Changement | Résultat | Leçon |
+|---|---|---|---|
+| a | **Qualité de service** multiplicative : revenu × (1 + q × Σ niveaux) | q = 0,1 : rentabilité T1 1 min 30 – 2 min, mais T2 ×100–800 à +3 min, fin 54 min – 1 h 04 | le multiplicatif grossit encore (×8 sur le T2) et nourrit l'emballement |
+| b | Prix des niveaux / licences ×k au T2 (et au T3) | le T2 s'effondre (×11–44 à +10 min, T3 à 52 min – 2 h) ou garde l'emballement | le moteur du T2, ce sont des licences et des niveaux bon marché : les renchérir arrête tout |
+| c | Constat : au passage du T2 les licences passent de 1 à 23 en 30 s (révélées après le palier quand le T1 accélère) | stock de licences = saut ×26 de la valeur | **les licences doivent être achetées pendant le T1** |
+| d | **Services facturés** (recette fixe par niveau, au prix d'un EVP) | T1 1 min 18 – 3 min selon le taux, part qui fond aux paliers 2 et 3 | retenu : un geste « hors goulot » rapporte sans gonfler la suite |
+| e | + licences 60 s (au lieu de 180) après la gate, palier 2 tenu par l'argent | T1 2 min 08 – 2 min 20, 0 % > 5 min ; T2 +3 / +10 ×7–11 / ×34–42 | les chapitres arrivent plus tôt ; le palier 2 est tenu par le gravier et le coût |
+| f | Lignes T2 : 5 par armateur au lieu de 3, croissance ×1,6 | T2 4 min 54 – 10 min 08 | la fin du T2 garde un peu de croissance |
+| g | Plafond des licences progressif avec l'EVP du palier | T2 12–19 min | **rejeté** : une licence au plafond n'est plus un achat |
+| h | Nordhaven 200 K$, lignes T2 2,5 M$ | T2 +3 min ×4,0–5,5 (4/4) | l'entrée du T2 venait du démarchage et des premières lignes, pas seulement du palier |
+| i | Épargne du bot 150 → 60/90 s ; bâtiments T3 ×0,6–0,85 | trou de l'entrée du T3 1 min 13 – 2 min 25, inchangé en moyenne | **rejeté** : le trou vient des bâtiments T3 (1,5–3 min de revenu), pas de la règle |
+
+### Réglages retenus
+| Élément | Avant | Après |
+|---|---|---|
+| Services facturés (`config.service_fee`) | — | 0,5 EVP/s par niveau de service au-delà du premier, au prix de base d'un EVP (cargaison × palier × Renom, sans licences), recette « Services facturés » |
+| Licences (`unlocks.licences`) | 180 s après la gate | 60 s après la gate |
+| Plafond des licences au T1 (`licence_max`) | 25 | 30 (T2 60, T3 100 inchangés) |
+| Palier 2 (`tiers` T2) | 4 000 EVP, 4 000 $ | 8 500 EVP, 14 000 $ ; Extension du parc gravier 4 000 → 14 000 $ |
+| Palier 3 (`tiers` T3) | 500 000 EVP | 540 000 EVP |
+| Concession nationale | 7 × 10⁸ $ | 4 × 10⁸ $ (l'argent n'est plus le dernier verrou de la fin) |
+| Lignes (`lines_per_owner`, `line_cost`, `line_cost_growth`) | 0/3/4, T2 1 M$, ×2 | 0/5/6, T2 2,5 M$, ×1,6 |
+| Nordhaven (`owners`) | 60 K$ | 200 K$ |
+| Révélations | écart min 20 s ; barre après Réputation ; stats/aléas 30 s après | 45 s ; **barre de palier à 200 EVP** (≈ 2 min) ; aucune révélation 60 s après un palier (`reveal_tier_hold`) ; stats et aléas 150 s après ; Ambre après Réputation |
+| Carte Goulot | rouge dès qu'une action est possible | rouge seulement en **alerte** (`PortSim.alert_reason` : brouillard, navire à < 30 % de patience, parc ≥ 90 %, camions bloqués), tenue 4 s |
+
+### Mesures finales (vrai projet, graines 1 / 2 / 3 / 4)
+| Mesure | Cible | Avant | Après |
+|---|---|---|---|
+| 1er achat | ≤ 5 s | 1 s | 1 s |
+| T1 → T2 | 12–13 min | 13:15 / 12:46 / 12:38 / 13:03 | 11:43 / 13:07 / 12:23 / 12:18 (moy. 12:23) |
+| Durée du T2 | 28–30 min | 28:36 / 28:21 / 29:43 / 28:03 | 28:10 / 29:22 / 28:35 / 29:22 (moy. 28:52) |
+| Fin du MVP | 1 h 15 – 1 h 30 | 1 h 14 / 1 h 15 / 1 h 20 / 1 h 25 | 1 h 20 / 1 h 34 / 1 h 14 / 1 h 28 (moy. 1 h 24) |
+| Rentabilité médiane T1 | ≤ 3 min | 4:53 / 5:31 / 5:11 / 7:46 | **2:19 / 2:24 / 2:04 / 2:21** |
+| T1 sans achat < 5 min | ≤ 15 % | 56 / 69 / 58 / 70 % | 0 / 26 / 4 / 4 % (moy. 8,5 %) |
+| Rentabilité médiane T2 | ≤ 3 min | 7:14 / 12:35 / 6:27 / 7:56 | 4:51 / 5:13 / 6:39 / 5:51 |
+| T2 sans achat < 5 min | ≤ 15 % | 61 / 65 / 59 / 61 % | 48 / 55 / 65 / 56 % |
+| Revenu T2 +3 / +10 min | ≤ ×6 / ≤ ×80 | ×14 / 17 / 14 / 18 · ×331 / 234 / 291 / 307 | **×4,3 / 5,3 / 5,5 / 4,0 · ×18 / 35 / 23 / 19** (lissé ×7–11 / ×31–60) |
+| Entrée du T3 : +1 min / −1 min | ≥ ×1 | ×11 / 10 / 15 / 9,7 | ×15 / 9,2 / 8,7 / 8,1 |
+| Trou d'achat, 10 premières min du T3 | ≤ 90 s | 1:43 / 0:55 / 1:08 / 1:38 | 1:30 / 1:35 / 1:19 / 1:24 |
+| Trou d'achat, tout le T3 | (≤ 90 s) | 2:19 / 2:23 / 2:35 / 2:27 | 2:29 / 2:38 / 2:57 / 1:59 |
+| Barre de palier | ≤ Douane | 15:37 / 15:35 / 14:57 / 15:57 | **1:43 / 2:08 / 2:00 / 1:42** (Douane 3:10–3:37) |
+| Bandeaux en 6 min autour du T2 | ≤ 4 | 7 / 7 / 7 / 7 | **4 / 2 / 3 / 4** |
+| Révélations < 60 s après un palier | 0 | 2 / 2 / 1 / 2 | 0 |
+| Carte Goulot rouge (T1 / T2 / T3) | rare | dès qu'un achat est possible | 0–4 % / 4–10 % / 4–9 % |
+| 1er / 4e bâtiment T3 | ≥ +1 / ≥ +6 min | +2:38 – 3:52 / +4:22 – 6:07 | +1:41 – 2:18 / +5:04 – 6:59 |
+
+### Pourquoi deux cibles ne sont pas tenues
+- **Rentabilité du T2 ≤ 3 min.** Un joueur qui réinvestit tout ce qu'il gagne voit son revenu croître comme e^(t/P) : la rentabilité
+  médiane P vaut environ 1 / G, G étant la croissance du revenu par minute (vérifié : T1 avec services facturés, G ≈ 0,5/min et
+  P ≈ 1 min 55). Pour P ≤ 3 min sur un T2 de 28 min il faut G ≥ 0,33/min, soit **×10 000 sur le palier** (aujourd'hui ×50–90,
+  avant ×450–550) — incompatible avec « +10 min ≤ ×80 » et avec les prix du T3 (calés sur 10–20 M$/min en fin de T2 : il faudrait
+  tout le T3 ×10). La fin du T2 est en outre plafonnée physiquement (deux postes à quai, temps planchers) : le revenu y plafonne
+  plusieurs minutes et le bot, qui achète tout ce qui est abordable, pousse chaque achat suivant loin (licence au niveau 55 :
+  9–30 min). Compromis retenu : médiane 4 min 51 – 6 min 39 (avant 6 min 27 – 12 min 35), croissance du T2 étalée.
+- **Trou d'achat ≤ 90 s au T3.** Les bâtiments du T3 coûtent 1,5–3 min de revenu (écart ISM « un achat marquant toutes les
+  2–4 min ») et le bot économise pour eux. À l'entrée (10 premières min) : 1 min 19 – 1 min 35 (moyenne 1 min 27, deux graines au-
+  dessus) ; sur tout le T3, 2 – 3 min, comme avant. Prix T3 ×0,6–0,85 ou épargne du bot à 60–90 s : aucun gain stable (±40 s d'une
+  graine à l'autre). Il faudrait des achats intermédiaires au T3 (du contenu), hors de ce lot.
+- **T1 sans achat < 5 min** : tenu en moyenne (8,5 %), graine 2 à 26 % (fin du T1 : licences au plafond, épargne pour le gravier).
+  **Fin du MVP** : moyenne 1 h 24 tenue ; graines 2 (1 h 34) et 3 (1 h 14) hors de la fenêtre mais à ±15 % (durée du T3 : 31–52 min).
+
+### À savoir
+- Les chapitres du T1 arrivent plus tôt (Douane ≈ 3 min 30 au lieu de 4 min 30 – 5 min, gate ≈ 6 min au lieu de 7 min 30 – 8 min 30,
+  Commerce ≈ 7 min au lieu de 12 min) : l'argent des services fait monter les niveaux plus vite ; le palier 2 reste à 12 min 30 grâce
+  au gravier et au coût du palier. La fin du T1 est une épargne d'environ 1–2 min pour l'Extension du parc gravier.
+- Les services facturés comptent dans `income_rate_estimate` (hors-ligne, contrats) et dans `upgrade_gain` : la pastille d'Améliorer
+  et « rentabilisé en … » les montrent sans autre changement d'interface ; la ligne « Services facturés » apparaît dans Gestion › Stats.
+- Sauvegarde : aucun champ nouveau (version inchangée) ; la copie de la vraie partie du joueur se charge et tourne 10 min.

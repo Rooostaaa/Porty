@@ -12,8 +12,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, 'parts'))
 import lib, palette
-import terrain, buildings, equipment, ships, cargo, world, harbour
-for mod in (lib, palette, terrain, buildings, equipment, ships, cargo, world, harbour):
+import terrain, buildings, equipment, ships, cargo, world, harbour, baie
+for mod in (lib, palette, terrain, buildings, equipment, ships, cargo, world, harbour, baie):
     importlib.reload(mod)
 
 BUILDING = 2500
@@ -28,10 +28,10 @@ BUDGET = {
     'stack': TERRAIN,
 }
 VEHICLES = ('truck', 'tractor', 'forklift', 'locomotive', 'wagon', 'tug', 'pilot_boat', 'van', 'reach_stacker', 'straddle',
-            'car_')
+            'car_', 'barge')
 PROPS = ('docker', 'customs_officer', 'inspector', 'manager', 'cone', 'barrel', 'pallet', 'sign', 'bollard', 'fender',
          'ladder', 'cleat', 'buoy', 'net_pile', 'crate_fish', 'gull', 'life_ring_post', 'lamp', 'fence', 'tree', 'bush',
-         'rock', 'barrier', 'swatch')
+         'rock', 'barrier', 'swatch', 'light_', 'zone_sign', 'riprap')
 
 
 def budget(name):
@@ -78,7 +78,7 @@ def main():
             only = set(args[i + 1].split(','))
     os.makedirs(out, exist_ok=True)
     all_assets = {}
-    for mod in (terrain, buildings, equipment, ships, cargo, world, harbour):
+    for mod in (terrain, buildings, equipment, ships, cargo, world, harbour, baie):
         all_assets.update(mod.ASSETS)
     meta_path = os.path.join(out, 'assets_meta.json')
     meta = {}

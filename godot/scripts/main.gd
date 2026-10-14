@@ -1,7 +1,7 @@
 extends Node
 ## Point d'entrée : assemble le diorama 3D et l'interface.
 ## Arguments utiles (après --) : --fresh, --capture=chemin.png --delay=6, --look=x,z, --zoom=40, --open=upgrades|manage|missions|contracts ;
-## en version de débogage seulement (DebugArgs) : --speed=10, --debug-money=1e6, --tier=3, --levels=N, --build-all, --hire-all, --build=…
+## depuis le binaire de l'éditeur seulement (DebugArgs.allowed) : --speed=10, --debug-money=1e6, --tier=3, --levels=N, --build-all, --hire-all, --build=…
 
 var diorama: Diorama
 var hud: Hud
@@ -15,6 +15,12 @@ func _ready() -> void:
 		Save.enabled = false
 		GameState.new_game()
 		GameState.offline_report = {}
+	# capture d'une partie de bot réelle (tests/bot_saves.gd) : charge ce fichier, jamais la vraie sauvegarde (avec --fresh,
+	# la sauvegarde automatique est coupée)
+	if a.has("load-sim") and a.has("fresh") and DebugArgs.allowed():
+		var d: Variant = JSON.parse_string(FileAccess.get_file_as_string(String(a["load-sim"])))
+		if d is Dictionary and (d as Dictionary).has("sim"):
+			GameState.load_from(d.sim)
 	if a.has("tuto-step"):
 		Settings.tuto_step = int(a["tuto-step"])
 	# triches (--debug-money, --tier, --levels…) : seulement en version de débogage
@@ -35,6 +41,8 @@ func _ready() -> void:
 	if a.has("capture"):      # capture automatique : la souris ne doit pas pouvoir déplacer la caméra
 		diorama.rig.input_enabled = false
 		diorama.rig.locked = a.has("look")      # --look fixe le cadrage : les recentrages du jeu sont ignorés
+	if a.has("open-zone") and DebugArgs.allowed():   # capture d'une ouverture de zone (--open-zone=10 après --build=berth3)
+		diorama.opening_queue.append(int(a["open-zone"]))
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	hud = Hud.new()
@@ -56,6 +64,17 @@ func _ready() -> void:
 			"debug":
 				if DebugArgs.allowed():
 					hud.toggle_debug()
+			"settings":
+				hud.open_sheet(SettingsSheet.new())
+			"hint":           # carte Goulot dépliée (captures)
+				hud.hint_text.visible = true
+			"tier":           # cérémonie du palier courant (captures, débogage seulement)
+				if DebugArgs.allowed():
+					hud._on_tier(GameState.sim.tier)
+			"shippaid":       # encaissement d'un navire au poste n°1 (captures, débogage seulement)
+				if DebugArgs.allowed() and diorama.has_signal("ship_paid"):
+					var amount := GameState.sim.avg_value_per_evp() * 400.0
+					diorama.emit_signal("ship_paid", Vector3(Layout.berth_center(0), 8.0, Layout.QUAY_Z), amount)
 	Capture.schedule(self)
 
 

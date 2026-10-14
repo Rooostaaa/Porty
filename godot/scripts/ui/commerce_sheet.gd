@@ -17,6 +17,14 @@ var verdict_l: Label
 func _init(start_tab: int = 0) -> void:
 	super._init("Commerce", ["Trafic", "Armateurs", "Contrats"] as Array[String])
 	tab = start_tab
+	half = true          # feuille mi-hauteur au-dessus du port (lot D-UI) : on voit la rade et la capitainerie
+
+
+func _ready() -> void:
+	super._ready()
+	if Hud.main != null and Hud.main.diorama != null:
+		var d := Hud.main.diorama
+		Hud.main.frame_point(d.call("rade_anchor") if d.has_method("rade_anchor") else Layout.anchor_pos(0))
 
 
 func _signature() -> String:
@@ -68,7 +76,8 @@ func _build_traffic() -> void:
 	v.add_child(verdict_l)
 	# campagnes de démarchage
 	content.add_child(UI.label("Démarchage", 40, UI.VIOLET))
-	content.add_child(UI.wrap_label("Une campagne fait venir plus de navires pendant quelques minutes. Lance-la quand tes quais ont de la marge.", 26))
+	# (la consigne « lance-la quand tes quais ont de la marge » est déjà dans le verdict ci-dessus : pas de phrase en double)
+	help("com_camp", "Une campagne fait venir plus de navires pendant quelques minutes, puis se recharge.")
 	for cdef in Commerce.campaigns(s):
 		_campaign_card(cdef)
 	# équipements qui attirent du trafic
@@ -200,7 +209,7 @@ func _owner_card(o: Dictionary) -> void:
 
 func _recruit(oid: String) -> void:
 	if Commerce.recruit(sim(), oid):
-		Sfx.play("tier")
+		Sfx.play("hire")
 	else:
 		Sfx.play("bad")
 	rebuild()
@@ -276,7 +285,7 @@ func _contract_card(c: Dictionary, active: bool, index: int) -> void:
 		acc.disabled = s.contracts_active.size() >= int(s.db.cfg("contract_active_max"))
 		acc.pressed.connect(_accept.bind(index))
 		h2.add_child(acc)
-		var dec := UI.button("REFUSER", UI.GREY.darkened(0.2), 30, 96)
+		var dec := UI.button("REFUSER", UI.INDIGO_DARK, 30, 96)      # le gris est réservé à l'impossible
 		dec.pressed.connect(_decline.bind(index))
 		h2.add_child(dec)
 
@@ -327,8 +336,8 @@ func refresh() -> void:
 					btn.disabled = true
 				else:
 					var cost := Commerce.campaign_cost(s, id)
-					btn.text = "LANCER\n%s" % Fmt.money(cost)
 					btn.disabled = s.money < cost
+					btn.text = "LANCER\n%s" % Fmt.money(cost) if not btn.disabled else "Il manque\n%s" % Fmt.money(cost - s.money)
 			"owner":
 				var oid := String(r.id)
 				if r.rel != null:
@@ -344,15 +353,18 @@ func refresh() -> void:
 					continue
 				if String(r.state) == "available" and not bool(r.present):
 					var rc := float(s.db.owner_by_id[oid].recruit)
-					b.text = "DÉMARCHER · %s" % Fmt.money(rc)
 					b.disabled = s.money < rc
+					b.text = "DÉMARCHER · %s" % Fmt.money(rc) if not b.disabled else "DÉMARCHER · il manque %s" % Fmt.money(rc - s.money)
 				elif not Commerce.line_available(s, oid):
 					b.text = "LIGNES AU COMPLET"
 					b.disabled = true
 				else:
 					var lc := Commerce.line_cost(s, oid)
-					b.text = "SIGNER UNE LIGNE · %s%s" % [Fmt.money(lc), "  (−50 %)" if s.line_offers.has(oid) else ""]
 					b.disabled = s.money < lc
+					if not b.disabled:
+						b.text = "SIGNER UNE LIGNE · %s%s" % [Fmt.money(lc), "  (−50 %)" if s.line_offers.has(oid) else ""]
+					else:
+						b.text = "SIGNER UNE LIGNE · il manque %s" % Fmt.money(lc - s.money)
 			"contract":
 				var c: Dictionary = r.c
 				(r.bar as RoundBar).value = float(c.progress) / float(c.target)

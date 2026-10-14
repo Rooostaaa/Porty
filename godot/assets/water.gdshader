@@ -1,34 +1,27 @@
 shader_type spatial;
 // Eau stylisée : dégradé selon la distance au rivage (claire près des quais et des plages, profonde au large),
-// vaguelettes, reflets doux. Les terres sont décrites par des rectangles (x0, z0, x1, z1) fournis par le diorama.
-
-const int MAX_LAND = 12;
+// vaguelettes, reflets doux. Les terres (polygones du plan coté : côte, brise-lames, terre-plein) sont rastérisées
+// une fois dans une texture de distance par le diorama (Diorama.distance_texture), recalculée quand le terre-plein apparaît.
 
 uniform vec4 shore : source_color = vec4(0.55, 0.82, 0.93, 1.0);    // bord de plage / pied de quai
 uniform vec4 shallow : source_color = vec4(0.25, 0.64, 0.86, 1.0);  // eau côtière
 uniform vec4 deep : source_color = vec4(0.16, 0.44, 0.72, 1.0);     // large
 uniform vec4 sparkle : source_color = vec4(0.9, 0.97, 1.0, 1.0);
-uniform vec4 land[MAX_LAND];
-uniform int land_count = 0;
+uniform sampler2D dist_tex : filter_linear, repeat_disable;
+uniform vec4 mask_rect = vec4(-200.0, -230.0, 260.0, 230.0);        // x0, z0, x1, z1 du monde couvert par la texture
 uniform float shore_width = 7.0;     // largeur (u) de la bande claire au pied des terres
 uniform float deep_start = 14.0;     // distance (u) à partir de laquelle l'eau fonce
 uniform float deep_full = 70.0;      // distance (u) où elle atteint la teinte du large
 
 varying vec3 wp;
 
-// Distance signée au rectangle de terre le plus proche (positive dans l'eau).
+// Distance au rivage le plus proche (positive dans l'eau) ; hors de la texture : le large.
 float shore_dist(vec2 p) {
-	float d = 1e9;
-	for (int i = 0; i < MAX_LAND; i++) {
-		if (i >= land_count) {
-			break;
-		}
-		vec2 c = (land[i].xy + land[i].zw) * 0.5;
-		vec2 h = (land[i].zw - land[i].xy) * 0.5;
-		vec2 q = abs(p - c) - h;
-		d = min(d, length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0));
+	vec2 uv = (p - mask_rect.xy) / (mask_rect.zw - mask_rect.xy);
+	if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) {
+		return 200.0;
 	}
-	return d;
+	return texture(dist_tex, uv).r;
 }
 
 void vertex() {

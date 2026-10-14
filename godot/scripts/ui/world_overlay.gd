@@ -6,7 +6,7 @@ extends Control
 ## et posée *au-dessus* de ce point ; deux bulles qui se chevauchent sont décalées latéralement (`Bubbles.settle`).
 
 const MOOD_COL := [Color("#38B76A"), Color("#FFB020"), Color("#EB4D4B")]
-const PILL_H := 54.0
+const PILL_H := 58.0        # texte des bulles et pancartes : 30 px sur 1080 (≈ 15 px sur un écran de 540, revue du 13/10)
 const GAP := 6.0            # écart entre le point d'ancrage et le bas de la bulle, et entre deux bulles décalées
 
 var diorama: Diorama
@@ -14,24 +14,41 @@ var popups: Array[Dictionary] = []      # {p: Vector3, text, t, col}
 var _t := 0.0
 var _placed: Array[Rect2] = []          # rectangles déjà dessinés dans l'image courante (anti-chevauchement)
 var last_rects: Dictionary = {}         # clé -> Rect2 de la dernière bulle dessinée (tests)
+var frame_rects: Dictionary = {}        # idem, pour l'image courante seulement (tests : tout ce qui vient d'être dessiné)
+var useful := Rect2()                   # rectangle utile de l'écran (sous le HUD du haut, au-dessus des boutons du bas)
+var zone_info: Dictionary = {}          # bulle d'information d'une zone grise touchée : {p, text, t} (2 s)
+var popups_added := 0                   # gains ajoutés depuis le lancement (tests)
+const ZONE_INFO_TIME := 2.0
 
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# toute la surcouche (bulles, minuteries, gains, pastilles) est découpée au rectangle utile : rien sur le HUD ni hors
+	# de l'écran (revue N4) ; la position et la taille suivent Hud.useful_rect, on dessine en coordonnées écran
+	clip_contents = true
 
 
-func add_popup(p: Vector3, text: String, col: Color = UI.MONEY) -> void:
+## Gain qui s'envole au-dessus d'un point du monde. `big` : encaissement d'un navire, retour d'achat, geste (texte plus gros,
+## plus long à l'écran).
+func add_popup(p: Vector3, text: String, col: Color = UI.MONEY, big: bool = false) -> void:
 	if popups.size() > 14:
 		popups.pop_front()
-	popups.append({"p": p, "text": text, "t": 0.0, "col": col})
+	popups.append({"p": p, "text": text, "t": 0.0, "col": col, "big": big})
+	popups_added += 1
 
 
 func _process(delta: float) -> void:
 	_t += delta
+	if Hud.main != null:
+		useful = Hud.main.useful_rect()
+		position = useful.position
+		size = useful.size
 	for p in popups:
 		p.t += delta
-	popups = popups.filter(func(p: Dictionary) -> bool: return p.t < 1.6)
+	popups = popups.filter(func(p: Dictionary) -> bool: return p.t < (2.4 if bool(p.get("big", false)) else 1.6))
+	if not zone_info.is_empty():
+		zone_info.t = float(zone_info.t) + delta
 	queue_redraw()
 
 
@@ -49,15 +66,19 @@ func _draw() -> void:
 		return
 	var sim := diorama.sim
 	_placed.clear()
+	frame_rects.clear()
 	# rien n'est dessiné sous les cartes du haut (conseil, aléa, bandeau des missions) : un navire caché derrière reste caché
-	var top_y := Hud.main.top_cards_bottom() if Hud.main != null else 0.0
+	if Hud.main == null:
+		useful = Rect2()
+	draw_set_transform(-position)       # coordonnées écran (le contrôle est posé sur le rectangle utile)
+	var top_y := useful.position.y if useful.has_area() else 0.0
 	# navires
 	for s in sim.ships:
 		var v: ShipView = diorama.ship_views.get(s.id)
 		if v == null:
 			continue
 		var sp := _sp(v.bubble_point())
-		if sp.y < top_y:
+		if sp.y < top_y or (useful.has_area() and not useful.grow(10.0).has_point(sp)):
 			continue
 		if s.state == Ship.State.ANCHORED or s.state == Ship.State.ARRIVING:
 			_mood_bubble(sp, s.patience_ratio(), s.mood(), s.priority)
@@ -82,54 +103,103 @@ func _draw() -> void:
 			var cm := "crane_sts" if cv.kind == "sts" else "crane_mobile"
 			_pill_above(_sp(anchor_point(cm, cv.position)), "Coup de main !", UI.AMBER, "boost", UI.TEXT, "assist")
 			break
+	# gestes optionnels du parc et de la gate (accélérateurs à recharge, remplacés par Nadia Benali et Tonio Ferrer)
+	if sim.yard_boost_ready() and not diorama.traffic.vehicles.is_empty():
+		var vn: Node3D = diorama.traffic.vehicles[0].node
+		var vp := _sp(vn.position + Vector3(0, 4.5, 0))
+		if vp.y > top_y + 30.0:
+			_pill_above(vp, "Touche !", UI.AMBER, "yard", UI.TEXT, "yard_gesture")
+	if sim.gate_rush_ready():
+		var bp2 := _sp(Layout.GATE + Vector3(-3.0, 3.0, 2.0))
+		if bp2.y > top_y + 30.0:
+			_pill_above(bp2, "Touche la barrière !", UI.AMBER, "gate", UI.TEXT, "gate_gesture")
 	# file en rade
 	var waiting := sim.waiting_ships()
-	var col := UI.INFO if waiting < sim.rade_places() - 1 else UI.BAD
+	var col := UI.INFO if waiting < sim.rade_places() else UI.BAD      # rouge seulement quand la rade est pleine
 	# l'étiquette suit la rade, mais reste lisible : jamais sous les cartes du haut ni coupée par le bord de l'écran
-	var rp := _sp(Layout.anchor_pos(0) + Vector3(-20, 6, 8))
+	# ancrée au mouillage lui-même (D-Monde : `rade_anchor`, centre des navires en rade), plus sur le phare ou dans les terres
+	var ra: Vector3 = diorama.call("rade_anchor") if diorama.has_method("rade_anchor") else Layout.anchor_pos(0) + Vector3(0, 4, 0)
+	var rp := _sp(ra + Vector3(0, 6, 0))
 	var vw := get_viewport_rect().size.x
-	rp.x = clampf(rp.x, 110.0, vw - 110.0)
-	if Hud.main != null:
-		rp.y = maxf(rp.y, Hud.main.top_cards_bottom() + 36.0)
-	_pill(rp, "%d/%d en rade" % [waiting, sim.rade_places()], col, "ship")
+	if useful.has_area():
+		rp = rp.clamp(useful.position + Vector2(110, 30), useful.end - Vector2(110, 30))
+	_pill(rp, "%d/%d en rade" % [waiting, sim.rade_places()], col, "ship", Color.WHITE, true, "rade")
 	# douane : au-dessus du toit du bureau (anchor_y), jamais sur la table d'inspection
 	var pend := sim.pending_total()
-	if pend >= 1.0 or sim.analysis.get("dept", "") == "customs":
-		var bad: bool = sim.analysis.get("dept", "") == "customs"
+	if sim.feature("dept_customs") and (pend >= 1.0 or sim.shown_analysis().get("dept", "") == "customs"):
+		var bad: bool = sim.shown_analysis().get("dept", "") == "customs"
 		_pill_above(_sp(anchor_point("customs_hut", Layout.CUSTOMS_HUT)), "À inspecter : %s" % Fmt.num(pend), UI.BAD if bad else UI.INFO, "customs", Color.WHITE, "customs")
 	# dézoom fort : parc et gate sont proches à l'écran, on n'affiche que ce qui pose problème
 	var far := diorama.rig != null and diorama.rig.zoom > 110.0
-	var dept: String = sim.analysis.get("dept", "")
+	var dept: String = sim.shown_analysis().get("dept", "")
 	# parc : jauge de remplissage
 	var fill := sim.yard_fill()
-	if not far or dept == "yard_ops" or fill > 0.65:
-		_gauge(_sp(Layout.YARD_CENTER + Vector3(0, 9, 0)), fill)
+	# bulles d'un service seulement une fois son chapitre ouvert (revue du 13/10)
+	var small_yard: bool = sim.shown_analysis().get("key", "") == "yard_space"
+	if sim.feature("dept_yard_ops") and (not far or dept == "yard_ops" or fill > 0.65):
+		_gauge(_sp(Layout.YARD_CENTER + Vector3(0, 9, 0)), fill, small_yard)
 	# gate : au-dessus de la guérite (ou de la barrière avant elle), au-dessus des camions en file
 	var tw := sim.trucks_waiting()
 	var honk := sim.trucks_honking() > 0
-	if not far or honk or dept == "gate":
+	if sim.feature("dept_gate") and (not far or honk or dept == "gate"):
 		var gm := "gate_booth" if sim.built.has("gate2") else "barrier"
-		var gpos := _sp(Layout.GATE + Vector3(0, maxf(Assets.anchor_y(gm), 3.6), 0))
-		gpos.x = clampf(gpos.x, 110.0, vw - 110.0)      # jamais coupée par le bord de l'écran
-		var gr := _pill_above(gpos, "%d camion%s" % [tw, "s" if tw > 1 else ""], UI.BAD if honk else UI.INFO, "horn" if honk else "truck", Color.WHITE, "gate")
+		var gbase: Vector3 = Layout.LOTS.gate2.p if sim.built.has("gate2") else Layout.GATE
+		var gpos := _sp(gbase + Vector3(0, maxf(Assets.anchor_y(gm), 3.6), 0))
+		# ancrée sur la guérite (ou la barrière) : la bulle reste au-dessus d'elle, bornée au rectangle utile (revue N15)
+		var gr := _pill_above(gpos, "File : %d" % tw, UI.BAD if honk else UI.INFO, "horn" if honk else "truck", Color.WHITE, "gate")
 		if honk and fmod(_t, 0.6) < 0.3:
 			_text_c(gr.get_center() + Vector2(70, -46), "Tuut !", 30, UI.BAD)
 	# aire d'attente : places occupées / places disponibles
-	if sim.parking_slots > 0 and (not far or honk or dept == "gate"):
+	if sim.parking_slots > 0 and sim.feature("dept_gate") and (not far or honk or dept == "gate"):
 		var in_lot := clampi(tw - TrafficView.ROAD_SLOTS, 0, sim.parking_slots)
 		var full := in_lot >= sim.parking_slots
-		_pill(_sp(Vector3(-6, 5, 50)), "Aire d'attente %d/%d" % [in_lot, sim.parking_slots], UI.BAD if full else UI.INFO, "truck")
+		_pill(_sp(PARKING_PILL), "Aire d'attente %d/%d" % [in_lot, sim.parking_slots], UI.BAD if full else UI.INFO, "truck")
 	# tablier : alerte dessinée après la jauge du parc, qu'elle chevauche en dézoom
 	var af := sim.apron_stock() / maxf(1.0, sim.apron_capacity())
 	if af > 0.92:
 		_pill(_sp(Vector3(-18, 3, 1)), "Tablier plein", UI.BAD, "yard")
-	# gains qui s'envolent (jamais décalés : ils bougent)
-	for p in popups:
-		var a: float = 1.0 - clampf((float(p.t) - 1.0) / 0.6, 0.0, 1.0)
-		var sp2 := _sp(p.p) + Vector2(0, -float(p.t) * 70.0)
+	# pancarte du prochain achat : sur la pancarte de la zone prochaine, ou au-dessus de l'empreinte dans sa case ;
+	# elle rebondit quand l'achat devient abordable (même signal que la pastille d'achats abordables)
+	_draw_next_sign(sim, top_y)
+	# une icône par zone à venir (sur son emplacement de pancarte) : on reconnaît ce qui viendra sans lire de texte
+	if not diorama.opening_active():
+		for z in Layout.ZONES:
+			if Zones.state(sim, z) != Zones.GRAY:
+				continue
+			var zp := _sp((z.sign as Vector3) + Vector3(0, 1.5, 0))
+			if useful.size.x > 80.0 and useful.size.y > 80.0 and useful.grow(-30.0).has_point(zp):
+				draw_circle(zp + Vector2(0, 3), 30.0, Color(0, 0, 0, 0.12))
+				draw_circle(zp, 30.0, Color(1, 1, 1, 0.88))
+				draw_texture_rect(UI.icon_tex(String(z.get("icon", "info"))), Rect2(zp - Vector2(19, 19), Vector2(38, 38)), false, UI.MUTED)
+				last_rects["zone_icon_%d" % int(z.id)] = Rect2(zp - Vector2(30, 30), Vector2(60, 60))
+				frame_rects["zone_icon_%d" % int(z.id)] = Rect2(zp - Vector2(30, 30), Vector2(60, 60))
+	# bulle d'information d'une zone grise touchée (2 s), au lieu d'une fenêtre
+	if not zone_info.is_empty():
+		if float(zone_info.t) > ZONE_INFO_TIME:
+			zone_info = {}
+		else:
+			_pill_above(_sp(zone_info.p), String(zone_info.text), Color(1, 1, 1, 0.96), "lock", UI.TEXT, "zone_info")
+	# numéros des bouées du mouillage (vue rapprochée seulement)
+	if diorama.rig != null and diorama.rig.zoom < 70.0:
+		for k in sim.rade_places():
+			var bp := _sp(Diorama.anchor_buoy(k) + Vector3(0, 3.6, 0))
+			if bp.y > top_y + 20.0:
+				draw_circle(bp, 15.0, Color(1, 1, 1, 0.9))
+				_text_c(bp + Vector2(0, 9), str(k + 1), 24, UI.TEXT)
+	# gains qui s'envolent : décalés s'ils chevauchent une bulle (« +2,9 $ » ne recouvre plus « File : 0 », revue D-UI)
+	for pi in popups.size():
+		var p: Dictionary = popups[pi]
+		var big := bool(p.get("big", false))
+		var life := 2.4 if big else 1.6
+		var a: float = 1.0 - clampf((float(p.t) - (life - 0.6)) / 0.6, 0.0, 1.0)
+		var sp2 := _sp(p.p) + Vector2(0, -float(p.t) * (55.0 if big else 70.0))
 		var c: Color = p.col
 		c.a = a
-		_pill(sp2, String(p.text), Color(1, 1, 1, 0.85 * a), "", c, false)
+		if big:
+			var sc := 1.0 + 0.25 * (1.0 - clampf(float(p.t) / 0.25, 0.0, 1.0))
+			_pill(sp2, String(p.text), Color(1, 1, 1, 0.94 * a), "", c, true, "pop%d" % pi, int(44.0 * sc))
+		else:
+			_pill(sp2, String(p.text), Color(1, 1, 1, 0.85 * a), "", c, true, "pop%d" % pi)
 
 
 func _mood_bubble(sp: Vector2, ratio: float, mood: int, priority: bool) -> void:
@@ -172,22 +242,26 @@ func _pill_above(anchor: Vector2, t: String, bg: Color, icon_name: String, fg: C
 	return _pill(anchor - Vector2(0, PILL_H * 0.5 + GAP), t, bg, icon_name, fg, true, key)
 
 
-func _pill(center: Vector2, t: String, bg: Color, icon_name: String, fg: Color = Color.WHITE, settle_it: bool = true, key: String = "") -> Rect2:
-	var size := 28
+func _pill(center: Vector2, t: String, bg: Color, icon_name: String, fg: Color = Color.WHITE, settle_it: bool = true, key: String = "", size: int = 30) -> Rect2:
 	var tw := UI.font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
 	var iw := 40.0 if icon_name != "" else 0.0
 	var w := tw + iw + 36.0
-	var h := PILL_H
+	var h := PILL_H * float(size) / 30.0
 	var r := Rect2(center - Vector2(w * 0.5, h * 0.5), Vector2(w, h))
 	if settle_it:
-		r = Bubbles.settle(r, _placed)
+		# bornée au rectangle utile (jamais sur le HUD ni coupée par le bord), puis décalée si elle en chevauche une autre
+		r = Bubbles.bound(r, useful)
+		if not r.has_area():
+			return r
+		r = Bubbles.bound(Bubbles.settle(r, _placed), useful)
 		_placed.append(r)
 	if key != "":
 		last_rects[key] = r
+		frame_rects[key] = r
 	center = r.get_center()
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = bg
-	sb.set_corner_radius_all(27)
+	sb.set_corner_radius_all(int(h * 0.5))
 	sb.shadow_color = Color(0, 0, 0, 0.15 * bg.a)
 	sb.shadow_size = 4
 	sb.shadow_offset = Vector2(0, 3)
@@ -200,10 +274,17 @@ func _pill(center: Vector2, t: String, bg: Color, icon_name: String, fg: Color =
 	return r
 
 
-func _gauge(center: Vector2, fill: float) -> void:
+## Jauge du parc : le **stock** (remplissage). Quand le goulot est « parc trop petit » (capacité théorique, pas le
+## remplissage), la jauge le dit en rouge sous le stock : jamais un goulot rouge à côté d'une jauge verte sans explication.
+func _gauge(center: Vector2, fill: float, small_yard: bool = false) -> void:
 	var w := 200.0
 	var h := 36.0
-	var outer := Bubbles.settle(Rect2(center - Vector2(w * 0.5 + 8, h * 0.5 + 8), Vector2(w + 16, h + 16)), _placed)
+	var outer := Bubbles.bound(Rect2(center - Vector2(w * 0.5 + 8, h * 0.5 + 8), Vector2(w + 16, h + 16)), useful)
+	if not outer.has_area():
+		return
+	outer = Bubbles.bound(Bubbles.settle(outer, _placed), useful)
+	last_rects["yard"] = outer
+	frame_rects["yard"] = outer
 	_placed.append(outer)
 	center = outer.get_center()
 	var col := UI.MONEY if fill < 0.65 else (UI.AMBER if fill < 0.9 else UI.BAD)
@@ -219,4 +300,53 @@ func _gauge(center: Vector2, fill: float) -> void:
 	draw_style_box(fg, Rect2(center - Vector2(w, h) * 0.5, Vector2(w, h)))
 	fg.bg_color = col
 	draw_style_box(fg, Rect2(center - Vector2(w, h) * 0.5, Vector2(maxf(h, w * clampf(fill, 0, 1)), h)))
-	_text_c(center + Vector2(0, 10), "Parc %d %%" % roundi(fill * 100.0), 26, UI.TEXT if fill < 0.45 else Color.WHITE)
+	_text_c(center + Vector2(0, 10), "Stock %d %%" % roundi(fill * 100.0), 26, UI.TEXT if fill < 0.45 else Color.WHITE)
+	if small_yard:
+		var tag := _pill(Vector2(center.x, outer.end.y + PILL_H * 0.5 + GAP), "Trop petit pour ton débit", UI.BAD, "yard", Color.WHITE, true, "yard_small")
+		if tag.has_area():
+			last_rects["yard_small"] = tag
+
+
+## Pastille de l'aire d'attente (centre du parking poids lourds).
+const PARKING_PILL := Vector3(-3, 5, 64)
+
+
+## Pancarte du prochain achat (nom et prix dessinés ici, jamais en texte 3D) ; elle rebondit quand l'achat est abordable.
+## Pendant une ouverture de zone, rien n'est dessiné.
+func _draw_next_sign(sim: PortSim, top_y: float) -> void:
+	if diorama.opening_active():
+		return
+	var bid := Zones.first_unbuilt(sim)
+	if bid == "" or not Layout.LOTS.has(bid):
+		return
+	var wp := diorama.lot_sign_point()
+	if wp == Vector3.INF:
+		return
+	var sp := _sp(wp)
+	var vs := get_viewport_rect().size
+	if sp.y < top_y + 40.0 or sp.y > vs.y - 120.0 or sp.x < 0.0 or sp.x > vs.x:
+		return
+	var b: Dictionary = sim.db.building_by_id[bid]
+	var st := sim.building_state(bid)
+	var cost := float(b.cost)
+	# même achat, même nom partout (revue D-UI) : la pancarte porte le nom du bâtiment, comme Gestion et la carte Goulot
+	var name := String(b.name)
+	var txt := "%s · %s" % [name, Fmt.money(cost)] if st == "available" else "%s · palier T%d" % [name, int(b.tier)]
+	var ok := st == "available" and sim.money >= cost
+	var bounce := -absf(sin(_t * 5.0)) * 12.0 if ok else 0.0
+	_pill_above(sp + Vector2(0, bounce), txt, UI.MONEY if ok else Color(1, 1, 1, 0.95), Info.building_icon(b), Color.WHITE if ok else UI.TEXT, "lot")
+
+
+## Zone grise touchée : une bulle d'information (son nom, ce qui l'ouvre) pendant 2 s, pas une fenêtre.
+func show_zone_info(zone_id: int, wp: Vector3) -> void:
+	var z := Layout.zone_by_id(zone_id)
+	if z.is_empty() or diorama == null or diorama.sim == null:
+		return
+	var sim := diorama.sim
+	var key := String(z.get("key", ""))
+	var cond := ""
+	if key != "" and sim.db.building_by_id.has(key):
+		cond = "avec « %s »" % String(sim.db.building_by_id[key].name)
+	elif String(z.open).begins_with("t"):
+		cond = "au palier T%s" % String(z.open).substr(1)
+	zone_info = {"p": Vector3(wp.x, 2.0, wp.z), "text": "%s : s'ouvre %s" % [String(z.name), cond], "t": 0.0, "id": zone_id}

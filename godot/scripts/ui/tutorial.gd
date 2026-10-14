@@ -29,7 +29,7 @@ func _ready() -> void:
 	steps = raw if raw is Array else []
 	idx = Settings.tuto_step
 	if Settings.tuto_rev < Settings.TUTO_REV and idx > 0:
-		idx = _from_old_index(idx)
+		idx = _from_old_index(idx, Settings.tuto_rev)
 		Settings.set_tuto_step(idx)
 	# une partie déjà avancée (sauvegarde d'avant le tutoriel) n'a pas besoin des premiers pas
 	if idx == 0 and GameState.sim != null and GameState.sim.time > 300.0 and not Capture.args().has("tuto"):
@@ -69,7 +69,7 @@ func _build_card() -> void:
 	var left := UI.vbox(2)
 	_narrator = Narrator.new(132.0)
 	left.add_child(_narrator)
-	var who := UI.label("Capitaine Roche", 20, UI.MUTED)
+	var who := UI.label("Capitaine Roche", 24, UI.MUTED)
 	who.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	left.add_child(who)
 	hrow.add_child(left)
@@ -83,14 +83,37 @@ func _build_card() -> void:
 	var row := UI.hbox(12)
 	row.alignment = BoxContainer.ALIGNMENT_END
 	v.add_child(row)
-	_skip = UI.button("Passer le tutoriel", UI.GREY.darkened(0.2), 24, 64)
+	_skip = UI.button("Passer le tutoriel", UI.INDIGO_DARK, 24, 96)
 	_skip.pressed.connect(skip_all)
 	row.add_child(_skip)
-	_btn = UI.button("", UI.MONEY, 30, 80)
+	_btn = UI.button("", UI.MONEY, 30, 96)
 	_btn.custom_minimum_size.x = 260
 	_btn.pressed.connect(_on_button)
 	row.add_child(_btn)
 
+
+var _card_top := false
+
+
+## Feuille mi-hauteur ouverte (Améliorer, Commerce) : la carte passe en haut de l'écran, au-dessus de la feuille (lot D-UI) ;
+## sinon elle reste en bas, au-dessus des boutons.
+func _place_card() -> void:
+	var top := hud != null and hud.half_sheet_open()
+	if top == _card_top:
+		return
+	_card_top = top
+	if top:
+		_card.anchor_top = 0.0
+		_card.anchor_bottom = 0.0
+		_card.offset_top = 24.0
+		_card.offset_bottom = 24.0
+		_card.grow_vertical = Control.GROW_DIRECTION_END
+	else:
+		_card.anchor_top = 1.0
+		_card.anchor_bottom = 1.0
+		_card.offset_bottom = -222.0
+		_card.offset_top = -222.0
+		_card.grow_vertical = Control.GROW_DIRECTION_BEGIN
 
 ## Colonne centrale de l'interface : la carte de conseil reste dans la colonne.
 func set_side(side: float) -> void:
@@ -144,9 +167,13 @@ func _on_button() -> void:
 func _process(delta: float) -> void:
 	_t += delta
 	_flash = maxf(0.0, _flash - delta)
-	if not active or GameState.sim == null:
+	_place_card()
+	# pendant une ouverture de zone, le tutoriel se tait (le HUD est masqué) et reprend à la fin
+	var opening := hud != null and hud.diorama != null and hud.diorama.opening_active()
+	if not active or GameState.sim == null or opening:
 		_card.visible = false
 		_set_lock(false)
+		queue_redraw()
 		return
 	_check += delta
 	if _check >= 0.25:
@@ -199,7 +226,7 @@ func _refresh_card(force: bool) -> void:
 ## Amène la caméra sur la cible monde de l'étape (le HUD en haut de l'écran cache la rade au cadrage de départ).
 func _focus_camera(st: Dictionary) -> void:
 	var t := String(st.get("target", ""))
-	if hud == null or hud.diorama == null or (t != "ship" and t != "crane" and t != "ship_waiting"):
+	if hud == null or hud.diorama == null or (t != "ship" and t != "crane" and t != "ship_waiting" and not t.begins_with("lot:") and t != "vehicle" and t != "barrier"):
 		return
 	var d := hud.diorama
 	var sim := GameState.sim
@@ -218,6 +245,11 @@ func _focus_camera(st: Dictionary) -> void:
 	elif t == "crane" and not d.crane_views.is_empty():
 		var p := d.crane_views[0].position
 		d.rig.focus(Vector3(p.x - 4.0, 0.0, p.z + 10.0))
+	elif t == "vehicle" or t == "barrier":
+		d.rig.focus(Layout.GATE + Vector3(2, 0, -14) if t == "barrier" else Layout.YARD_CENTER + Vector3(-4, 0, 4))
+	elif t.begins_with("lot:") and Layout.LOTS.has(t.substr(4)):
+		var lp: Vector3 = Layout.LOTS[t.substr(4)].p
+		d.rig.focus(Vector3(lp.x - 4.0, 0.0, lp.z + 6.0))
 
 
 # --- étapes verrouillées : le reste de l'interface est assombri et ne répond plus ------------------
@@ -328,6 +360,18 @@ func _target(st: Dictionary) -> Dictionary:
 		var w := _longest_waiting(sim)
 		if w != null and d.ship_views.has(w.id):
 			return {"pos": d.to_screen((d.ship_views[w.id] as Node3D).position + Vector3(0, 4, 0))}
+	if t == "vehicle" and d != null and not d.traffic.vehicles.is_empty():
+		return {"pos": d.to_screen((d.traffic.vehicles[0].node as Node3D).position + Vector3(0, 2, 0))}
+	if t == "barrier" and d != null:
+		return {"pos": d.to_screen(Layout.GATE + Vector3(-2, 1.5, 1))}
+	if t.begins_with("lot:") and d != null:
+		var bid := t.substr(4)
+		if sim.built.has(bid) or not Layout.LOTS.has(bid):
+			return {}
+		var wp: Vector3 = d.lot_sign_point() if Zones.first_unbuilt(sim) == bid else (Layout.LOTS[bid].p as Vector3)
+		if wp == Vector3.INF:
+			return {}
+		return {"pos": d.to_screen(wp)}
 	if t == "crane" and d != null:
 		for cv in d.crane_views:
 			if sim.assist_ready(cv.berth) or cv.berth == 0:
@@ -382,15 +426,24 @@ func _longest_waiting(sim: PortSim) -> Ship:
 	return best
 
 
-## Progression enregistrée avec l'ancienne liste d'étapes (avant la narratrice) : on retrouve l'étape par son nom.
-## L'ancienne étape « goulot » venait avant le quai : elle reprend au quai.
-const OLD_ORDER := ["welcome", "ship", "crane", "buy", "quay", "quay", "manager", "building", "mission", "commerce", "contracts"]
+## Progression enregistrée avec une ancienne liste d'étapes : on retrouve l'étape par son nom.
+## Version 1 (avant la narratrice) : l'ancienne étape « goulot » venait avant le quai, elle reprend au quai.
+## Version 2 (avant les chapitres) : les étapes « parc » et « gate » n'existaient pas.
+## Version 3 (avant le quai en premier) : « buy » venait avant « quay » ; un joueur arrêté sur « buy » reprend au quai
+## (l'étape se valide d'elle-même si le quai est déjà construit).
+## Version 4 (avant C7) : « manager » venait avant « parc » ; un joueur arrêté sur l'une ou l'autre reprend au parc
+## (Yasmine suit ; son étape se valide seule si elle est déjà embauchée).
+const OLD_ORDER := ["welcome", "ship", "crane", "quay", "quay", "quay", "manager", "building", "mission", "commerce", "contracts"]
+const REV2_ORDER := ["welcome", "ship", "crane", "quay", "quay", "goulot", "goulot_fix", "manager", "building", "mission", "commerce", "contracts"]
+const REV3_ORDER := ["welcome", "ship", "crane", "quay", "quay", "goulot", "goulot_fix", "manager", "parc", "building", "gate", "mission", "commerce", "contracts"]
+const REV4_ORDER := ["welcome", "ship", "crane", "quay", "buy", "goulot", "goulot_fix", "parc", "parc", "building", "gate", "mission", "commerce", "contracts"]
 
 
-func _from_old_index(old: int) -> int:
-	if old >= OLD_ORDER.size():
+func _from_old_index(old: int, rev: int = 1) -> int:
+	var order: Array = REV4_ORDER if rev == 4 else (REV3_ORDER if rev == 3 else (REV2_ORDER if rev == 2 else OLD_ORDER))
+	if old >= order.size():
 		return steps.size()
 	for i in steps.size():
-		if String(steps[i].id) == OLD_ORDER[old]:
+		if String(steps[i].id) == order[old]:
 			return i
 	return old

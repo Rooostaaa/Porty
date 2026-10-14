@@ -4,7 +4,7 @@ extends Node
 signal changed()
 
 const PATH := "user://settings.cfg"
-const TUTO_REV := 2                # liste d'étapes du tutoriel (data/tutorial.json) : 2 = narratrice et goulot après le quai
+const TUTO_REV := 5                # liste d'étapes du tutoriel (data/tutorial.json) : 5 = le parc avant Yasmine (revue C7 B5)
 
 var muted: bool = false
 var show_flows: bool = false

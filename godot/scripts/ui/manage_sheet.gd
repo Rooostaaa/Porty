@@ -44,50 +44,99 @@ func _signature() -> String:
 
 # --- Bâtiments ------------------------------------------------------------------
 
+var built_folded := true               # « 7 construits ▸ » : les bâtiments construits, repliés en bas de la liste
+var built_fold_btn: Button
+
+
+## Bâtiments triés « disponible › bloqué › construit » ; les construits repliés en une ligne « 7 construits ▸ » (revue D-UI :
+## la liste commençait par 7 cartes CONSTRUIT).
 func _build_buildings() -> void:
 	var s := sim()
-	content.add_child(UI.wrap_label("Chaque construction agrandit le port. Elles se débloquent l'une après l'autre.", 28))
+	help("man_build", "Chaque construction agrandit le port. Elles se débloquent l'une après l'autre.")
+	var avail: Array = []
+	var later: Array = []
+	var built_l: Array = []
 	for b in s.db.buildings:
-		var c := UI.card()
-		content.add_child(c)
-		var row := UI.hbox(20)
-		c.add_child(row)
 		var st := s.building_state(b.id)
-		row.add_child(UI.icon_disc(String(b.icon), UI.MONEY if st == "built" else (UI.VIOLET if st == "available" else UI.GREY), 100))
-		var mid := UI.vbox(4)
-		mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(mid)
-		var nl := UI.label(String(b.name), 36, UI.BAD if st == "locked" or st == "tier" else UI.VIOLET)
-		nl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		nl.custom_minimum_size.x = 300
-		mid.add_child(nl)
-		var why := String(b.desc)
-		if st == "locked":
-			why = "Construis d'abord le précédent."
-		elif st == "tier":
-			why = "Palier T%d requis." % int(b.tier)
-		mid.add_child(UI.wrap_label(why, 26))
-		var btn := UI.button("", UI.MONEY, 30, 110)
-		btn.custom_minimum_size.x = 220
-		btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		row.add_child(btn)
-		if st == "built":
-			btn.text = "CONSTRUIT"
-			btn.disabled = true
+		if st == "available":
+			avail.append(b)
+		elif st == "built":
+			built_l.append(b)
 		else:
-			btn.text = "CONSTRUIRE\n" + Fmt.money(float(b.cost))
-			btn.disabled = st != "available" or s.money < float(b.cost)
-			btn.pressed.connect(_build.bind(String(b.id)))
-		rows.append({"id": b.id, "btn": btn, "cost": float(b.cost), "state": st})
+			later.append(b)
+	for b in avail + later:
+		_building_card(b)
+	built_fold_btn = null
+	if not built_l.is_empty():
+		var fold := UI.button("%d construit%s  %s" % [built_l.size(), "s" if built_l.size() > 1 else "", "▸" if built_folded else "▾"], UI.INDIGO_DARK, 30, 96)
+		fold.pressed.connect(func() -> void:
+			built_folded = not built_folded
+			Sfx.play("click")
+			rebuild())
+		content.add_child(fold)
+		built_fold_btn = fold
+		if not built_folded:
+			for b in built_l:
+				_building_card(b)
+
+
+func _building_card(b: Dictionary) -> void:
+	var s := sim()
+	var c := UI.card()
+	content.add_child(c)
+	var row := UI.hbox(20)
+	c.add_child(row)
+	var st := s.building_state(b.id)
+	row.add_child(UI.icon_disc(Info.building_icon(b), UI.MONEY if st == "built" else (UI.VIOLET if st == "available" else UI.GREY), 100))
+	var mid := UI.vbox(4)
+	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(mid)
+	# charte : gris = impossible (bloqué), violet = à faire ; le rouge reste aux problèmes
+	var nl := UI.label(String(b.name), 36, UI.MUTED if st == "locked" or st == "tier" else UI.VIOLET)
+	nl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	nl.custom_minimum_size.x = 300
+	mid.add_child(nl)
+	var why := String(b.desc)
+	if st == "locked":
+		why = "Construis d'abord le précédent."
+	elif st == "tier":
+		why = "Palier T%d requis." % int(b.tier)
+	mid.add_child(UI.wrap_label(why, 26))
+	var btn := UI.button("", UI.MONEY, 28, 110)
+	btn.custom_minimum_size.x = 220
+	btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(btn)
+	if st == "built":
+		btn.text = "CONSTRUIT ✓"
+		btn.disabled = true
+		UI.style_done(btn)
+	else:
+		btn.pressed.connect(_build.bind(String(b.id)))
+	rows.append({"id": b.id, "btn": btn, "cost": float(b.cost), "state": st})
+	_building_btn(rows.back(), s)
+
+
+## Bouton d'un bâtiment : CONSTRUIRE et son prix, « Il manque … » quand il est gris faute d'argent.
+func _building_btn(r: Dictionary, s: PortSim) -> void:
+	var btn: Button = r.btn
+	var st := String(r.state)
+	if st == "built":
+		return
+	var cost := float(r.cost)
+	btn.disabled = st != "available" or s.money < cost
+	if st == "available" and s.money < cost:
+		btn.text = "Il manque\n" + Fmt.money(cost - s.money)
+	else:
+		btn.text = "CONSTRUIRE\n" + Fmt.money(cost)
 
 
 func _build(bid: String) -> void:
 	var btn: Button = null
 	for r in rows:
-		if r.id == bid:
+		if r.get("id", "") == bid:
 			btn = r.btn
 	if sim().build(bid):
-		Sfx.play("tier")
+		Sfx.play("build")
 		Hud.main.world_shake()
 		if btn != null:
 			Fx.reward(btn, "Construit !", UI.MONEY, true)
@@ -170,7 +219,8 @@ func _build_stats() -> void:
 	content.add_child(c3)
 	var v3 := UI.vbox(10)
 	c3.add_child(v3)
-	v3.add_child(UI.label("Revenus de la dernière minute", 40, UI.VIOLET))
+	v3.add_child(UI.label("Revenus par source", 40, UI.VIOLET))
+	v3.add_child(UI.wrap_label("Moyenne de la dernière minute.", 26))
 	var src := UI.label("", 28, UI.TEXT)
 	v3.add_child(src)
 	stat_bars["sources"] = {"label": src}
@@ -246,11 +296,11 @@ func _refresh_stats() -> void:
 		_tags_at = s.time
 		_refresh_tags(s)
 	if stat_bars.has("sources"):
-		var names := {"handling": "Manutention", "dues": "Droits de port", "gate": "Gate", "inspection": "Inspections", "reefer": "Prises frigo", "contract": "Contrats", "auction": "Enchères", "salaries": "Salaires"}
+		var names := {"handling": "Manutention", "dues": "Droits de port", "gate": "Gate", "inspection": "Inspections", "reefer": "Prises frigo", "fees": "Services facturés", "contract": "Contrats", "auction": "Enchères", "salaries": "Salaires"}
 		var txt := ""
 		for k in names:
 			if s.last_income.has(k):
-				txt += "%s : %s\n" % [names[k], Fmt.money(float(s.last_income[k]))]
+				txt += "%s : %s/s\n" % [names[k], Fmt.money(float(s.last_income[k]) / 60.0)]      # une seule unité de revenu : $/s
 		(stat_bars.sources.label as Label).text = txt if txt != "" else "—"
 
 
@@ -258,11 +308,13 @@ func _refresh_stats() -> void:
 
 func _build_managers() -> void:
 	var s := sim()
-	content.add_child(UI.wrap_label("Un responsable automatise son département (×2) et fait tourner le port hors-ligne.", 28))
+	help("man_mgr", "Un responsable automatise son département (×2) et fait tourner le port hors-ligne.")
 	var locked := not s.feature("managers")
 	if locked:
 		content.add_child(UI.wrap_label("Les responsables se présenteront " + s.unlock_text("managers") + ".", 30, UI.BAD))
 	for d in PortSim.DEPTS:
+		if not s.feature("dept_" + d):
+			continue        # un responsable ne se présente qu'avec son service (chapitres)
 		var m: Dictionary = s.db.dept_by_id[d].manager
 		var c := UI.card()
 		content.add_child(c)
@@ -291,8 +343,9 @@ func _build_managers() -> void:
 		var col := UI.vbox(8)
 		row.add_child(col)
 		if s.managers[d]:
-			var ok := UI.button("EMBAUCHÉ", UI.MONEY, 30, 100)
+			var ok := UI.button("EMBAUCHÉ ✓", UI.MONEY, 30, 100)
 			ok.disabled = true
+			UI.style_done(ok)
 			ok.custom_minimum_size.x = 220
 			col.add_child(ok)
 		else:
@@ -301,15 +354,20 @@ func _build_managers() -> void:
 			b.disabled = not s.manager_available(d) or s.money < float(m.cost)
 			if not s.manager_available(d):
 				b.text = "Palier T%d" % int(m.tier)
+			elif not s.manager_revealed(d) and not locked:
+				b.text = "Niveau %d
+requis" % int(s.db.cfg("manager_reveal_level", 10))
+				b.disabled = true
 			if locked:
 				b.text = "Verrouillé"
 				b.disabled = true
 			b.pressed.connect(_hire.bind(d, false))
 			col.add_child(b)
-			var ba := UI.button("%d Ambre" % int(m.amber), UI.AMBER, 26, 80)
+			var ba := UI.button("%d Ambre" % int(m.amber), UI.AMBER, 26, 96)
+			ba.add_theme_color_override("font_color", UI.TEXT)
 			ba.custom_minimum_size.x = 220
 			ba.disabled = s.amber < int(m.amber)
-			ba.disabled = ba.disabled or locked
+			ba.disabled = ba.disabled or locked or not s.manager_revealed(d)
 			ba.pressed.connect(_hire.bind(d, true))
 			col.add_child(ba)
 			rows.append({"dept": d, "btn": b, "abtn": ba, "cost": float(m.cost), "amber": int(m.amber)})
@@ -321,7 +379,7 @@ func _hire(d: String, amber: bool) -> void:
 		if r.get("dept", "") == d:
 			btn = r.abtn if amber else r.btn
 	if sim().hire_manager(d, amber):
-		Sfx.play("tier")
+		Sfx.play("hire")
 		if btn != null:
 			Fx.reward(btn, "Embauché !", UI.MONEY, true)
 	else:
@@ -452,8 +510,11 @@ func _check_text(chk: Dictionary) -> String:
 
 
 func _tier_up() -> void:
+	# la cérémonie du palier (gerbe, caméra, jingle, puis la fenêtre) part du signal tier_changed (Hud._on_tier)
 	if sim().tier_up():
-		Sfx.play("tier")
+		close()
+		return
+	Sfx.play("bad")
 	rebuild()
 
 
@@ -470,14 +531,17 @@ func _prestige() -> void:
 		return
 	if GameState.prestige():
 		var ns := GameState.sim
-		Sfx.play("tier")
 		close()
 		Hud.main.world_shake()
-		Hud.main.show_popup("Concession n°%d ouverte !" % (ns.prestiges + 1), [
+		# cérémonie (gerbe plein écran, jingle du prestige), puis la fenêtre (lot D-UI)
+		var title := "Concession n°%d ouverte !" % (ns.prestiges + 1)
+		var body: Array = [
 			UI.label("Renom ✦ %d" % ns.renown, 52, UI.AMBER, true),
 			UI.wrap_label("Revenus ×%s, débit ×%s, escales plus courtes. +%d Ambre. Le port repart de zéro : fais mieux, plus vite." % [
 				("%.2f" % ns.renown_mult()).replace(".", ","), ("%.2f" % ns.renown_throughput_mult()).replace(".", ","),
-				int(ns.db.cfg("renown").amber)], 30, UI.TEXT)], "trophy")
+				int(ns.db.cfg("renown").amber)], 30, UI.TEXT)]
+		Hud.main.ceremony(title, "Renom ✦ %d" % ns.renown, UI.AMBER, "prestige", CameraRig.START, func() -> void:
+			Hud.main.show_popup(title, body, "trophy"))
 
 
 func _set_policy(i: int) -> void:
@@ -537,15 +601,18 @@ func refresh() -> void:
 	match tab:
 		0:
 			for r in rows:
-				if r.state == "available":
-					(r.btn as Button).disabled = s.money < float(r.cost)
+				if r.has("state"):
+					_building_btn(r, s)
 		1:
 			_refresh_stats()
 		2:
 			for r in rows:
 				if r.has("dept"):
 					var off := not s.feature("managers")
-					(r.btn as Button).disabled = off or not s.manager_available(r.dept) or s.money < float(r.cost)
+					var b: Button = r.btn
+					b.disabled = off or not s.manager_available(r.dept) or s.money < float(r.cost)
+					if not off and s.manager_available(r.dept) and s.manager_revealed(r.dept):
+						b.text = "EMBAUCHER\n" + Fmt.money(float(r.cost)) if not b.disabled else "Il manque\n" + Fmt.money(float(r.cost) - s.money)
 					(r.abtn as Button).disabled = off or s.amber < int(r.amber)
 		3:
 			_refresh_port()

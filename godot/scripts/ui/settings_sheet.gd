@@ -5,6 +5,7 @@ extends Sheet
 var sound_btn: Button
 var _confirm := false
 var reset_btn: Button
+var sliders: Dictionary = {}      # bus audio -> réglette de volume
 
 
 func _init() -> void:
@@ -23,6 +24,33 @@ func build() -> void:
 		Sfx.play("click")
 		refresh())
 	v.add_child(sound_btn)
+	# deux réglages : les sons de l'interface et l'ambiance du port (mer, mouettes, cornes, grues, camions)
+	sliders.clear()
+	for bus in [["Sons", "Sons"], ["Ambiance", "Ambiance du port"]]:
+		var h := UI.hbox(14)
+		var l := UI.label(String(bus[1]), 30, UI.TEXT)
+		l.custom_minimum_size.x = 300
+		h.add_child(l)
+		var sl := HSlider.new()
+		sl.min_value = 0.0
+		sl.max_value = 100.0
+		sl.step = 5.0
+		sl.value = Sfx.get_volume(String(bus[0])) * 100.0
+		sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sl.custom_minimum_size.y = 96
+		sl.add_theme_icon_override("grabber", UI.circle_tex(56, UI.VIOLET))
+		sl.add_theme_icon_override("grabber_highlight", UI.circle_tex(60, UI.VIOLET.lightened(0.1)))
+		sl.add_theme_stylebox_override("slider", UI.flat(UI.GREY, 12, 0, 12))
+		sl.add_theme_stylebox_override("grabber_area", UI.flat(UI.VIOLET, 12, 0, 12))
+		sl.add_theme_stylebox_override("grabber_area_highlight", UI.flat(UI.VIOLET, 12, 0, 12))
+		var bn := String(bus[0])
+		sl.value_changed.connect(func(x: float) -> void:
+			Sfx.set_volume(bn, x / 100.0)
+			if bn == "Sons":
+				Sfx.play("click", 0.15))
+		h.add_child(sl)
+		v.add_child(h)
+		sliders[bn] = sl
 	var c2 := UI.card()
 	content.add_child(c2)
 	var v2 := UI.vbox(16)

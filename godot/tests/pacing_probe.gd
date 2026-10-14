@@ -76,7 +76,7 @@ func _best_payback(sim: PortSim) -> Array:
 
 func _patch(db: DataDB, path: PackedStringArray, value: Variant, mul: bool = false) -> void:
 	var roots := {"config": db.config, "cargo": db.cargo, "tiers": db.tiers, "buildings": db.buildings, "departments": db.departments,
-		"owners": db.owners, "ships": db.ships, "missions": db.missions}
+		"owners": db.owners, "ships": db.ships, "missions": db.missions, "unlocks": db.unlocks}
 	var nodes: Array = [roots[path[0]]]
 	for i in range(1, path.size() - 1):
 		var nxt: Array = []
@@ -121,6 +121,11 @@ func _init() -> void:
 	var seeds := [1, 2, 3]
 	var verbose := false
 	var brief := false
+	var curve := OS.get_cmdline_user_args().has("--curve")   # revenu toutes les 30 s (moyenne sur 60 s), goulot, argent
+	var max_t := 3.0 * 3600.0                                 # --maxh=2 : arrêt après 2 h de jeu (essais)
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--maxh="):
+			max_t = float(a.substr(7)) * 3600.0
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--seeds="):
 			seeds = []
@@ -144,14 +149,20 @@ func _init() -> void:
 	for sd in seeds:
 		var sim := PortSim.new(db, sd)
 		var bot := Bot.new(sim)
+		for a in OS.get_cmdline_user_args():
+			if a.begins_with("--bot-save="):
+				bot.save_horizon = float(a.substr(11))
 		var keys := {}               # goulot -> secondes, par palier
 		var excess := {}             # palier -> secondes où demande > 1,5 × capacité
+		var alert_t := {}            # palier -> secondes où la carte Goulot est en alerte (rouge)
+		var alert_why_t := {}        # « T2:rade » -> nombre de relevés
 		var tier_time := {}
 		var last_ta := 0.0
 		var rows: Array = []
 		var samples: Array = []      # [t, palier, revenu/min] toutes les 10 s
 		var paybacks := {}           # palier -> [s]
 		var pb_what := {}            # palier -> {quoi: n}
+		var pb_log: Array = []       # [t, rentabilité, quoi] (--curve)
 		var next_pb := 0.0
 		var tier_start := {1: 0.0}
 		var cond_ok := {}
@@ -162,23 +173,56 @@ func _init() -> void:
 			if source != "contract" and source != "auction":
 				op[0] += amount)
 		var op_hist: Array = []      # revenu d'exploitation par tranche de 10 s
-		while sim.time < 3.0 * 3600.0 and not sim.finished:
+		var dry := [0.0, 0.0]        # T1 : début de la période sans rien d'abordable, plus longue période
+		var pre_chapter := {"yard_ops": 0.0, "gate": 0.0}   # secondes où le parc / la gate sont le goulot avant leur chapitre
+		var reveal := {}             # fonction révélée -> instant
+		sim.feature_unlocked.connect(func(id: String) -> void: reveal[id] = sim.time)
+		var tier_at := {}            # palier -> instant exact du passage
+		sim.tier_changed.connect(func(t: int) -> void: tier_at[t] = sim.time)
+		var banners: Array = []      # instants des bandeaux (révélations et « premier navire d'une classe »)
+		var banner_ids: Array = []
+		sim.feature_unlocked.connect(func(id: String) -> void:
+			banners.append(sim.time)
+			banner_ids.append(id))
+		sim.ship_class_first.connect(func(s: Ship) -> void:
+			banners.append(sim.time)
+			banner_ids.append("navire " + String(s.cls)))
+		while sim.time < max_t and not sim.finished:
 			bot.run(10.0)
 			var caps: Dictionary = sim.analysis.caps
 			var dem := float(caps.traffic)
 			var cap := _service_cap(caps)
 			var tk := "T%d" % sim.tier
 			if sim.tier != last_tier:
-				tier_start[sim.tier] = sim.time
+				tier_start[sim.tier] = float(tier_at.get(sim.tier, sim.time))
 				lic_at["T%d" % sim.tier] = sim.licences[0]
+				lic_at["niv T%d" % sim.tier] = PortSim.DEPTS.map(func(d): return int(sim.levels[d]))
 				last_tier = sim.tier
 			for c in sim.tier_check():
 				var ck := "T%d %s" % [sim.tier + 1, c.label]
 				if c.ok and not cond_ok.has(ck):
 					cond_ok[ck] = sim.time
+			if sim.tier == 1:
+				var aff := false
+				for d2 in PortSim.DEPTS:
+					if sim.feature("dept_" + d2) and sim.dept_cost(d2, 1) <= sim.money:
+						aff = true
+				for b2 in sim.db.buildings:
+					if sim.building_state(b2.id) == "available" and float(b2.cost) <= sim.money:
+						aff = true
+				if aff:
+					dry[0] = sim.time
+				dry[1] = maxf(float(dry[1]), sim.time - float(dry[0]))
+			for dd in pre_chapter:
+				if String(sim.analysis.get("dept", "")) == dd and not sim.feature("dept_" + dd):
+					pre_chapter[dd] = float(pre_chapter[dd]) + 10.0
 			var kk := tk + ":" + String(sim.analysis.key)
 			keys[kk] = float(keys.get(kk, 0.0)) + 10.0
 			tier_time[tk] = float(tier_time.get(tk, 0.0)) + 10.0
+			if String(sim.shown_analysis().get("alert", "")) != "":
+				alert_t[tk] = float(alert_t.get(tk, 0.0)) + 10.0
+				var akey := tk + ":" + String(sim.shown_analysis().alert)
+				alert_why_t[akey] = int(alert_why_t.get(akey, 0)) + 1
 			if dem > 1.5 * cap:
 				excess[tk] = float(excess.get(tk, 0.0)) + 10.0
 			op_hist.append(op[0])
@@ -186,7 +230,7 @@ func _init() -> void:
 			var op_min := 0.0
 			for j in range(maxi(0, op_hist.size() - 6), op_hist.size()):
 				op_min += float(op_hist[j])
-			samples.append([sim.time, sim.tier, op_min * 6.0 / float(mini(6, op_hist.size()))])
+			samples.append([sim.time, sim.tier, op_min * 6.0 / float(mini(6, op_hist.size())), String(sim.analysis.key), sim.money])
 			if sim.time >= next_pb and not sim.finished:
 				next_pb += PAYBACK_EVERY
 				var bp := _best_payback(sim)
@@ -194,12 +238,14 @@ func _init() -> void:
 					paybacks[tk] = []
 					pb_what[tk] = {}
 				paybacks[tk].append(bp[0])
+				pb_log.append([sim.time, bp[0], bp[1]])
 				pb_what[tk][bp[1]] = int(pb_what[tk].get(bp[1], 0)) + 1
 			if int(sim.time) % 60 < 10:
 				var ta := sim.counter("turned_away")
 				rows.append([sim.time, sim.tier, sim.money, sim.income_per_min(), dem * 60.0, cap * 60.0, ta - last_ta, String(sim.analysis.key), sim.levels.harbor, sim.licences[0]])
 				last_ta = ta
 		lic_at["fin"] = sim.licences[0]
+		lic_at["niv fin"] = PortSim.DEPTS.map(func(d): return int(sim.levels[d]))
 		if verbose:
 			print("\n=== graine %d ===" % sd)
 			print("   temps  T  argent      rev/min     demande/min  capacité/min  déroutés  goulot  capit. lic")
@@ -207,8 +253,15 @@ func _init() -> void:
 				print("%8s  %d  %10s  %10s  %12s  %12s  %5d  %-12s %d %d" % [Fmt.duration(r[0]), r[1], Fmt.money(r[2]), Fmt.money(r[3]), Fmt.num(r[4]), Fmt.num(r[5]), int(r[6]), r[7], r[8], r[9]])
 			for l in bot.log_lines:
 				print(l)
+		if curve:
+			for q in pb_log:
+				print("renta g%d %s %s %s" % [sd, Fmt.duration(float(q[0])), _dur(float(q[1])), String(q[2])])
+			for i in range(0, samples.size(), 3):
+				var s0: Array = samples[i]
+				print("courbe g%d %s T%d %s/min %s %s" % [sd, Fmt.duration(float(s0[0])), int(s0[1]), Fmt.money(float(s0[2])), String(s0[3]), Fmt.money(float(s0[4]))])
 		# trous d'achat par palier
 		var gaps := {}
+		var gap_at := {}             # palier -> « début→fin achat » du plus long trou
 		var last := 0.0
 		for p in bot.purchases:
 			var t: float = p.t
@@ -217,7 +270,9 @@ func _init() -> void:
 				if t >= float(tier_start[k]):
 					tr = maxi(tr, int(k))
 			var key := "T%d" % tr
-			gaps[key] = maxf(float(gaps.get(key, 0.0)), t - last)
+			if t - last > float(gaps.get(key, 0.0)):
+				gaps[key] = t - last
+				gap_at[key] = "%s→%s %s" % [Fmt.duration(last), Fmt.duration(t), String(p.kind) + ":" + String(p.id)]
 			last = t
 		# croissance du revenu minute par minute (hors 2 premières minutes d'un palier) et pire baisse depuis le pic,
 		# sur une moyenne glissante de 3 min (un Panamax ou un brouillard fait varier la minute isolée de ×3)
@@ -258,7 +313,63 @@ func _init() -> void:
 			var parts: Array[String] = []
 			for dtm in [3, 6, 10]:
 				parts.append("×%s" % Fmt.num(float(inc_at.call(t0 + 60.0 * dtm)) / maxf(1.0, r0)))
-			ratios[trg] = "%s → %s" % [Fmt.money(r0), " / ".join(parts)]
+			# fin du palier : moyenne des 3 dernières minutes avant le palier suivant (ou la fin)
+			var t_end: float = float(tier_start.get(trg + 1, samples[-1][0]))
+			var r_end := (float(inc_at.call(t_end - 60.0)) + float(inc_at.call(t_end - 120.0)) + float(inc_at.call(t_end - 180.0))) / 3.0
+			# variante lissée (moyenne de 3 fenêtres d'une minute) : la minute isolée varie de ×2–3 avec les gros navires
+			var avg_at := func(t: float) -> float:
+				return (float(inc_at.call(t - 60.0)) + float(inc_at.call(t)) + float(inc_at.call(t + 60.0))) / 3.0
+			var r0s: float = (float(inc_at.call(t0 + 10.0)) + float(inc_at.call(t0 - 50.0)) + float(inc_at.call(t0 - 110.0))) / 3.0
+			ratios[trg] = "%s → %s · fin ×%s (lissé ×%s / ×%s)" % [Fmt.money(r0), " / ".join(parts), Fmt.num(r_end / maxf(1.0, r0)),
+				Fmt.num(float(avg_at.call(t0 + 180.0)) / maxf(1.0, r0s)), Fmt.num(float(avg_at.call(t0 + 600.0)) / maxf(1.0, r0s))]
+		# entrée des paliers 2 et 3 : revenu d'exploitation sur la minute glissante à −1 min et à +1 min du palier ; trou
+		# d'achat des 10 premières minutes du palier
+		var entries := {}
+		for trg3 in [2, 3]:
+			if not tier_start.has(trg3):
+				continue
+			var t3: float = tier_start[trg3]
+			var r_m1: float = inc_at.call(t3 - 60.0)
+			var r_p1: float = inc_at.call(t3 + 60.0)
+			var r_p2: float = inc_at.call(t3 + 120.0)
+			var lastp := t3
+			var gap3 := 0.0
+			var gap3_at := ""
+			for p in bot.purchases:
+				if p.t < t3 or p.t > t3 + 600.0:
+					continue
+				if p.t - lastp > gap3:
+					gap3 = p.t - lastp
+					gap3_at = "%s→%s %s:%s" % [Fmt.duration(lastp), Fmt.duration(p.t), String(p.kind), String(p.id)]
+				lastp = p.t
+			entries[trg3] = "−1 min %s · +1 min %s (×%.2f) · +2 min %s · trou 10 min %s (%s)" % [Fmt.money(r_m1), Fmt.money(r_p1), r_p1 / maxf(1.0, r_m1), Fmt.money(r_p2), _dur(gap3), gap3_at]
+		# bandeaux : le plus grand nombre dans une fenêtre de 6 min qui contient le passage au T2
+		var b6 := 0
+		var b6_list := ""
+		var b6c := 0                 # fenêtre centrée [T2 − 3 min, T2 + 3 min] (mesure de la revue)
+		if tier_start.has(2):
+			var t2: float = tier_start[2]
+			for w0 in range(int(t2) - 360, int(t2) + 1, 5):
+				var nb := 0
+				var lst := ""
+				for bi in banners.size():
+					var bt: float = banners[bi]
+					if bt >= float(w0) and bt < float(w0) + 360.0:
+						nb += 1
+						lst += "%s %s, " % [banner_ids[bi], Fmt.duration(bt)]
+				if w0 == int(t2) - 180:
+					b6c = nb
+				if nb > b6:
+					b6 = nb
+					b6_list = lst
+		var after_tier := ""
+		for trg2 in tier_start:
+			if int(trg2) == 1:
+				continue
+			for rid in reveal:
+				var dtr := float(reveal[rid]) - float(tier_start[trg2])
+				if dtr >= 0.0 and dtr < 60.0:
+					after_tier += "%s T%d+%ds " % [rid, int(trg2), int(dtr)]
 		# bâtiments T3 : 1er et 4e
 		var t3b: Array = []
 		for p in bot.purchases:
@@ -272,8 +383,9 @@ func _init() -> void:
 			var n_inf: int = paybacks[tk].size() - fin.size()
 			var over: int = fin.filter(func(v): return v > 300.0).size()
 			var under: int = fin.filter(func(v): return v < 20.0).size()
-			pbs += "%s méd %s max %s (<20 s %d%%, >5 min %d%%, aucun %d%%) · " % [tk, _dur(_median(fin)), _dur(fin.max() if not fin.is_empty() else INF),
-				roundi(100.0 * under / paybacks[tk].size()), roundi(100.0 * over / paybacks[tk].size()), roundi(100.0 * n_inf / paybacks[tk].size())]
+			pbs += "%s méd %s max %s (<20 s %d%%, >5 min %d%%, aucun %d%% ; sans achat < 5 min %d%%) · " % [tk, _dur(_median(fin)), _dur(fin.max() if not fin.is_empty() else INF),
+				roundi(100.0 * under / paybacks[tk].size()), roundi(100.0 * over / paybacks[tk].size()), roundi(100.0 * n_inf / paybacks[tk].size()),
+				roundi(100.0 * (over + n_inf) / paybacks[tk].size())]
 		var ms := bot.milestones
 		table.append("g%d | T2 %s | T3 %s | fin %s | rev 1/5/10 min %s/%s/%s, %d achats<5 min | T2 %s | T3 %s | ×/min max T2 %s T3 %s | pire baisse T3 %d%% | trou T1/T2/T3 %s/%s/%s | bât. T3 1er %s 4e %s | lic %s" % [
 			sd, _dur(ms.get("Palier T2 atteint", INF)), _dur(ms.get("Palier T3 atteint", INF)), _dur(ms.get("FIN DU MVP (concession nationale)", INF)),
@@ -282,6 +394,31 @@ func _init() -> void:
 			Fmt.num(float(max_ratio.get("T2", 0.0))), Fmt.num(float(max_ratio.get("T3", 0.0))), roundi(100.0 * (1.0 - float(worst_drop.get("T3", 1.0)))),
 			_dur(float(gaps.get("T1", 0.0))), _dur(float(gaps.get("T2", 0.0))), _dur(float(gaps.get("T3", 0.0))),
 			_dur(t3b[0] if t3b.size() > 0 else INF), _dur(t3b[3] if t3b.size() > 3 else INF), str(lic_at)])
+		var first_buy := INF
+		if not bot.purchases.is_empty():
+			first_buy = float(bot.purchases[0].t)
+		table.append("     T1 : plus longue attente sans aucun achat abordable %s (mesure à la seconde : %s)" % [_dur(float(dry[1])), _dur(bot.dry_t1)])
+		table.append("     1er achat %s · goulot parc / gate avant leur chapitre %d s / %d s · chapitres : parc %s, gate %s, navires %s, licences %s" % [
+			_dur(first_buy), int(pre_chapter.yard_ops), int(pre_chapter.gate), _dur(float(reveal.get("dept_yard_ops", INF))),
+			_dur(float(reveal.get("dept_gate", INF))), _dur(float(reveal.get("commerce", INF))), _dur(float(reveal.get("licences", INF)))])
+		# révélations dans l'ordre (un sujet par seuil) et plus petit écart entre deux d'entre elles
+		var rv: Array = reveal.keys()
+		rv.sort_custom(func(a, b): return float(reveal[a]) < float(reveal[b]))
+		var rl := ""
+		var min_gap := INF
+		for i in rv.size():
+			rl += "%s %s · " % [rv[i], Fmt.duration(float(reveal[rv[i]]))]
+			if i > 0:
+				min_gap = minf(min_gap, float(reveal[rv[i]]) - float(reveal[rv[i - 1]]))
+		table.append("     révélations (écart min %s) : %s" % [_dur(min_gap), rl])
+		table.append("     bandeaux en 6 min autour du T2 (max) %s · révélations < 60 s après un palier : %s · barre de palier %s (douane %s)" % [
+			"%d centrée, %d au pire [%s]" % [b6c, b6, b6_list], after_tier if after_tier != "" else "aucune", _dur(float(reveal.get("progress", INF))), _dur(float(reveal.get("dept_customs", INF)))])
+		var al := ""
+		for tk2 in ["T1", "T2", "T3"]:
+			al += "%s %d%% " % [tk2, roundi(100.0 * float(alert_t.get(tk2, 0.0)) / maxf(1.0, float(tier_time.get(tk2, 1.0))))]
+		table.append("     carte Goulot rouge : " + al + str(alert_why_t))
+		table.append("     plus longs trous : %s" % str(gap_at))
+		table.append("     entrée T2 : %s | entrée T3 : %s" % [entries.get(2, "-"), entries.get(3, "-")])
 		table.append("     rentabilité du meilleur achat : " + pbs)
 		var wl := ""
 		for tk in pb_what:

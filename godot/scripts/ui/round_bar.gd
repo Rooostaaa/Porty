@@ -17,6 +17,7 @@ var text: String = "":
 var bg: Color = Color("#E3E6F0")
 var font_size: int = 26
 var light_text: bool = false   # texte toujours clair (fond sombre)
+var dark_text: bool = false    # texte toujours foncé (barre ambre : lisible, revue D-UI)
 
 
 func _init(h: float = 40.0) -> void:
@@ -36,8 +37,9 @@ func _draw() -> void:
 		var f := UI.font if UI.font else get_theme_default_font()
 		var ts := f.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
 		var p := Vector2((size.x - ts.x) * 0.5, (size.y + font_size * 0.72) * 0.5)
-		draw_string(f, p + Vector2(0, 2), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(0, 0, 0, 0.25))
-		draw_string(f, p, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.WHITE if (value > 0.45 or light_text) else UI.TEXT)
+		if not dark_text:
+			draw_string(f, p + Vector2(0, 2), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(0, 0, 0, 0.25))
+		draw_string(f, p, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, UI.TEXT if dark_text else (Color.WHITE if (value > 0.45 or light_text) else UI.TEXT))
 
 
 func _rounded(r: Rect2, c: Color, rad: float) -> void:

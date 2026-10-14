@@ -14,8 +14,9 @@ func build() -> void:
 	rows.clear()
 	var s := sim()
 	_sig = ",".join(s.missions_claimed)
-	content.add_child(UI.wrap_label("L'Ambre sert à embaucher un responsable en avance ou à relancer les Heures sup. " \
-		+ "Les objectifs de carrière ★ comptent toutes tes concessions et ne s'arrêtent jamais.", 28))
+	help("missions", "L'Ambre sert à embaucher un responsable en avance ou à relancer les Heures sup. " \
+		+ "Les objectifs de carrière ★ comptent toutes tes concessions et ne s'arrêtent jamais.")
+	_chest_card(s)
 	var vis := Objectives.visible_missions(s)
 	if vis.is_empty():
 		content.add_child(UI.label("Toutes les missions sont accomplies !", 34, UI.MONEY))
@@ -26,7 +27,7 @@ func build() -> void:
 		c.add_child(v)
 		var h := UI.hbox(14)
 		v.add_child(h)
-		h.add_child(UI.icon_disc("missions", UI.VIOLET, 90))
+		h.add_child(UI.icon_disc(Info.mission_icon(m), UI.VIOLET, 90))      # une icône par type de mission (revue D-UI)
 		var t := UI.wrap_label(("★ " if m.get("career", false) else "") + String(m.text), 34, UI.TEXT)
 		h.add_child(t)
 		var rw := UI.hbox(6)
@@ -58,6 +59,8 @@ func _claim(id: String) -> void:
 		Sfx.play("coin")
 		if btn != null:
 			Fx.reward(btn, "+%d Ambre" % amber, UI.AMBER, true)
+		if bool(sim().last_claim.get("chest", false)):
+			Sfx.play("chest")
 	rebuild()
 
 
@@ -72,3 +75,34 @@ func refresh() -> void:
 		(r.bar as RoundBar).value = p / t
 		(r.bar as RoundBar).text = "%s / %s" % [Fmt.num(minf(p, t)), Fmt.num(t)]
 		(r.btn as Button).disabled = p < t
+
+
+## Coffre : sa progression (n/N missions réclamées) et ce qu'il donne (revue D-UI : le coffre n'avait pas de progression ici).
+func _chest_card(s: PortSim) -> void:
+	var ch: Dictionary = s.db.cfg("mission_chest", {})
+	var cp := Objectives.chest_progress(s)
+	if ch.is_empty() or cp.y <= 0:
+		return
+	var c := UI.card(Color("#FFF8E6"))
+	content.add_child(c)
+	var h := UI.hbox(16)
+	c.add_child(h)
+	h.add_child(UI.icon_disc("chest", UI.AMBER, 96))
+	var v := UI.vbox(8)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(v)
+	v.add_child(UI.label("Coffre de missions", 34, UI.VIOLET))
+	var bar := RoundBar.new(40)
+	bar.color = UI.AMBER
+	bar.dark_text = true
+	bar.value = float(cp.x) / float(cp.y)
+	bar.text = "%d / %d missions" % [cp.x, cp.y]
+	v.add_child(bar)
+	chest_bar = bar
+	var gift := "Chaque %d missions réclamées, le coffre s'ouvre" % int(ch.every)
+	if ch.has("amber"):
+		gift += " : +%d Ambre" % int(ch.amber)
+	v.add_child(UI.wrap_label(gift + ".", 26))
+
+
+var chest_bar: RoundBar

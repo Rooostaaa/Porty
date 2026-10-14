@@ -64,3 +64,24 @@ Le joueur ne corrompt, ne juge, ne saisit jamais. Il finance la capacité d'insp
 
 ## Règles de cohérence (toute mécanique)
 1. Une cause réelle · 2. Un goulot visible · 3. Un levier · 4. Un visuel dans le diorama.
+
+## Le port sur la carte : la baie et le terre-plein (13/10)
+Un petit port de pêche abrité derrière un cap devient, palier après palier, un terminal gagné sur la mer, d'ouest en est.
+Plan coté : `docs/PLAN_COTE.md`. Neuf quartiers, chacun avec son sol, sa couleur et son repère vertical :
+
+| Quartier | Où | Sol | Repère | Ambiance |
+|---|---|---|---|---|
+| **Vieux port** | crique derrière le cap | planches, gravier beige | phare rouge et blanc, grue mobile | mouettes, cordages, bateaux de pêche |
+| **La Porte** | entre le parc et la route | béton clair, bandes jaunes et noires | barrières, portique scanner | bips, moteurs au ralenti |
+| **Colline du port** | butte derrière le vieux port | herbe vive | tour de contrôle (T2) | calme, drapeaux |
+| **Terminal** | au centre, côte droite | asphalte violet | premier portique bleu | engins, signaux de recul |
+| **Pôle froid** | au bout du Terminal | béton bleu glacier | racks frigorifiques | ronronnement des groupes froids |
+| **Terre-plein** | gagné sur la mer à l'est (T3) | asphalte violet, enrochements | rangée de grands portiques | grandeur, activité dense |
+| **Zone sensible** | pointe du terre-plein | sol brique, clôtures | sphères de GNL | sirènes lointaines |
+| **Gare et logistique** | arrière-pays, à l'est | ballast, entrepôts | locomotive, silo | klaxon de train |
+| **Village** | colline ouest, derrière les arbres | rues, trottoirs | boutique | vie civile |
+
+Les navires mouillent devant la passe, entrent entre le feu vert du cap et le feu rouge du brise-lames, suivent le chenal
+balisé, pivotent au bassin d'évitage et accostent le long du quai ; ils repartent par l'est. Les camions sortent d'un tunnel
+à l'ouest, passent la gate, chargent le long du parc et repartent par le tunnel est. Le palier 1 se raconte en quatre
+chapitres : le petit quai, le parc, la gate, faire venir les navires.

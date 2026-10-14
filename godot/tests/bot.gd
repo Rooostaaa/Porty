@@ -9,6 +9,7 @@ var use_boost := true
 var use_manual := true                   # accoste et donne des coups de main comme un joueur actif
 var wait_horizon := 30.0                 # secondes de revenu qu'on accepte d'attendre pour le meilleur achat
 var use_commerce := true                 # démarchage, armateurs, lignes
+var save_horizon := 150.0                # secondes de revenu qu'on accepte d'économiser pour l'équipement qui fait venir du trafic
 
 
 func _init(s: PortSim) -> void:
@@ -27,8 +28,33 @@ func _bought(kind: String, id: String) -> void:
 		_mark("Premier achat (%s %s)" % [kind, id])
 
 
+## Plus longue attente au palier 1 où **rien** n'était abordable (service présenté ou prochain bâtiment), mesurée
+## chaque seconde avant la décision du bot : c'est le « trou » que vit le joueur, indépendamment de la stratégie d'épargne.
+var dry_t1 := 0.0
+var _dry_from := 0.0
+
+
+func _track_dry() -> void:
+	if sim.tier != 1:
+		return
+	var aff := false
+	for d in PortSim.DEPTS:
+		if sim.feature("dept_" + d) and sim.dept_cost(d, 1) <= sim.money:
+			aff = true
+			break
+	if not aff:
+		for b in sim.db.buildings:
+			if sim.building_state(b.id) == "available" and float(b.cost) <= sim.money:
+				aff = true
+				break
+	if aff:
+		_dry_from = sim.time
+	dry_t1 = maxf(dry_t1, sim.time - _dry_from)
+
+
 ## Une décision par seconde de jeu.
 func think() -> void:
+	_track_dry()
 	if sim.can_tier_up():
 		var t := sim.tier
 		sim.tier_up()
@@ -51,6 +77,9 @@ func think() -> void:
 					break
 		for bi in sim.berths.size():
 			sim.assist_unload(bi)
+		# gestes optionnels du parc et de la gate (accélérateurs à recharge)
+		sim.yard_boost()
+		sim.gate_rush()
 	if use_boost and sim.boost_ready() and sim.feature("boost"):
 		sim.start_boost()
 	if not sim.active_event.is_empty() and sim.active_event.kind == "auction":
@@ -63,6 +92,17 @@ func think() -> void:
 				Commerce.start_campaign(sim, c.id)
 				_bought("campaign", c.id)
 				break
+	# un joueur guidé suit le tutoriel : il construit d'abord l'allongement du quai (étape « quai »), puis achète
+	# un niveau de Portiques (étape « achète un niveau »)
+	if not sim.built.has("quay_ext") and sim.tier == 1:
+		if float(sim.db.building_by_id.quay_ext.cost) <= sim.money and sim.build("quay_ext"):
+			_bought("building", "quay_ext")
+			_mark("Bâtiment : %s" % sim.db.building_by_id.quay_ext.name)
+		return
+	if int(sim.levels.cranes) < 2 and sim.tier == 1:
+		if sim.dept_cost("cranes", 1) <= sim.money and sim.buy_dept("cranes", 1):
+			_bought("dept", "cranes")
+		return
 	var opts := _options()
 	if opts.is_empty():
 		return
@@ -78,7 +118,7 @@ func think() -> void:
 	if best.kind == "tier":
 		return
 	# un joueur guidé économise pour l'équipement qui fait venir du trafic quand c'est le goulot
-	if (best.kind == "building" or best.kind == "line" or best.kind == "owner") and best.score * best.cost >= 0.6 and (best.cost - sim.money) / income <= 150.0:
+	if (best.kind == "building" or best.kind == "line" or best.kind == "owner") and best.score * best.cost >= 0.6 and (best.cost - sim.money) / income <= save_horizon:
 		return
 	for o in opts:
 		if o.cost <= sim.money:
@@ -116,6 +156,11 @@ func _options() -> Array[Dictionary]:
 	for k in ["traffic", "pilotage", "berth_cycle", "transfer", "inspection", "gate", "yard_space"]:
 		vals.append(float(caps.get(k, 0.0)))
 	vals.sort()
+	# services facturés (lot D-Éco) : gain relatif d'un niveau de plus, quel que soit le service
+	var n_lv := 0
+	for d0 in PortSim.DEPTS:
+		n_lv += int(sim.levels[d0]) - 1
+	var fee_rel := sim.service_fee_rate() / float(maxi(1, n_lv)) / maxf(sim.income_rate_estimate(), 0.01)
 	var headroom := clampf(vals[1] / maxf(0.0001, vals[0]) - 1.0, 0.0, 1.0) if vals.size() > 1 else 0.5
 	for d in PortSim.DEPTS:
 		if not sim.feature("dept_" + d):
@@ -128,8 +173,10 @@ func _options() -> Array[Dictionary]:
 			g = maxf(g, 0.2 / float(lv))
 			if d == "harbor" and sim.waiting_ships() >= 2:
 				g = 0.0
+		# services facturés (lot D-Éco) : chaque niveau rapporte un minimum, goulot ou non (la pastille le montre)
+		g += fee_rel
 		out.append({"kind": "dept", "id": d, "cost": c, "score": g / c})
-		if not sim.managers[d] and sim.manager_available(d) and sim.feature("managers"):
+		if not sim.managers[d] and sim.manager_available(d) and sim.manager_revealed(d):
 			var mc := float(sim.db.dept_by_id[d].manager.cost)
 			var gm := minf(1.0, headroom + 0.3) if d == bn else 0.25
 			if d == "harbor":

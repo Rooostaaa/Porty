@@ -353,3 +353,178 @@ voies de gate, marquages de parc, totem P) ; `blender/`, `godot/assets/models/` 
 - **Limites** : les ombres en T3 sur les portiques sont nettes mais longues de 0,6 × la hauteur ; le dégradé de l'eau ignore les îlots (rochers du phare approchés
   par un rectangle) ; les marquages de parc ne sont pas alignés sur les travées de 4,4 u des conteneurs (dalle de 12 u) ; `ghost_lot`
   attend le lot C.
+
+## Plan de la baie (13/10) — zones, trajets, chapitres (`docs/PROMPT_PLAN_PORT.md`, journal `docs/JOURNAL_PLAN_BAIE.md`)
+Sauvegarde préalable : `C:\Nadir\tycoon_backups\V2_avant_plan_baie_20261013_1950.zip`. Plan coté : `docs/PLAN_COTE.md`.
+Aucune migration de sauvegarde (les bâtiments sont enregistrés par identifiant ; les zones se déduisent de `sim.built`).
+- **Terrain polygonal construit dans Godot** (`Layout.COAST/BREAKWATER/RECLAIM`, `Terrain`) : continent avec cap, crique et baie,
+  dessus coloré et flancs de terre ; dessus à y −0,05 et sols de zone à −0,025 pour rester sous les dalles (routes, parcs).
+  Eau : **texture de distance** 256 × 256 (balayage + chanfrein 3-4, ≈ 40 ms) au lieu des 12 rectangles, recalculée quand le
+  terre-plein (bâtiment `berth3`) apparaît.
+- **Zones** (`Layout.ZONES`, `Zones`) : ouverte au départ, au palier (Colline) ou par son bâtiment clé ; **une seule prochaine** :
+  celle dont le bâtiment clé est le premier non construit de la liste (y compris au-delà du palier : la pancarte dit « palier T2 »).
+  « Mouillage » n'est pas une zone : une bouée numérotée par place en rade. Toutes les autres zones sont visibles en gris.
+- **Cases** (`Layout.LOTS`) : chaque bâtiment a la sienne, son empreinte `ghost_lot` est dessinée dès le départ (dorée pour le
+  prochain achat) ; ce qui n'avait pas d'objet en a un (atelier, bureau du pilotage, centre informatique, guichet numérique,
+  remorqueur, taquets d'amarrage). Toucher l'empreinte ouvre la fiche du bâtiment (CONSTRUIRE), toucher une zone grise sa fiche.
+- **Ouverture de zone** (4,2 s ; 5 s pour le terre-plein, `Layout.OPENING*`) : passable d'un toucher, en pause sous un écran ou une
+  fenêtre, phrase de la narratrice (`Layout.ZONE_SAY`), vibration courte sur mobile (aussi à chaque achat).
+- **Trajets** : navires sur polylignes (mouillage devant la passe, chenal, bassin d'évitage, accostage parallèle, sortie est) ;
+  camions en boucle à sens unique (tunnel ouest → gate d'entrée → voie des camions → arrêt devant une travée réelle → gate de
+  sortie → tunnel est) ; engins côté mer vers des travées réelles, qui apportent le conteneur au camion. Tolérances du test
+  `test_trajets` : navire à ≥ 2,5 u de toute terre hors de son poste ; véhicules sur la terre et hors des bâtiments (allées des
+  parcs, portique scanner exceptés) ; engins à ≥ 1,75 u des camions (au chargement, la remorque touche le bord du parc) ;
+  personnages à ≥ 2,5 u des camions et 1,2 u des engins.
+- **Chapitres** (`unlocks.json`, conditions `level`, `manager`, `bottleneck`, `any`) : petit quai → (grue 10) parc + Gestion +
+  responsables + licences → (parc 10, ou la gate devient le goulot) gate → (gate 10) navires (Commerce, Missions, réputation, barre
+  de palier) → palier 2 (Heures sup, aléas, statistiques). Les responsables se présentent au niveau 10 de leur service.
+  **Écarts au prompt** : licences au chapitre 2 (au palier 2, le T1 dure 14–15 min et la gate bloque 3–4 min avant son chapitre) ;
+  la gate s'ouvre aussi quand elle devient le goulot (« le service suivant s'allume parce qu'il devient le goulot », `ETUDE_CARTE`
+  § 3) ; l'allongement du quai reste le premier achat (zone prochaine dès le départ, tutoriel sur son empreinte) au lieu d'attendre
+  le chapitre 4 : le retarder aurait cassé le début doux.
+- **Gestes optionnels** : engin du parc (2 s de rangement, recharge 4 s), barrière de la gate (2 s de gate, recharge 4 s) ;
+  jamais nécessaires, remplacés par Nadia Benali et Tonio Ferrer. Le bot les utilise et suit le tutoriel pour son premier achat.
+- **Mesures** (4 graines) : premier achat 1 s ; T1 → T2 12 min 34 – 13 min 29 ; durée du T2 −11,8 à +8,7 % ; fin 1 h 19 – 1 h 25
+  (±8 %) ; parc et gate jamais goulots avant leur chapitre. **Non tenu** : trou d'achat ≤ 90 s au T1 (2 min 08 – 2 min 24, déjà
+  1 min 22 – 1 min 34 avant) — voir le journal, options à trancher.
+- **Tests** : `run_all` 152 contrôles (+23), `ui_smoke` 74 (+12). Captures `docs/captures/plan_cote_*.png`, `baie_*.png`.
+- **Limites** : camions sans distance de suivi entre eux ; les cartes du HUD masquent le haut des grandes zones pendant leur
+  ouverture ; pas de modèle pour la « butte » de la Colline (sol vert vif plat) ; pas de projet d'export Android dans `tycoon_V2`.
+
+## Plan de la baie — corrections (13–14/10) après la revue (`docs/REVUE_PLAN_BAIE.md`, journal `JOURNAL_PLAN_BAIE.md` § « Corrections »)
+Décisions retenues par le chef de projet appliquées sans les rouvrir : départ 260 $ et quai en premier ; navires par la passe aux paliers 1–2 ;
+chapitres fermés au niveau 10 ; un sujet par seuil. Sauvegarde : format v4 inchangé (les révélations sont enregistrées par identifiant ;
+leur instant ne l'est pas : une fonction chargée compte comme révélée « depuis longtemps »).
+- **Export Android** : `godot/export_presets.cfg` (paquet `com.nadir.porthorizon.v2`, « Port Horizon V2 », installable à côté de la V1),
+  `exporter_apk.bat` → `build\PortHorizonV2.apk` (debug signé). Lancé : APK de 29,5 Mo produit.
+- **Début** : `start_money` 260 ; tutoriel révision 4 (« quay » avant « buy », conversion par nom) ; le bot suit le même ordre.
+- **« Vert si possible, gris sinon »** : carte Goulot rouge et bouton vert seulement si l'action est possible tout de suite (`Hud.hint_actionable`) ;
+  texte de rentabilité gris si l'achat n'est pas abordable ; la carte du service qui ferme le chapitre dit « Niveau 10 : ouvre « … » (n/10) »
+  au lieu de « Aucun gain immédiat » (`PortSim.chapter_goal`).
+- **Un sujet par seuil** : `config.json` → `reveal_gap` = 20 s entre deux révélations ordinaires ; `"opens_chapter": true` (Parc, Gate,
+  Commerce, Douane) passe tout de suite, une par seconde ; condition `after` (N s après une autre révélation). Calendrier : grue 10 → Parc ·
+  +25 s Responsables · parc 10 (ou gate goulot) → Gate · +25 s Gestion · +3 min Licences · gate 10 → Commerce · +25 s Missions · +25 s Réputation
+  · +25 s Paliers · Ambre · bureau de douane → Douane · +25 s Contrats · T2 → Heures sup · +30 s Statistiques · +30 s Aléas.
+  **Écart assumé** : les licences arrivent 3 min après la gate (≈ 9 min 30 – 10 min) et non plus avec le parc : c'est ce seuil qui ramène le
+  T1 dans 12–20 min avec 260 $ de départ (essais a → h, `ANALYSE.md` § 14).
+- **Ouverture de zone** : HUD masqué (fondu, boutons inactifs), bulles, tutoriel, notifications et bandeaux en file, seule la phrase de la
+  narratrice ; « Toucher pour passer ». Terre-plein en 7,5 s (barges `barge_sand` qui déversent, sable, asphalte, dalles, quais, portiques) ;
+  autres zones en 4,9 s avec un chantier (cônes, poussière). Dalles, bollards, marquages et musoirs d'une zone surgissent avec elle.
+- **Notifications** : une à la fois sous l'en-tête, dans la colonne de gauche, en file (4 au plus).
+- **Zones à venir** : teinte du quartier gardée (désaturation 0,55, voile 0,25), une icône par zone, empreintes seulement pour les zones
+  ouvertes et la prochaine, contour seul pour les cases à flot ; chenal à venir en **bouées fantômes** ; zone 12 grise jusqu'à la gare.
+- **Bulles** : parc, gate, aire d'attente, douane après leur chapitre ; « File : n » ; « n/N en rade » rouge seulement si la rade est pleine ;
+  anneau du goulot seulement si une amélioration est possible ; toutes bornées au rectangle utile (`Hud.useful_rect`, `Bubbles.bound`) ;
+  texte des bulles et pancartes 30 px sur 1080 (≈ 15 px sur un écran de 540).
+- **Touchers** : plus petit rapport distance / rayon (`Diorama.pick_tap`, `Layout.TAP_RADIUS`) ; zone grise = bulle d'information de 2 s.
+- **Mouillage et passe** : bouées jaunes de marque spéciale ; place n°1 en (−71 ; −69) (26 u de la pointe du cap) ; cadrage de départ
+  (−51 ; −30), 48 u ; brise-lames prolongé à x −18 (passe de 46 u, feu rouge en (−21 ; −44)) ; le vert du modèle `breakwater` rendu gris.
+  **Navires** : deux voies dans le chenal (3 u de part et d'autre de l'axe) ; départ par la passe et le large au nord aux paliers 1–2,
+  par l'est au palier 3 ; les navires mouillés à l'est du chenal rejoignent la voie d'entrée par le large.
+- **GNL** : deux `lng_sphere` (modèle livré par l'expert Blender) en (145 ; 6) et (145 ; 19), repli `silo` ; case `lng` 9,4 × 22,4.
+- **Quartiers** : haies (`Layout.HEDGES`) ; la Colline est une butte de 1,4 u (`Layout.BUTTE`, `Layout.ground_y`) ; arbres en bosquets.
+- **Divers** : « + » de l'Ambre écrit (plus de pastille orange vide) ; « RESPONSABLES · n au travail · m à embaucher » ; sillage en V qui
+  s'estompe ; « Remise en état de la friche » (gravel2) ; `zone_ice` et `zone_dash` dans `Layout.PALETTE_EXTRA` (palette.json est
+  régénéré par la chaîne Blender et les avait perdus).
+- **Captures** sur des parties de bot réelles : `tests/bot_saves.gd` écrit des sauvegardes dans un dossier temporaire ; `--load-sim=…`
+  (avec `--fresh`, version de débogage) les charge pour la capture.
+- **Mesures** (4 graines) : premier achat 1 s ; T1 → T2 12:13 – 12:45 ; durée du T2 −12,0 / +11,9 / +1,3 / +7,7 % (moyenne +1,7 %) ;
+  fin 1 h 12 – 1 h 24 (−8,9 à +5,2 %) ; attente sans rien d'abordable au T1 ≤ 1 min 16 ; parc et gate jamais goulots avant leur chapitre ;
+  ≥ 20 s entre deux révélations ordinaires. **Limites** : le trou d'achat du bot reste > 90 s (épargne du bot pour le bureau de douane) ;
+  deux graines à ±12 % sur la durée du T2.
+- **Tests** : `run_all` 162 contrôles (+10), `ui_smoke` 81 (+7) ; aucun retiré (5 recalés, voir le journal).
+
+## Plan de la baie — seconde revue (14/10), lot C6 (journal `JOURNAL_PLAN_BAIE.md` § C6a–C6c)
+- **Chenal** : axe décalé de 3 u vers l'ouest, ±14 u, voie d'entrée à 4 u (ouest) et de sortie à 6 u (est) de l'axe ; bouées du large
+  jusqu'à la passe seulement ; tout navire entre par `CHANNEL_ENTRY` ; cap à l'écran = corde étrave–poupe sur le trajet. Contrôle :
+  coque ≥ 1,5 u de toute bouée et des feux (2,0 u au plus près). Mouillages sur une grille 50 × 28 u ; feeder ×0,94, panamax ×0,78 ;
+  contrôle « deux coques ≥ 2 u ». Distance de suivi 4 u entre deux navires qui vont dans le même sens.
+- **Départ** : `START` (−45 ; −29), 58 u ; carte Goulot masquée pendant une carte du tutoriel ; `ui_smoke` en fenêtre portrait.
+- **Notifications** : sous la carte Goulot, colonne de gauche, fond opaque, 60 s sans doublon, file de 2, une toutes les 4 s, 3 s de
+  calme après une ouverture de zone. **Surcouche** découpée au rectangle utile.
+- **Révélations** : `reveal_gap` 60 s, ou 20 s (`reveal_gap_min`) si la précédente a servi (`used` dans `unlocks.json`) ; gate ouverte
+  au niveau 10 du parc ou quand elle est le goulot depuis 45 s (option a) ; caméra 2 s sur le poste d'un service dont le chapitre s'ouvre.
+- **Conseil affiché** (`analysis_shown`) : jamais « pas assez de navires » quand la rade est pleine depuis 3 s (présentation seulement).
+- **Douane au T1 (N5)** : **non changé** — la masquer ou la retarder repousse le palier 2 à 21–29 min ; décision à prendre (options au journal).
+- **Mineurs** : « Toucher pour passer » lisible et seulement après 1,5 s (séquence non passable avant) ; un seul badge numérique ;
+  empreintes avec liseré ; « File : n » ancrée sur la guérite (ou la barrière).
+- **Critère du T2** : moyenne des 4 graines ±5 %, chaque graine ±15 % (adopté) — tenu (moyenne −0,5 %).
+
+
+## Lot C7 — corrections de la revue de code C6 (14/10, journal `JOURNAL_PLAN_BAIE.md` § C7)
+- **Navires à l'écran** : la vue suit toujours une polyligne du plan (abscisse curviligne propre) ; retenue = abscisse figée ;
+  rattrapage borné (2 × nominale, ≥ 10 u/s, × vitesse de simulation) ; un départ terminé dans la simulation finit à l'écran.
+- **Sauvegarde version 5** : `features` = {id : instant} (+ dernière révélation) ; l'ancien format liste reste lisible.
+- **Outils de débogage** : réservés au binaire de l'éditeur (`OS.has_feature("editor")`), jamais dans un APK, même debug.
+- **Ouverture interrompue par une reconstruction** : terminée comme un toucher (narratrice et retour de la caméra gardés).
+- **Notifications** : file de 2, on jette la plus ancienne non « bad » ; rien sur un écran ou une fenêtre ; anti-doublon à l'affichage.
+- **Avant Gestion** (chapitre 3) : le conseil « CONSTRUIRE » ouvre la fiche du bâtiment ; aucun texte ne renvoie à Gestion.
+- **Tutoriel** (liste v5) : parc avant Yasmine ; « embauche-la » sautée si Yasmine n'est pas là.
+- **Barges du terre-plein** : couloir est–ouest devant le futur quai (z −15).
+- `unlocks.json` : plus de champ `chapter` ; Douane et Contrats en tête (ordre réel des révélations).
+
+
+## Interface (lot D) — 14/10 (journal `JOURNAL_PLAN_BAIE.md` § « Lot D — UI », ordre `docs/ORDRE_D_UI.md`)
+- **Acheter au-dessus du port vivant** : Améliorer et Commerce sont des feuilles basses à mi-hauteur (58 % de l'écran) ; le port
+  continue de vivre au-dessus (effets, bulles), la caméra y cadre le service acheté, le solde est dans l'en-tête. Gestion, Missions et
+  Réglages restent plein cadre (avec un mini-solde) : Gestion construit, et une construction lance une ouverture de zone.
+- **HUD du haut sous 20 %** (15 % au T3) : barre indigo + une ligne (coffre des missions, carte Goulot réduite à titre + bouton,
+  détail au toucher) ; bandeau des missions replié par défaut. En bas : Réglages en petit rond, Gestion (Responsables y est
+  intégré : pastille ambre), Commerce, gros AMÉLIORER vert à droite ; Heures sup en rond flottant, grand seulement quand il est prêt.
+- **Carte Goulot** : le bouton dit quoi et combien et passe au vert dès qu'une action règle le goulot ; « parc trop petit » =
+  capacité (place × rotation), la jauge montre le stock. Même achat, même nom partout (nom du bâtiment).
+- **Charte** : vert = argent / acheter, bleu = info, ambre = « touche-moi », rouge = problème, gris = impossible seulement.
+  Unités : revenu toujours en **$/s** ; gestes manuels en $. Textes ≥ 24 px, cibles ≥ 96 px (zones de toucher élargies).
+- **Retours** : achat → effet dans le monde + « +X $/s » ou « +n % — pas le goulot » ; navire payé → « +X $ » et pièces vers le
+  compteur ; palier, nouvelle concession et fin → cérémonie (gerbes, dézoom, jingle) puis la fenêtre ; retour d'absence → ENCAISSER.
+- **Sons** : un son par moment (construction, embauche, palier de niveau, Heures sup, coffre ; « tier » et jingles réservés aux
+  paliers), ±4 % de hauteur, demi-ton qui monte en appui long, 10 voix à priorité (corne et jingles jamais volés), bus « Sons » et
+  « Ambiance » réglables (`user://audio.cfg`).
+- Interface monde fournie par D-Monde et utilisée : `feedback_purchase`, `set_overtime`, `set_campaign`, `dept_anchor`,
+  `rade_anchor`, signal `ship_paid` (toujours appelés via `has_method` / `has_signal`).
+- Non fait / limites : Gestion pas en mi-hauteur (voir plus haut) ; les aides d'en-tête se replient après une lecture **par
+  lancement** (pas de mémoire sur disque) ; la valeur en $ des gestes est une estimation (EVP × valeur moyenne d'un EVP).
+- Captures : `--open=hint` (carte Goulot dépliée), `--open=settings`, et en version de débogage `--open=tier` (cérémonie du palier courant), `--open=shippaid` (encaissement au poste n°1).
+
+
+## Réorganisation du port (lot D) — 14/10 (journal `JOURNAL_PLAN_BAIE.md` § « Lot D — Monde », ordre `docs/ORDRE_D_MONDE.md`)
+- **Circulation à droite** (autoroute, route d'accès, voie des camions) : on entre à l'est, on sort à l'ouest ; la boucle se fait
+  à vide, le chargement au retour le long du parc. Conséquence voulue : les camions **chargés** sortent devant la douane et sous
+  le scanner à portique ; entrée et sortie ne se croisent plus. `gate2` est une **deuxième voie de sortie**.
+- **Douane dans une enceinte côté sortie** (bureau, scanner mobile, scanner à portique, halle au T3 à la place du hangar) ;
+  guichet numérique et douane dématérialisée **côté public**, aux **Bureaux du port** (ex-Colline, zone 13, palier 2, à plat).
+  Zone **Gate** (ouverte au départ) séparée de la zone **Bureau de douane**.
+- **Pôle nautique sur le cap** (zone 9, butte) : tour VTS face à la passe (35 u), pilotage au pied, atelier avec cale de halage
+  sur la crique ; la Capitainerie passe à la tour au T2. Zone grise « discrète » tant qu'elle est fermée (cadrage du tutoriel).
+- **Même achat, même nom** : une zone ouverte par un bâtiment porte le nom de ce bâtiment ; deux bâtiments renommés pour être
+  aussi des noms de lieu (`reefer` « Pôle froid », `gate2` « Deuxième voie de gate »).
+- **Gare contre le terre-plein**, reliée à sa voie des camions ; logistique en arrière-plan. **Brise-lames et passe est au T3** :
+  postes 3–4 par l'est, postes 1–2 par la passe ouest à tous les paliers ; voie au large du mouillage au nord du chenal.
+- **Pas de gate est** : la simulation n'a qu'une file et un débit de gate ; une seconde file serait une présentation inventée.
+- **Vie du port** : foule de dockers et douaniers en MultiMesh, nombre lié aux agents (plafond 28 + 4), dockers sur le pont
+  pendant le déchargement, demi-tour progressif ; conteneurs posés (descente + glissement) ; Heures sup visibles (gyrophares,
+  grues plus rapides, lumière plus chaude) ; campagne visible (pavillons, fanions) ; retour d'achat au poste.
+- `ship_paid` porte un **montant estimé** (la simulation ne mémorise pas le montant d'une escale) : manutention de la cargaison
+  relevée à l'arrivée aux valeurs du moment + droits de port et services, même formule que `PortSim`, en lecture seule.
+
+
+## Rythme (lot D) — 14/10 (ordre `docs/ORDRE_D_ECO.md`, essais `ANALYSE.md` § 15, journal `JOURNAL_PLAN_BAIE.md` § « Lot D — Éco »)
+- **Services facturés** (`service_fee` 0,5) : chaque niveau de service au-delà du premier facture l'équivalent de 0,5 EVP/s au
+  prix de base d'un EVP (sans licences) — un achat hors goulot rapporte toujours un peu ; la part fond aux paliers 2 et 3
+  (`PortSim.service_fee_rate`, recette « fees », comptée dans les estimations de revenu, du hors-ligne et des gains d'achat).
+  Écarté : un bonus multiplicatif (« qualité de service ») qui gonflait le T2 de ×8 de plus.
+- **Licences 60 s après la gate** (180 avant) et plafond T1 30 : le stock de licences ne part plus d'un coup au passage du T2.
+- **Palier 2 tenu par l'argent** : 8 500 EVP, 14 000 $, Extension du parc gravier 14 000 $ (le T1 reste à 12 min 30 malgré les
+  services). Palier 3 : 540 000 EVP. Concession : 4 × 10⁸ $.
+- **Entrée du T2 étalée** : Nordhaven 200 K$, lignes T2 2,5 M$ (×1,6 par ligne, 5 par armateur ; T3 6).
+- **Révélations** : écart minimal 45 s ; rien pendant 60 s après un palier (`reveal_tier_hold`, la cérémonie passe seule) ; barre de
+  palier à 200 EVP (≈ 2 min, avant la Douane) ; Ambre après Réputation ; statistiques et aléas 150 s après les Heures sup.
+- **Carte Goulot** : rouge seulement en alerte (`PortSim.alert_reason` : brouillard, navire à < 30 % de patience, parc ≥ 90 %,
+  camions bloqués ; tenue 4 s) ; un goulot normal reste neutre (titre indigo, pastille bleue), le bouton garde « vert si possible ».
+  Seul changement d'interface avec la ligne « Services facturés » de Gestion › Stats.
+- **Mesures** (4 graines) : T1 12:23 en moyenne, T2 28:52, fin 1 h 24 ; rentabilité T1 2 min 04 – 2 min 24 (avant 4 min 53 – 7 min 46) ;
+  T2 +3 / +10 min ×4,0–5,5 / ×18–35 (avant ×14–18 / ×234–331) ; 2–4 bandeaux autour du T2 (avant 7) ; barre de palier à ≈ 2 min.
+- **Non tenu** : rentabilité T2 ≤ 3 min (4 min 51 – 6 min 39 ; il faudrait ×10 000 de croissance sur le T2 et tout le T3 ×10) ;
+  trou d'achat ≤ 90 s au T3 (1 min 19 – 1 min 35 à l'entrée, 2 – 3 min sur le palier : les bâtiments T3 valent 1,5–3 min de revenu).
+- Chapitres du T1 plus tôt (Douane ≈ 3 min 30, gate ≈ 6 min, Commerce ≈ 7 min). Format de sauvegarde inchangé.
+- Sonde : `--curve`, `--maxh=`, `--bot-save=` ; bot : valorise les services facturés (`fee_rel`), épargne réglable (`save_horizon`, 150 s).

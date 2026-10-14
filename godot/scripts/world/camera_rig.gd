@@ -9,11 +9,13 @@ const YAW := 45.0
 const DIST := 160.0
 
 var cam: Camera3D
-## Cadrage de départ (lot B) : le quai n°1, le parc et la capitainerie tiennent sous les cartes du HUD
-## (le tiers haut de l'écran est couvert au démarrage) ; la rade reste atteignable d'un glissement.
-const START := Vector3(-34.5, 0.0, -5.5)
-## Largeur visible par défaut (unités monde) : 40 u, un bâtiment de 5 u occupe un huitième de l'écran.
-const ZOOM_START := 40.0
+## Cadrage de départ (plan de la baie, décision 4) : le vieux port, la passe et un navire au mouillage (place n°1)
+## tiennent sous les cartes du HUD en portrait.
+const START := Vector3(-45.0, 0.0, -29.0)
+## Largeur visible par défaut (unités monde) : 58 u — phare, navire au mouillage n°1 et empreinte du quai tiennent entre la
+## carte du tutoriel et le haut de l'écran, et le navire reste sous la carte Goulot quand le tutoriel est fini (revue N3,
+## contrôlé par ui_smoke en portrait).
+const ZOOM_START := 58.0
 var target := START
 var goal := START
 var zoom := ZOOM_START        # largeur visible (unités monde)

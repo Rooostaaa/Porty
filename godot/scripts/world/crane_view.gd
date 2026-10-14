@@ -145,3 +145,8 @@ func _cable_between(a: Vector3, b: Vector3) -> void:
 	var l := maxf(0.05, a.distance_to(b))
 	cable.position = (a + b) * 0.5
 	cable.scale = Vector3(1, l, 1)
+
+
+## Hauteur du gyrophare des Heures sup (lot D) : sommet du portique, ou toit de la cabine de la grue mobile.
+func beacon_y() -> float:
+	return height + 0.3 if kind == "sts" else pivot_y + 1.7

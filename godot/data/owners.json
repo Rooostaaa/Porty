@@ -5,7 +5,7 @@
   {"id": "grandlarge", "name": "Grand Large Cargo", "home": "Rio Verde", "tier": 1, "require": "customs1", "weight": 0.8,
    "patience": 0.9, "pay": 0.8, "fraud": 0.12, "bias": {"std": 1.3, "empty": 1.5}, "hull": "hull_grey",
    "blurb": "Du volume, des prix bas, et des papiers parfois… créatifs."},
-  {"id": "nordhaven", "name": "Nordhaven Lines", "home": "Nordhaven", "tier": 2, "recruit": 60000, "weight": 1.0,
+  {"id": "nordhaven", "name": "Nordhaven Lines", "home": "Nordhaven", "tier": 2, "recruit": 200000, "weight": 1.0,
    "patience": 0.8, "pay": 1.2, "fraud": 0.02, "bias": {"std": 1.0}, "hull": "hull_navy",
    "blurb": "Ponctuels comme une horloge. Ils détestent attendre."},
   {"id": "sakura", "name": "Sakura Bay Shipping", "home": "Sakura Bay", "tier": 2, "recruit": 400000, "weight": 0.8,

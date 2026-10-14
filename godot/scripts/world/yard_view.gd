@@ -16,6 +16,7 @@ var _blink := 0.0
 var _shown: PackedInt32Array = PackedInt32Array([-1, -1, -1, -1])
 var _empty_share := -1.0
 var _pending_n := 0
+var _apron_shown := -1
 
 
 func _ready() -> void:
@@ -55,6 +56,8 @@ func rebuild(sim: PortSim) -> void:
 			mm.set_instance_custom_data(i, _slot_color(sim, z, i, 0.0))
 		zone_mm[z].multimesh = mm
 	_shown = PackedInt32Array([-1, -1, -1, -1])
+	_apron_shown = -1
+	_drop_reset()
 	_empty_share = -1.0
 	# tablier : une rangée de conteneurs derrière chaque poste
 	apron_slots = []
@@ -99,8 +102,11 @@ func sync(sim: PortSim, delta: float) -> void:
 		var f := 0.0 if cap <= 0.0 else clampf(sim.yard_stock_zone(z) / cap, 0.0, 1.0)
 		var n := roundi(f * mm.instance_count)
 		if n != _shown[z]:
+			if _shown[z] >= 0 and n > _shown[z]:
+				_drop_new(z, mm, zone_slots[z], _shown[z], n)      # lot D : les nouveaux conteneurs se posent
 			_shown[z] = n
 			mm.visible_instance_count = n
+		_drop_step(z, mm, zone_slots[z], delta)
 	# part de vides dans la zone standard
 	var std_i: int = sim.db.cargo_index["std"]
 	var emp_i: int = sim.db.cargo_index["empty"]
@@ -128,13 +134,77 @@ func sync(sim: PortSim, delta: float) -> void:
 	var am := apron_mm.multimesh
 	if am != null and am.instance_count > 0:
 		var fa := clampf(sim.apron_stock() / maxf(1.0, sim.apron_capacity()), 0.0, 1.0)
-		am.visible_instance_count = roundi(fa * am.instance_count)
+		var na := roundi(fa * am.instance_count)
+		if na != _apron_shown:
+			if _apron_shown >= 0 and na > _apron_shown:
+				_drop_new(4, am, apron_slots, _apron_shown, na)
+			_apron_shown = na
+			am.visible_instance_count = na
+		_drop_step(4, am, apron_slots, delta)
 
 
-## Point de référence d'un bloc (pour les engins).
-func random_yard_point(rng: RandomNumberGenerator) -> Vector3:
-	var arr: Array = zone_slots[0]
-	if arr.is_empty():
-		return Layout.YARD_CENTER
-	var p: Vector3 = arr[rng.randi_range(0, mini(arr.size(), 200) - 1)]
-	return Vector3(p.x, 0, p.z + ROW * 0.5 + 0.8)
+## Emplacements de conteneurs actuellement visibles d'une zone (les engins et les camions vont aux blocs réels).
+func visible_slots(z: int) -> Array:
+	var arr: Array = zone_slots[z]
+	return arr.slice(0, clampi(_shown[z], 0, arr.size()))
+## Conteneurs posés (lot D, revue axe 3) : un conteneur qui arrive descend de DROP_H u et glisse de DROP_SLIDE u en
+## DROP_TIME s au lieu d'apparaître d'un coup. Au plus DROP_MAX animations à la fois par MultiMesh (un saut de remplissage —
+## chargement d'une partie, vitesse ×N — pose le reste d'un coup). Tableaux préalloués : aucune allocation par image.
+const DROP_TIME := 0.38
+const DROP_H := 2.6
+const DROP_SLIDE := 0.9
+const DROP_MAX := 12
+var _drop_i: Array[PackedInt32Array] = []      # par MultiMesh (4 zones + tablier) : indices en cours de pose (−1 = libre)
+var _drop_t: Array[PackedFloat32Array] = []
+var drops_started := 0                         # poses animées lancées (tests)
+
+
+func _drop_reset() -> void:
+	_drop_i.clear()
+	_drop_t.clear()
+	for k in 5:
+		var pi := PackedInt32Array()
+		pi.resize(DROP_MAX)
+		pi.fill(-1)
+		var pt := PackedFloat32Array()
+		pt.resize(DROP_MAX)
+		_drop_i.append(pi)
+		_drop_t.append(pt)
+
+
+## Nouveaux conteneurs visibles [from, to[ du MultiMesh k : les derniers (au plus DROP_MAX) descendent à leur place.
+func _drop_new(k: int, mm: MultiMesh, slots: Array, from: int, to: int) -> void:
+	if _drop_i.size() != 5:
+		_drop_reset()
+	for i in range(maxi(from, to - DROP_MAX), to):
+		var free := -1
+		for s in DROP_MAX:
+			if _drop_i[k][s] < 0 or _drop_i[k][s] == i:
+				free = s
+				break
+		if free < 0:
+			break
+		_drop_i[k][free] = i
+		_drop_t[k][free] = 0.0
+		drops_started += 1
+		var p: Vector3 = slots[i]
+		mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, p + Vector3(-DROP_SLIDE, DROP_H, 0)))
+
+
+func _drop_step(k: int, mm: MultiMesh, slots: Array, delta: float) -> void:
+	if _drop_i.size() != 5:
+		return
+	for s in DROP_MAX:
+		var i := _drop_i[k][s]
+		if i < 0:
+			continue
+		if i >= slots.size():
+			_drop_i[k][s] = -1
+			continue
+		var t := minf(1.0, _drop_t[k][s] + delta / DROP_TIME)
+		_drop_t[k][s] = t
+		var e := 1.0 - (1.0 - t) * (1.0 - t)          # ralentit en se posant
+		var p: Vector3 = slots[i]
+		mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, p + Vector3(-DROP_SLIDE * (1.0 - e), DROP_H * (1.0 - e), 0)))
+		if t >= 1.0:
+			_drop_i[k][s] = -1

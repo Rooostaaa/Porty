@@ -8,6 +8,7 @@ uniform float vertex_is_srgb = 0.0;
 uniform vec4 tint : source_color = vec4(1.0);
 uniform float desat = 0.0;          // 1 = gris neutre (entrepôts du village avant le T3)
 uniform float flash = 0.0;          // surbrillance (sélection, goulot)
+uniform float degreen = 0.0;        // 1 : les pièces vertes deviennent grises (feu vert du brise-lames : le vert est au cap)
 uniform vec4 flash_color : source_color = vec4(1.0, 0.3, 0.25, 1.0);
 
 vec3 to_linear(vec3 c) {
@@ -20,6 +21,9 @@ void fragment() {
 		c = to_linear(c);
 	}
 	c *= tint.rgb;
+	if (degreen > 0.5 && c.g > c.r * 1.3 && c.g > c.b * 1.15) {
+		c = vec3(dot(c, vec3(0.2126, 0.7152, 0.0722)) * 0.9);
+	}
 	float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
 	c = mix(c, vec3(lum), desat);
 	ALBEDO = mix(c, flash_color.rgb, flash * 0.45);

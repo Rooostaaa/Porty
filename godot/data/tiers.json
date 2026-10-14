@@ -3,11 +3,11 @@
    "value_mult": 1.8, "dues_mult": 1.8, "traffic_mult": 1.0},
   {"id": 2, "name": "Port régional", "story": "Les premiers armateurs sérieux frappent à la porte.",
    "value_mult": 3.0, "dues_mult": 3.0, "traffic_mult": 3.0, "amber": 5,
-   "req": {"evp": 4000, "stars": 3.0, "money": 4000, "buildings": ["gravel3"]}},
+   "req": {"evp": 8500, "stars": 3.0, "money": 14000, "buildings": ["gravel3"]}},
   {"id": 3, "name": "Terminal national", "story": "Contrats nationaux, panamax et trains de conteneurs.",
    "value_mult": 18.0, "dues_mult": 10.0, "traffic_mult": 35.0, "amber": 10,
-   "req": {"evp": 500000, "stars": 3.5, "money": 1.5e7, "buildings": ["scanner1"]}},
+   "req": {"evp": 540000, "stars": 3.5, "money": 1.5e7, "buildings": ["scanner1"]}},
   {"id": 4, "name": "Concession nationale", "story": "L'État vous confie le terminal pour 30 ans. Bravo, directeur·rice !",
    "value_mult": 10.0, "dues_mult": 10.0, "traffic_mult": 35.0, "amber": 20, "final": true,
-   "req": {"evp": 2.2e6, "stars": 4.0, "money": 7.0e8, "buildings": ["tos"]}}
+   "req": {"evp": 2.2e6, "stars": 4.0, "money": 4.0e8, "buildings": ["tos"]}}
 ]

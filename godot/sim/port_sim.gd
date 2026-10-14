@@ -49,7 +49,13 @@ var mission_flags: Dictionary = {}     # missions déjà signalées (non sauvega
 var renown: int = 0                    # prestige : points de Renom (bonus permanent de revenus)
 var prestiges: int = 0                 # nombre de concessions déjà menées à terme
 var lifetime: Dictionary = {}          # compteurs cumulés des concessions précédentes
-var features: Dictionary = {}          # fonctions déjà révélées (id -> true) ; voir `feature()`
+var features: Dictionary = {}          # fonctions déjà révélées (id -> instant de la révélation, ou true si chargée) ; voir `feature()`
+var last_reveal_t: float = -1.0e9      # dernière révélation (un sujet à la fois, voir check_unlocks ; sauvegardée depuis C7)
+var _rade_full_t: float = 0.0          # secondes (lissées) de rade pleine : le goulot n'est pas « navires » (non sauvegardé)
+var _bn_time: Dictionary = {}          # secondes « lissées » où chaque service est le goulot (condition « bottleneck » + « for »)
+var _bn_last: float = 0.0
+var last_reveal_id: String = ""         # dernière fonction révélée : sa condition « used » raccourcit l'attente
+var last_tier_t: float = -1.0e9         # dernier passage de palier : aucune révélation pendant `reveal_tier_hold` s (non sauvegardé)
 var owners_on: Dictionary = {}         # armateurs démarchés (salon maritime) : id -> true
 var lines: Dictionary = {}             # lignes régulières signées : armateur -> nombre
 var line_offers: Array[String] = []    # armateurs qui proposent une ligne (après un contrat réussi)
@@ -100,6 +106,7 @@ var ship_buckets: PackedFloat64Array = PackedFloat64Array()
 var bucket_index: int = 0
 var bucket_time: float = 0.0
 var analysis: Dictionary = {}
+var analysis_shown: Dictionary = {}     # conseil affiché (rade pleine : jamais « pas assez de navires », revue N5 bis)
 var _analysis_timer: float = 0.0
 var _second_timer: float = 0.0
 var _last_full_notice: float = -100.0
@@ -150,6 +157,11 @@ func reset() -> void:
 	missions_claimed.clear()
 	mission_flags.clear()
 	features.clear()
+	last_reveal_t = -1.0e9
+	last_reveal_id = ""
+	_rade_full_t = 0.0
+	_bn_time.clear()
+	_bn_last = 0.0
 	owners_on.clear()
 	lines.clear()
 	line_offers.clear()
@@ -186,6 +198,8 @@ func reset() -> void:
 	stat_truck_wait = 0.0
 	stat_berth_busy = 0.0
 	_assist_at.clear()
+	_yard_at = 0.0
+	_gate_at = 0.0
 	_last_full_notice = -100.0
 	_second_timer = 0.0
 	_analysis_timer = 0.0
@@ -355,6 +369,25 @@ func boost_active() -> bool:
 # =====================================================================
 # Statistiques et explicabilité
 # =====================================================================
+
+## Services facturés (lot D-Éco, `service_fee`) : chaque niveau de service au-delà du premier facture aux armateurs
+## l'équivalent de `service_fee` EVP/s (pilotage, amarrage, stockage…) au prix de base d'un EVP (cargaison × palier ×
+## Renom, sans les licences). Un niveau hors goulot rapporte donc toujours un minimum ; la part de ces recettes fond
+## quand le trafic grandit (paliers 2 et 3).
+func service_fee_rate() -> float:
+	var f := float(db.cfg("service_fee", 0.0))
+	if f <= 0.0:
+		return 0.0
+	var n := 0
+	for d in DEPTS:
+		n += int(levels[d]) - 1
+	var mix := cargo_shares()
+	var v := 0.0
+	for c in NCARGO:
+		v += mix[c] * float(db.cargo[c].value)
+	v *= float(db.tier_def(tier).get("value_mult", 1.0)) * renown_mult()
+	return f * float(n) * v * (1.0 + float(db.cfg("gate_fee_ratio")))
+
 
 ## Bonus permanent de prestige : +10 % de revenus par point de Renom.
 func renown_mult() -> float:
@@ -999,6 +1032,43 @@ func assist_unload(bi: int) -> float:
 	return moved
 
 
+var _yard_at := 0.0         # instant où le prochain coup de pouce au parc est possible
+var _gate_at := 0.0         # instant où le prochain passage express à la gate est possible
+
+
+## Toucher l'engin du parc : il range tout de suite quelques secondes de transfert (tant que Nadia Benali n'est pas là).
+func yard_boost_ready() -> bool:
+	return feature("dept_yard_ops") and not managers.yard_ops and time >= _yard_at and apron_stock() > 0.5
+
+
+func yard_boost() -> float:
+	if not yard_boost_ready():
+		return 0.0
+	var m: Dictionary = db.cfg("manual")
+	_yard_at = time + float(m.yard_cooldown)
+	var before := apron_stock()
+	_transfer(float(m.yard_seconds))
+	add_counter("yard_boosts")
+	return before - apron_stock()
+
+
+## Toucher la barrière : un camion passe tout de suite (quelques secondes de gate d'un coup, tant que Tonio Ferrer n'est pas là).
+func gate_rush_ready() -> bool:
+	return feature("dept_gate") and not managers.gate and time >= _gate_at and truck_queue >= float(db.cfg("truck_evp"))
+
+
+func gate_rush() -> float:
+	if not gate_rush_ready():
+		return 0.0
+	var m: Dictionary = db.cfg("manual")
+	_gate_at = time + float(m.gate_cooldown)
+	# EVP réellement sortis par la gate (revue C7 C1 : le solde de la file mêlait les camions servis et ceux arrivés)
+	var before := _sum(delivered)
+	_gate(float(m.gate_seconds))
+	add_counter("gate_rushes")
+	return maxf(0.0, _sum(delivered) - before)
+
+
 func missions_claimable() -> int:
 	return Objectives.claimable_count(self)
 
@@ -1013,6 +1083,16 @@ func feature(id: String) -> bool:
 
 
 func unlock_ok(when: Dictionary) -> bool:
+	# « any » : l'une des conditions suffit (ex. le service atteint le niveau 10, ou le suivant devient le goulot)
+	if when.has("any"):
+		for w in when.any:
+			if unlock_ok(w):
+				return true
+		return false
+	# « for » : le service doit être le goulot depuis au moins N secondes (revue N7 : la gate ne s'ouvre pas sur un pic)
+	if when.has("bottleneck") and (String(analysis.get("dept", "")) != String(when.bottleneck)
+			or float(_bn_time.get(String(when.bottleneck), 0.0)) < float(when.get("for", 0.0))):
+		return false
 	if when.has("ships") and counter("ships") < float(when.ships):
 		return false
 	if when.has("evp") and counter("evp") < float(when.evp):
@@ -1023,15 +1103,75 @@ func unlock_ok(when: Dictionary) -> bool:
 		return false
 	if when.has("tier") and tier < int(when.tier):
 		return false
+	if when.has("level"):
+		var lw: Dictionary = when.level
+		if int(levels.get(String(lw.dept), 1)) < int(lw.min):
+			return false
+	if when.has("manager") and not bool(managers.get(String(when.manager), false)):
+		return false
+	# conditions « used » (le joueur s'est servi d'une fonction révélée) : responsables embauchés, compteur, licence, mission
+	if when.has("hired") and managers_count() < int(when.hired):
+		return false
+	if when.has("counter") and counter(String(when.counter.id)) < float(when.counter.min):
+		return false
+	if when.has("licence"):
+		var best_lv := 0
+		for ci in NCARGO:
+			best_lv = maxi(best_lv, int(licences[ci]))
+		if best_lv < int(when.licence):
+			return false
+	if when.has("claimed") and missions_claimed.size() < int(when.claimed):
+		return false
+	# « after » : quelques secondes après une autre révélation (les sujets d'un chapitre arrivent un par un)
+	if when.has("after"):
+		var aw: Dictionary = when.after
+		var aid := String(aw.id)
+		if not features.has(aid) or time - feature_time(aid) < float(aw.get("s", 0.0)):
+			return false
 	return true
+
+
+## Prochain chapitre fermé par le niveau d'un service : {dept, min, name} (le service à monter, le niveau, ce qu'il ouvre),
+## {} s'il n'y en a plus. Sert aux cartes d'Améliorer : un niveau sans gain immédiat rapproche quand même du chapitre suivant.
+func chapter_goal() -> Dictionary:
+	for u in db.unlocks:
+		if features.has(String(u.id)) or not bool(u.get("opens_chapter", false)):
+			continue
+		var w: Dictionary = u.get("when", {})
+		var subs: Array = w.any if w.has("any") else [w]
+		for sub in subs:
+			if (sub as Dictionary).has("level"):
+				return {"dept": String(sub.level.dept), "min": int(sub.level.min), "name": String(u.name)}
+	return {}
+
+
+## Instant de la révélation d'une fonction (−1e9 si elle vient d'une sauvegarde ou d'une concession précédente).
+func feature_time(id: String) -> float:
+	var v: Variant = features.get(id, null)
+	if (v is float or v is int) and not (v is bool) and float(v) <= time:
+		return float(v)
+	return -1.0e9
 
 
 ## Condition lisible d'une fonction encore cachée (« après 4 escales (2/4) »), pour les cartes verrouillées.
 func unlock_text(id: String) -> String:
 	var u: Dictionary = db.unlock_by_id.get(id, {})
 	var w: Dictionary = u.get("when", {})
+	if w.has("any"):
+		for sub in w.any:
+			if (sub as Dictionary).has("level"):
+				w = sub
+				break
+	if w.has("level"):
+		var lw: Dictionary = w.level
+		var dn := String(db.dept_by_id[String(lw.dept)].name)
+		return "quand %s atteint le niveau %d (%d/%d)" % [dn, int(lw.min), mini(int(levels.get(String(lw.dept), 1)), int(lw.min)), int(lw.min)]
+	if w.has("manager"):
+		return "avec %s" % String(db.dept_by_id[String(w.manager)].manager.name)
 	if w.has("building"):
-		return "avec « %s » (Gestion → Bâtiments)" % db.building_by_id[String(w.building)].name
+		# Gestion n'existe qu'à partir du chapitre 3 : avant, on désigne l'emplacement doré du port (revue C7 B6)
+		var where := "Gestion → Bâtiments" if feature("manage") else "son emplacement doré, dans le port"
+		return "avec « %s » (%s)" % [db.building_by_id[String(w.building)].name, where]
 	if w.has("ships"):
 		return "après %d escales (%d/%d)" % [int(w.ships), mini(int(counter("ships")), int(w.ships)), int(w.ships)]
 	if w.has("evp"):
@@ -1040,20 +1180,44 @@ func unlock_text(id: String) -> String:
 		return "au palier T%d" % int(w.tier)
 	if w.has("amber"):
 		return "au premier Ambre gagné"
+	if w.has("after"):
+		var au: Dictionary = db.unlock_by_id.get(String(w.after.id), {})
+		var s := float(w.after.get("s", 0.0))
+		var lead := "peu" if s < 60.0 else Fmt.duration(s)
+		return "%s après « %s »" % [lead, String(au.get("name", w.after.id))]
 	return ""
 
 
+## Révèle les fonctions dont la condition est remplie, **un sujet à la fois** : une révélation ordinaire attend
+## `reveal_gap` secondes après la précédente (config.json) ; celles qui ouvrent un chapitre (« opens_chapter ») passent
+## tout de suite (leur service ne doit pas devenir le goulot sans avoir été présenté), mais une seule par passage.
+## Rien n'est révélé pendant `reveal_tier_hold` s après un passage de palier (la cérémonie passe seule, lot D-Éco).
 func check_unlocks() -> void:
-	for u in db.unlocks:
-		var id := String(u.id)
-		if features.has(id) or not unlock_ok(u.get("when", {})):
-			continue
-		features[id] = true
-		if id == "events":
-			next_event_at = maxf(next_event_at, time + 60.0)   # le premier aléa laisse une minute de répit
-		elif id == "contracts":
-			next_contract_refresh = time
-		feature_unlocked.emit(id)
+	if time - last_tier_t < float(db.cfg("reveal_tier_hold", 0.0)):
+		return
+	var pick := ""
+	for pass_i in 2:
+		for u in db.unlocks:
+			var id := String(u.id)
+			if features.has(id) or bool(u.get("opens_chapter", false)) != (pass_i == 0):
+				continue
+			if pass_i == 1 and not _reveal_gap_over():
+				return
+			if unlock_ok(u.get("when", {})):
+				pick = id
+				break
+		if pick != "":
+			break
+	if pick == "":
+		return
+	last_reveal_t = time
+	last_reveal_id = pick
+	features[pick] = time
+	if pick == "events":
+		next_event_at = maxf(next_event_at, time + 60.0)   # le premier aléa laisse une minute de répit
+	elif pick == "contracts":
+		next_contract_refresh = time
+	feature_unlocked.emit(pick)
 
 
 ## Sauvegarde d'avant la révélation progressive : le joueur connaissait déjà tout, et ses caboteurs
@@ -1214,6 +1378,9 @@ func _fees_and_costs(dt: float) -> void:
 	var reefer := yard_pending[ri] + yard_cleared[ri]
 	if reefer > 0.0:
 		_earn(reefer * float(db.cfg("reefer_fee_per_day")) * float(db.tier_def(tier).get("value_mult", 1.0)) * renown_mult() * dt / day, "reefer")
+	var fees := service_fee_rate()
+	if fees > 0.0:
+		_earn(fees * dt, "fees")
 	var cost := salaries_per_day() * dt / day
 	money = maxf(0.0, money - cost)
 	income_buckets[bucket_index] -= cost
@@ -1435,9 +1602,9 @@ const HINTS := {
 	"customs": "Les formalités traînent : améliore la Douane.",
 	"inspection": "Les lots attendent l'inspection : améliore la Douane ou assouplis la politique.",
 	"yard_ops": "Le tablier déborde : améliore le Parc et manutention.",
-	"yard_space": "Le parc sature : améliore Parc et manutention (empilage) ou agrandis-le (Bâtiments).",
+	"yard_space": "Parc trop petit pour ton débit, même s'il n'est pas plein : agrandis-le (CONSTRUIRE) ou améliore l'empilage (Parc et manutention).",
 	"gate": "Les camions font la queue : améliore la Gate ou construis une aire d'attente.",
-	"min_time": "Les escales sont au plancher : un remorqueur, des bollards rapides ou un guichet numérique les raccourcissent (Bâtiments).",
+	"min_time": "Les escales sont au plancher : un remorqueur, des bollards rapides ou un guichet numérique les raccourcissent (CONSTRUIRE).",
 	"tier": "Les quais tournent à plein régime : vise le palier suivant pour de plus gros navires.",
 }
 
@@ -1449,10 +1616,63 @@ const HINT_DEPT := {
 
 
 func _refresh_analysis() -> void:
-	analysis = _compute_analysis()
+	var a := _compute_analysis()
+	analysis = a
+	# conseil affiché au joueur (`analysis_shown`) : rade pleine depuis quelques secondes, des navires sont déroutés, le goulot
+	# affiché n'est donc pas « pas assez de navires » (revue N5 bis) ; on désigne le maillon suivant. Présentation seulement :
+	# `analysis` (débit soutenable, hors-ligne, contrats, bot d'équilibrage) est inchangée.
+	# temps écoulé depuis le passage précédent (appelé toutes les 0,5 s, mais aussi après chaque achat : revue C7 C2)
+	var dtb := clampf(time - _bn_last, 0.0, 2.0)
+	_bn_last = time
+	var full := waiting_ships() >= rade_places()
+	_rade_full_t = clampf(_rade_full_t + (dtb if full else -dtb), 0.0, float(db.cfg("rade_full_hold", 3.0)) * 2.0)
+	analysis_shown = a
+	if (String(a.key) == "harbor" or String(a.key) == "attract") and _rade_full_t >= float(db.cfg("rade_full_hold", 3.0)):
+		var b := _compute_analysis(true)
+		b.flow = a.flow
+		b.caps = a.caps
+		b.rade_full = true
+		analysis_shown = b
+	# alerte (lot D-Éco) : un goulot normal n'est pas une alerte ; la carte ne passe au rouge que si un maillon est bloqué
+	# (`alert_reason`), et le reste `alert_hold` s pour ne pas clignoter
+	var why := alert_reason(analysis_shown)
+	if why != "":
+		_alert_why = why
+		_alert_left = float(db.cfg("alert_hold", 4.0))
+	else:
+		_alert_left = maxf(0.0, _alert_left - dtb)
+	analysis_shown.alert = _alert_why if _alert_left > 0.0 else ""
+	if not is_same(analysis_shown, analysis):
+		analysis.alert = analysis_shown.alert
+	# depuis quand ce service est-il le goulot (condition « bottleneck » + « for » des chapitres)
+	var bd := String(analysis.get("dept", ""))
+	for d in _bn_time.keys():
+		if d != bd:
+			_bn_time[d] = maxf(0.0, float(_bn_time[d]) - dtb)      # un instant ailleurs n'efface pas tout
+	_bn_time[bd] = float(_bn_time.get(bd, 0.0)) + dtb
 
 
-func _compute_analysis() -> Dictionary:
+var _alert_why := ""        # dernière raison d'alerte (non sauvegardé)
+var _alert_left := 0.0      # secondes d'alerte restantes
+
+
+## Raison d'alerte de la carte Goulot (lot D-Éco) : "" pour un goulot normal — il y en a toujours un, et une rade pleine
+## est l'état ordinaire d'un port saturé ; sinon le maillon bloqué : brouillard (pilotage suspendu), navire sur le point
+## de repartir furieux, parc presque plein, camions bloqués à la gate.
+func alert_reason(a: Dictionary) -> String:
+	if String(a.get("key", "")) == "fog":
+		return "fog"
+	for s in ships:
+		if s.state == Ship.State.ANCHORED and s.patience < float(db.cfg("alert_patience", 0.3)) * s.patience_max:
+			return "patience"
+	if yard_fill() >= float(db.cfg("alert_yard_fill", 0.9)):
+		return "yard"
+	if trucks_honking() > 0:
+		return "gate"
+	return ""
+
+
+func _compute_analysis(exclude_harbor: bool = false) -> Dictionary:
 	invalidate()
 	var caps := capacities()
 	var cands := {
@@ -1464,6 +1684,8 @@ func _compute_analysis() -> Dictionary:
 		"gate": caps.gate,
 		"yard_space": caps.yard_space,
 	}
+	if exclude_harbor:
+		cands.erase("harbor")
 	var best := "harbor"
 	var bv := INF
 	for k in cands:
@@ -1555,7 +1777,7 @@ func sustainable_flow() -> float:
 func income_rate_estimate() -> float:
 	var flow := sustainable_flow()
 	var v := avg_value_per_evp() * (1.0 + float(db.cfg("gate_fee_ratio")))
-	return maxf(0.0, flow * v - salaries_per_day() / float(db.cfg("day_seconds")))
+	return maxf(0.0, flow * v + service_fee_rate() - salaries_per_day() / float(db.cfg("day_seconds")))
 
 
 ## Revenu net estimé (par seconde) si `n` niveaux de plus étaient achetés : un département (`dept`)
@@ -1568,7 +1790,7 @@ func income_estimate_with(dept: String, n: int, cargo_i: int = -1) -> float:
 	invalidate()
 	var flow := float(_compute_analysis().flow)
 	var v := avg_value_per_evp() * (1.0 + float(db.cfg("gate_fee_ratio")))
-	var r := maxf(0.0, flow * v - salaries_per_day() / float(db.cfg("day_seconds")))
+	var r := maxf(0.0, flow * v + service_fee_rate() - salaries_per_day() / float(db.cfg("day_seconds")))
 	if cargo_i >= 0:
 		licences[cargo_i] -= n
 	else:
@@ -1647,8 +1869,13 @@ func manager_available(dept: String) -> bool:
 	return int(db.dept_by_id[dept].manager.tier) <= tier
 
 
+## Le responsable d'un service se présente quand ce service atteint le niveau `manager_reveal_level` (10), un par un.
+func manager_revealed(dept: String) -> bool:
+	return feature("managers") and int(levels[dept]) >= int(db.cfg("manager_reveal_level", 10))
+
+
 func hire_manager(dept: String, with_amber: bool = false) -> bool:
-	if managers[dept] or not feature("managers"):
+	if managers[dept] or not manager_revealed(dept):
 		return false
 	var m: Dictionary = db.dept_by_id[dept].manager
 	if with_amber:
@@ -1761,7 +1988,8 @@ func carry_over(old: PortSim) -> void:
 	for m in old.missions_claimed:
 		missions_claimed.append(m)
 	lifetime = old.lifetime.duplicate()
-	features = old.features.duplicate()
+	for f in old.features:
+		features[f] = true
 	for k in old.counters:
 		if not RUN_ONLY_COUNTERS.has(k):
 			lifetime[k] = float(lifetime.get(k, 0.0)) + float(old.counters[k])
@@ -1788,6 +2016,7 @@ func tier_up() -> bool:
 	money -= float(nt.req.money)
 	tier += 1
 	amber += int(nt.get("amber", 0))
+	last_tier_t = time      # la cérémonie du palier passe seule : aucune révélation pendant `reveal_tier_hold` s
 	check_unlocks()
 	if bool(nt.get("final", false)):
 		finished = true
@@ -1871,7 +2100,7 @@ func to_dict() -> Dictionary:
 		"licences": Array(licences), "built": built.duplicate(), "policy": policy, "tariff": tariff,
 		"boost_until": boost_until, "boost_ready_at": boost_ready_at, "relations": relations.duplicate(),
 		"counters": counters.duplicate(), "missions_claimed": missions_claimed.duplicate(),
-		"renown": renown, "prestiges": prestiges, "lifetime": lifetime.duplicate(), "features": features.keys(), "owners_on": owners_on.keys(), "lines": lines.duplicate(),
+		"renown": renown, "prestiges": prestiges, "lifetime": lifetime.duplicate(), "features": features.duplicate(), "last_reveal_t": last_reveal_t, "last_reveal_id": last_reveal_id, "owners_on": owners_on.keys(), "lines": lines.duplicate(),
 		"line_offers": line_offers.duplicate(), "campaign_ready_at": campaign_ready_at.duplicate(),
 		"ships": sh, "next_ship_id": next_ship_id, "arrival_accum": arrival_accum,
 		"apron": Array(apron), "yard_pending": Array(yard_pending), "yard_cleared": Array(yard_cleared),
@@ -1891,7 +2120,7 @@ func from_dict(d: Dictionary) -> void:
 	time = float(d.get("time", 0.0))
 	money = float(d.get("money", 0.0))
 	amber = int(d.get("amber", 0))
-	tier = int(d.get("tier", 1))
+	tier = clampi(int(d.get("tier", 1)), 1, 3)     # palier borné (Layout.LAND_X, tier_def…)
 	finished = bool(d.get("finished", false))
 	satisfaction = float(d.get("satisfaction", 0.55))
 	for k in d.get("levels", {}):
@@ -1917,8 +2146,21 @@ func from_dict(d: Dictionary) -> void:
 	renown = int(d.get("renown", 0))
 	prestiges = int(d.get("prestiges", 0))
 	lifetime = d.get("lifetime", {}).duplicate()
-	for f in d.get("features", []):
-		features[String(f)] = true
+	# fonctions révélées : {id: instant de la révélation} depuis la version 5 de la sauvegarde (revue C7 A3 : une chaîne
+	# « after » garde son délai au rechargement) ; liste d'identifiants avant (révélées « depuis toujours »)
+	var fd: Variant = d.get("features", [])
+	if fd is Dictionary:
+		for f in fd:
+			var fv: Variant = fd[f]
+			if (fv is float or fv is int) and not (fv is bool):
+				features[String(f)] = float(fv)
+			else:
+				features[String(f)] = true
+	elif fd is Array:
+		for f in fd:
+			features[String(f)] = true
+	last_reveal_t = float(d.get("last_reveal_t", -1.0e9))
+	last_reveal_id = String(d.get("last_reveal_id", ""))
 	for o in d.get("owners_on", []):
 		owners_on[String(o)] = true
 	for k in d.get("lines", {}):
@@ -1969,4 +2211,28 @@ func from_dict(d: Dictionary) -> void:
 		_upgrade_commerce_save()
 	_clamp_licences()
 	rebuild_infra()
+	_bn_last = time          # pas de « temps de goulot » fantôme entre 0 et l'heure de la partie chargée (revue C7 C2)
 	_refresh_analysis()
+
+
+## La dernière fonction révélée a-t-elle déjà servi (condition « used » de unlocks.json) ? Si oui, la suivante n'attend
+## pas la fin de `reveal_gap` (revue N8 : une révélation par minute, ou dès que la précédente est utilisée).
+func _last_reveal_used() -> bool:
+	if last_reveal_id == "":
+		return false
+	var u: Dictionary = db.unlock_by_id.get(last_reveal_id, {})
+	return u.has("used") and unlock_ok(u.used)
+
+
+## Une révélation ordinaire attend `reveal_gap` s (60) après la précédente, ou seulement `reveal_gap_min` s (20) si la
+## précédente a déjà servi.
+func _reveal_gap_over() -> bool:
+	var dt := time - last_reveal_t
+	if dt >= float(db.cfg("reveal_gap", 0.0)):
+		return true
+	return dt >= float(db.cfg("reveal_gap_min", 0.0)) and _last_reveal_used()
+
+
+## Conseil de goulot affiché au joueur (voir `_refresh_analysis`).
+func shown_analysis() -> Dictionary:
+	return analysis_shown if not analysis_shown.is_empty() else analysis

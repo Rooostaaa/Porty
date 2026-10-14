@@ -1,7 +1,9 @@
 class_name DebugArgs
 extends RefCounted
 ## Arguments de triche de la ligne de commande (--debug-money, --tier, --levels, --build-all, --hire-all, --build,
-## --unlock-all, --speed, --open=debug) : appliqués seulement en version de débogage (OS.is_debug_build()).
+## --unlock-all, --speed, --open=debug, --load-sim, --open-zone ; F1 et sa ligne des Réglages) : seulement depuis le binaire de
+## l'éditeur (OS.has_feature("editor") : tests headless, captures, jouer.bat). Jamais dans l'APK, même exporté en debug
+## (OS.is_debug_build() y est vrai : revue C7 A5).
 ## Les arguments de capture (--fresh, --capture, --delay, --look, --zoom, --tuto…) restent disponibles partout.
 
 const CHEATS := ["speed", "debug-money", "tier", "build-all", "levels", "hire-all", "build", "unlock-all"]
@@ -31,9 +33,9 @@ static func build_all(s: PortSim) -> void:
 	s.invalidate()
 
 
-## Les triches sont-elles autorisées ? (version exportée : non)
+## Les triches sont-elles autorisées ? (binaire de l'éditeur : oui ; toute version exportée, debug comprise : non)
 static func allowed() -> bool:
-	return OS.is_debug_build()
+	return OS.has_feature("editor")
 
 
 ## Applique les triches de `a` à `sim` si `debug` ; renvoie {"applied": [clés appliquées], "speed": vitesse demandée ou -1}.

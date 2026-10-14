@@ -39,10 +39,10 @@ static func meta(name: String) -> Dictionary:
 	return _meta.get(name, {})
 
 
-## Couleur de palette (sRGB, pour l'UI).
+## Couleur de palette (sRGB, pour l'UI) ; à défaut, les couleurs propres au plan (Layout.PALETTE_EXTRA).
 static func color(key: String) -> Color:
 	_ensure()
-	return Color(String(_palette.get(key, "#ff00ff")))
+	return Color(String(_palette.get(key, Layout.PALETTE_EXTRA.get(key, "#ff00ff"))))
 
 
 ## Le modèle existe-t-il (fichier ou cache d'import) ?

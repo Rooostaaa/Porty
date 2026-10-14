@@ -194,6 +194,7 @@ static func icon_disc(name: String, bg: Color, size: float = 96.0) -> PanelConta
 	var p := PanelContainer.new()
 	p.add_theme_stylebox_override("panel", flat(bg, int(size / 2)))
 	p.custom_minimum_size = Vector2(size, size)
+	p.size_flags_vertical = Control.SIZE_SHRINK_CENTER     # jamais étirée en ovale par une rangée plus haute (revue D-UI)
 	var ic := icon(name, size * 0.6)
 	ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -211,3 +212,35 @@ static func badge(text: String, bg: Color = VIOLET, size: int = 28) -> PanelCont
 	p.add_child(l)
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return p
+
+
+## Bouton rond discret (pastille de `visual` px) dont la zone de toucher fait `hit` px : la cible tactile est grande sans
+## alourdir l'écran (revue D-UI : « i », ▲, « + » à 56–64 px).
+static func hit_button(col: Color, text: String, visual: float = 56.0, hit: float = 96.0) -> Button:
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.flat = true
+	for st in ["normal", "hover", "pressed", "disabled", "focus"]:
+		b.add_theme_stylebox_override(st, StyleBoxEmpty.new())
+	b.custom_minimum_size = Vector2(hit, hit)
+	var dot := PanelContainer.new()
+	dot.add_theme_stylebox_override("panel", flat(col, int(visual * 0.5)))
+	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dot.custom_minimum_size = Vector2(visual, visual)
+	dot.set_anchors_preset(Control.PRESET_CENTER)
+	dot.offset_left = -visual * 0.5
+	dot.offset_right = visual * 0.5
+	dot.offset_top = -visual * 0.5
+	dot.offset_bottom = visual * 0.5
+	var l := label(text, int(visual * 0.55), Color.WHITE, true)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	dot.add_child(l)
+	b.add_child(dot)
+	return b
+
+
+## Bouton d'un état acquis (CONSTRUIT, EMBAUCHÉ) : inactif mais vert pâle, pas gris (le gris est réservé à l'impossible).
+static func style_done(b: Button) -> void:
+	b.add_theme_stylebox_override("disabled", flat(MONEY.lightened(0.35), 28, 22, 8))
+	b.add_theme_color_override("font_disabled_color", Color.WHITE)

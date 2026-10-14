@@ -1,17 +1,36 @@
 class_name Sheet
 extends Control
-## Écran plein cadre : en-tête indigo + flèche retour, onglets optionnels, contenu défilant de cartes blanches.
+## Écran : en-tête indigo + flèche retour, onglets optionnels, contenu défilant de cartes blanches.
+## Deux formats (lot D-UI) :
+## - **plein cadre** (Gestion, Missions, Réglages) : fond opaque, le port est en pause derrière ;
+## - **mi-hauteur** (`half`, Améliorer et Commerce) : feuille basse sur 58 % de l'écran au-dessus du port qui continue de
+##   vivre (surcouche monde visible au-dessus, effets non suspendus) ; toucher le port au-dessus la referme.
+## Les deux portent un mini-solde dans l'en-tête et un « ? » qui rouvre l'aide (le texte d'aide n'est affiché qu'une fois).
 
 signal closed()
+
+## Haut de la feuille mi-hauteur, en fraction de la hauteur d'écran (la feuille occupe les 58 % du bas).
+const HALF_TOP := 0.42
 
 var title: String = ""
 var tabs: Array[String] = []
 var tab: int = 0
+var half := false
 var content: VBoxContainer
 var scroll: ScrollContainer
 var tab_buttons: Array[Button] = []
 var header_extra: HBoxContainer
+var money_l: Label                     # mini-solde de l'en-tête
+var help_btn: Button
+var panel_root: Control                # la feuille elle-même (en-tête + contenu) : en mi-hauteur, le bas de l'écran
 var _refresh_t := 0.0
+var _help_lines: Array[String] = []     # aides de l'onglet affiché (« ? » de l'en-tête)
+var _help_here: Dictionary = {}         # aides affichées dans cet écran (elles y restent jusqu'à sa fermeture)
+var _closing := false
+
+## Aides déjà lues (clé -> vrai) : une aide d'en-tête n'est déroulée qu'une fois par partie lancée, ensuite repliée
+## dans le « ? » de l'en-tête (revue D-UI, cosmétique).
+static var help_seen: Dictionary = {}
 
 
 func _init(t: String = "", tab_names: Array[String] = []) -> void:
@@ -24,60 +43,141 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	var bg := ColorRect.new()
 	bg.color = UI.BG
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(bg)
+	bg.mouse_filter = Control.MOUSE_FILTER_STOP
 	var root := UI.vbox(0)
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	if half:
+		# le haut de l'écran reste au port : seule la feuille a un fond
+		bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		bg.anchor_top = HALF_TOP
+		bg.offset_top = 60.0          # sous les coins arrondis de l'en-tête
+		root.set_anchors_preset(Control.PRESET_FULL_RECT)
+		root.anchor_top = HALF_TOP
+		root.offset_top = 0.0
+		root.offset_bottom = 0.0
+		root.offset_left = 0.0
+		root.offset_right = 0.0
+	else:
+		bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(bg)
 	add_child(root)
+	panel_root = root
 	# en-tête
 	var head := PanelContainer.new()
 	var hs := UI.flat(UI.INDIGO, 0, 24, 18)
+	if half:
+		hs.corner_radius_top_left = 44
+		hs.corner_radius_top_right = 44
+		hs.content_margin_top = 20
+		hs.shadow_color = Color(0.1, 0.05, 0.3, 0.35)
+		hs.shadow_size = 16
+	else:
+		hs.content_margin_top = 44
 	hs.corner_radius_bottom_left = 40
 	hs.corner_radius_bottom_right = 40
-	hs.content_margin_top = 44
 	head.add_theme_stylebox_override("panel", hs)
+	head.mouse_filter = Control.MOUSE_FILTER_STOP
 	root.add_child(head)
-	var hv := UI.vbox(18)
+	var hv := UI.vbox(14 if half else 18)
 	head.add_child(hv)
-	var hrow := UI.hbox(18)
+	var hrow := UI.hbox(14)
 	hv.add_child(hrow)
-	var back := UI.button("", UI.INDIGO_DARK, 36, 104)
-	back.icon = UI.icon_tex("back")
+	var back := UI.button("", UI.INDIGO_DARK, 36, 96 if half else 104)
+	back.icon = UI.icon_tex("close" if half else "back")
 	back.expand_icon = true
-	back.custom_minimum_size = Vector2(104, 104)
-	back.add_theme_constant_override("icon_max_width", 56)
+	back.custom_minimum_size = Vector2(96, 96) if half else Vector2(104, 104)
+	back.add_theme_constant_override("icon_max_width", 48 if half else 56)
 	back.pressed.connect(close)
 	hrow.add_child(back)
-	var tl := UI.label(title, 52, Color.WHITE)
+	var tl := UI.label(title, 44 if half else 52, Color.WHITE)
 	tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	tl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	tl.clip_text = true
+	tl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	hrow.add_child(tl)
 	header_extra = UI.hbox(10)
 	hrow.add_child(header_extra)
+	# « ? » : l'aide de l'onglet (repliée après la première lecture)
+	help_btn = UI.button("", UI.INDIGO_DARK, 30, 96)
+	help_btn.icon = UI.icon_tex("help")
+	help_btn.expand_icon = true
+	help_btn.custom_minimum_size = Vector2(96, 96)
+	help_btn.add_theme_constant_override("icon_max_width", 44)
+	help_btn.tooltip_text = "Aide"
+	help_btn.pressed.connect(_show_help)
+	help_btn.visible = false
+	header_extra.add_child(help_btn)
+	# mini-solde : on voit toujours ce qu'on a en poche (revue D-UI)
+	var mp := PanelContainer.new()
+	mp.add_theme_stylebox_override("panel", UI.flat(UI.INDIGO_DARK, 30, 14, 4))
+	mp.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var mh := UI.hbox(6)
+	mp.add_child(mh)
+	mh.add_child(UI.icon("money", 40))
+	money_l = UI.label("", 34, UI.MONEY.lightened(0.25), true)
+	mh.add_child(money_l)
+	header_extra.add_child(mp)
+	_update_money()
 	if not tabs.is_empty():
 		var trow := UI.hbox(10)
 		hv.add_child(trow)
 		for i in tabs.size():
-			var b := UI.button(tabs[i], UI.INDIGO_DARK, 30, 84)
+			var b := UI.button(tabs[i], UI.INDIGO_DARK, 30, 84 if half else 84)
 			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			b.clip_text = true
 			b.pressed.connect(_select_tab.bind(i))
 			trow.add_child(b)
 			tab_buttons.append(b)
+	var body := Control.new()
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(body)
+	var bbg := ColorRect.new()
+	bbg.color = UI.BG
+	bbg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bbg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	body.add_child(bbg)
 	scroll = ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	root.add_child(scroll)
+	body.add_child(scroll)
 	var margin := MarginContainer.new()
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for side in ["left", "right"]:
 		margin.add_theme_constant_override("margin_" + side, 28)
-	margin.add_theme_constant_override("margin_top", 26)
+	margin.add_theme_constant_override("margin_top", 22 if half else 26)
 	margin.add_theme_constant_override("margin_bottom", 60)
 	scroll.add_child(margin)
 	content = UI.vbox(22)
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	margin.add_child(content)
 	_select_tab(tab)
+	if half:
+		# entrée : la feuille monte du bas de l'écran
+		root.offset_top = 200.0
+		root.offset_bottom = 200.0
+		bg.modulate.a = 0.0
+		var tw := create_tween().set_parallel(true)
+		tw.tween_property(root, "offset_top", 0.0, 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		tw.tween_property(root, "offset_bottom", 0.0, 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		tw.tween_property(bg, "modulate:a", 1.0, 0.12)
+
+
+## Haut de la feuille (coordonnées écran) : en mi-hauteur, le port est visible au-dessus.
+func top_y() -> float:
+	if not half:
+		return 0.0
+	return get_viewport_rect().size.y * HALF_TOP
+
+
+## Toucher au-dessus d'une feuille mi-hauteur (sur le port) : elle se referme.
+func _gui_input(event: InputEvent) -> void:
+	if not half:
+		return
+	var mb := event as InputEventMouseButton
+	if mb != null and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT and mb.position.y < top_y():
+		accept_event()
+		close()
 
 
 func _select_tab(i: int) -> void:
@@ -104,11 +204,38 @@ func rebuild() -> void:
 		return
 	for c in content.get_children():
 		c.queue_free()
+	_help_lines.clear()
 	build()
+	help_btn.visible = not _help_lines.is_empty()
 	refresh()
 
 
+## Texte d'aide d'en-tête : déroulé la première fois (et tant que cet écran reste ouvert), ensuite replié dans le « ? ».
+func help(key: String, text: String) -> void:
+	_help_lines.append(text)
+	if not help_seen.has(key) or _help_here.has(key):
+		help_seen[key] = true
+		_help_here[key] = true
+		content.add_child(UI.wrap_label(text, 28))
+
+
+func _show_help() -> void:
+	if Hud.main == null or _help_lines.is_empty():
+		return
+	Sfx.play("click")
+	var body: Array = []
+	for t in _help_lines:
+		body.append(UI.wrap_label(t, 30, UI.TEXT))
+	Hud.main.show_popup(title, body, "help")
+
+
+func _update_money() -> void:
+	if money_l != null and GameState.sim != null:
+		money_l.text = Fmt.money(GameState.sim.money)
+
+
 func _process(delta: float) -> void:
+	_update_money()
 	_refresh_t += delta
 	if _refresh_t >= 0.2:
 		_refresh_t = 0.0
@@ -116,6 +243,9 @@ func _process(delta: float) -> void:
 
 
 func close() -> void:
+	if _closing:
+		return
+	_closing = true
 	Sfx.play("click")
 	closed.emit()
 	queue_free()
