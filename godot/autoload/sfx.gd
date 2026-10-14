@@ -94,14 +94,33 @@ func _load_volumes() -> void:
 		_apply_volume(b)
 
 
-## Volume d'un bus (0 à 1), sauvegardé (Réglages).
-func set_volume(bus: String, v: float) -> void:
+## Volume d'un bus (0 à 1). `save` : écrit aussi `user://audio.cfg` — lot E : Réglages n'écrit qu'au relâchement de la
+## réglette (`save_volumes`), plus à chaque cran.
+func set_volume(bus: String, v: float, save: bool = true) -> void:
 	volumes[bus] = clampf(v, 0.0, 1.0)
 	_apply_volume(bus)
+	_dirty = true
+	if save:
+		save_volumes()
+
+
+## Écrit les volumes s'ils ont changé (rien si `persist` est faux : tests).
+func save_volumes() -> void:
+	if not _dirty:
+		return
+	_dirty = false
+	saves += 1
+	if not persist:
+		return
 	var cf := ConfigFile.new()
 	for b in volumes.keys():
 		cf.set_value("volume", b, volumes[b])
 	cf.save(AUDIO_CFG)
+
+
+var persist := true                # faux pendant les tests : `user://audio.cfg` du joueur n'est jamais réécrit
+var saves := 0                     # enregistrements des volumes (tests ; avec `persist` faux, rien n'est écrit)
+var _dirty := false
 
 
 func get_volume(bus: String) -> float:
@@ -158,12 +177,21 @@ func play(name: String, min_gap: float = 0.05, step: int = 0) -> void:
 ## Voix libre, sinon celle du son en cours le moins prioritaire (jamais une voix de priorité 3, jamais celle d'un son plus
 ## prioritaire que le nouveau), -1 s'il n'y en a pas.
 func _voice_for(pr: int) -> int:
+	var busy: Array[bool] = []
+	for p in _players:
+		busy.append(p.playing)
+	return pick_voice(_prio, busy, pr)
+
+
+## Règle de vol des voix, sans lecteur audio (testable : lot E, le contrôle des priorités vérifie vraiment la règle) :
+## une voix libre, sinon celle du son en cours le moins prioritaire, jamais une voix de priorité 3 ni un son plus prioritaire.
+static func pick_voice(prio: Array[int], busy: Array[bool], pr: int) -> int:
 	var best := -1
 	var best_pr := 99
-	for i in _players.size():
-		if not _players[i].playing:
+	for i in prio.size():
+		if not busy[i]:
 			return i
-		var q := _prio[i]
+		var q := prio[i]
 		if q < 3 and q <= pr and q < best_pr:
 			best = i
 			best_pr = q

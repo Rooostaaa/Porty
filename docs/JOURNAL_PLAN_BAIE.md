@@ -811,3 +811,186 @@ fin des graines 2 et 3 hors de 1 h 15 – 1 h 30 (moyenne 1 h 24, ±15 %).
 
 APK réexporté : `C:\Nadir\tycoon_V2\build\PortHorizonV2.apk` (29,6 Mo, 14/10 15 h 21, verrou `scratchpad\capture.lock` pris puis
 rendu), l'ancien supprimé avant l'export.
+
+
+## Lot E — Confiance : interface et simulation d'affichage (14/10, soir)
+
+Ordre `docs/ORDRE_E_CONFIANCE.md` (source `docs/REVUE_LOT_D.md`, E1–E6 + mineurs UI/sim), mené en parallèle de la piste
+E-Flux. Fichiers : `scripts/ui/*` (dont le nouveau `advice.gd`), `autoload/sfx.gd`, `scripts/main.gd`, `scripts/world/camera_rig.gd`
+(E5 seulement), `sim/port_sim.gd`, `sim/hazards.gd`, `data/config.json`, `data/tiers.json`, `data/buildings.json` (deux
+descriptions), `tests/run_all.gd` (`test_e_confiance`), `tests/ui_smoke.gd` (`_e_confiance_checks`), `tests/fixtures/bot_t3.json`
+(partie de bot réelle, graine 1, T3 + 4 min : celle de la capture x3 de la revue). Chaque défaut vérifié dans le code avant
+correction : **aucun faux positif**.
+
+**E1 — services facturés × interface**
+- Vérifié : `upgrade_gain` comptait les services facturés (`service_fee_rate` monte à chaque niveau) → tout achat « rapportait »,
+  pastille 9 au T3 (partie de bot : 9 achats à gain > 0), « pas le goulot » jamais affiché.
+- `PortSim.income_parts_with` / `upgrade_gain_parts` : même estimation (au bit près, contrôlé) séparée en part « débit » et part
+  « services ». Bon achat (`Advice.is_good`) = le débit bouge **et** rentabilisé en < 10 min (seuil fixe, voir `DECISIONS.md`).
+  Vert, pastille et ★ seulement pour les bons achats ; débit immobile : « Portiques +6 % · pas le goulot (+15 $/s de services) »
+  en gris (« le débit ne bouge pas » sur le service goulot lui-même) ; idem pour le retour d'achat dans le monde (pastille bleue,
+  plus de « +X $/s » vert).
+- Au T3 de la partie de bot : pastille **0** (≤ 0 achat rentabilisé en < 10 min ; 9 avant).
+
+**E2 — bouton Goulot** — vérifié : `hint_action` prenait `Zones.next_building` (prochain de la chaîne). Table goulot → bâtiment
+d'après les effets (`Advice.fixes`), bâtiment proposé s'il est le prochain de la liste, sinon le service qui soulage (pour
+« postes à quai » et « escales au plancher », seulement s'il fait bouger le débit), sinon le bâtiment à viser (gris), sinon
+GESTION ; brouillard : PATIENTER. Au T3 de la partie de bot : « postes à quai » → **GESTION** (le quai n°4 est verrouillé derrière
+GNL, IMO, rail, RTG ; un niveau de Quais ne fait monter que les services) — plus jamais « GNL · 280M $ ». Gate au T2 → « DEUXIÈME
+VOIE · 3M $ ». `_on_hint_pressed` suit l'action proposée.
+
+**E3 — aléas** — vérifié : `pay_cost` = `income_rate_estimate` (débit théorique) × secondes. Désormais `Hazards.cost_for` : revenu
+**réel** (`PortSim.real_income_rate`, fenêtre d'une minute) × secondes, plafonné à 25 % de la trésorerie (`hazard_cost_cap`),
+aussi pour l'amende d'un contrôle. Partie de bot au T3 : « Sécuriser » 33 M$ pour 1,33 M$/s réels (116 M$ avant, débit théorique
+4,65 M$/s). Moins de 15 s de revenu mesuré (ancienne sauvegarde tout juste chargée) : estimation plafonnée, recalculée à 15 s.
+Brouillard : « Suspendu (brouillard) » (plus « Inf s → Inf s ») ; un service touché par l'aléa (`Info.event_hits`) n'est jamais le
+meilleur achat ni compté dans la pastille. Bonus trouvé en route : le revenu du HUD (`income_per_min`) tombait à « +41K $/s »
+juste après un chargement (seaux non sauvegardés) → HUD sur `real_income_rate`, et la dernière minute de revenu est sauvegardée
+(champs facultatifs, version inchangée).
+
+**E4 — noms courts** — vérifié (« RACK FRIGO », « 2ᵉ VOIE DE GATE », « QUAI ALLONGÉ »). `Info.BUILDING_SHORT` tiré des noms de
+`buildings.json` (ses mots, dans l'ordre) : « ALLONGEMENT DU QUAI », « PÔLE FROID », « DEUXIÈME VOIE », « SOUTAGE GNL »… ; plus
+de « ᵉ ». Pancarte et Gestion gardent le nom complet. Contrôle : les 31 noms courts cohérents avec leur nom.
+
+**E5 — toucher de fermeture** — vérifié : l'appui va à la feuille, le relâchement arrive à `CameraRig.handle_input` avec
+`_press_pos` de l'ancien toucher → `tapped`. La caméra n'émet un toucher que pour un relâchement dont elle a vu l'appui
+(`_pressed`), et `_press_pos` part hors écran quand l'entrée est coupée. Contrôle par vrais événements (`push_input`) :
+toucher du monde, Améliorer, toucher au-dessus → fermeture, 0 toucher du monde, pas de réouverture.
+
+**E6 — bandeaux sous feuille** — vérifié (`_close_banner` enchaînait sans `_covered()`, minuterie de 6,5 s qui courait masquée,
+VOIR fermait avant d'ouvrir, `_cam_back = rig.goal` déjà déplacé par le monde). `_banner_blocked()` (écran, fenêtre, ouverture,
+cérémonie) ; minuterie suspendue tant que le bandeau est masqué ; VOIR ouvre l'écran puis ferme le bandeau ; `_cam_back` =
+`view_home` pendant un regard de chapitre, sinon `rig.target` (ce que voit le joueur).
+
+**Feuille et cérémonie** — pastille d'aléa compacte en haut à gauche au-dessus d'une feuille mi-hauteur (le toucher passe : il
+referme la feuille) ; fenêtre du palier : texte propre (`story`) + 3 icônes « ce qui s'ouvre » (`tiers.json` → `opens`) + **VOIR**
+qui cadre la zone du prochain bâtiment du palier (terre-plein au T3, quai n°2 au T2 ; la cérémonie y recule aussi) ; surcouche
+monde masquée sous une fenêtre ; couche de cérémonie sans `z_index` (rangée sous `popup_layer`) ; pièces d'encaissement : vraie
+pièce d'or de 64 px (SVG en mémoire, `UI.coin_tex`), nées 150 px au-dessus du montant après 0,6 s, arc vers le haut.
+
+**Mineurs** — `last_tier_t` sauvegardé (champ facultatif, version 5 inchangée) ; `reset()` remet `last_tier_t`, `_alert_*`, la
+fenêtre du revenu réel et le cache des services ; alerte parc / gate seulement après leur chapitre ; onglet Port : « Navires
+satisfaits : 41 % / 50 % » (pour le T2) tant que la Réputation n'est pas révélée ; Stats : « Services facturés (niveaux) » et « Services aux
+escales (atelier, GNL) » (la recette « services » n'apparaissait pas) ; `service_fee_rate` en cache (palier, Renom, cargaisons,
+bâtiments, armateurs, contrats ; une valeur par somme des niveaux) ; `_burst_n` repart de zéro à chaque rafale ; cibles ≥ 96 px
+(onglets 84 → 96, barre de palier → bloc argent + barre de 96 px, BÂTIMENTS 90 → 100 ; « POURQUOI ? » faisait déjà 100 px : mesuré) ;
+`Bubbles.settle` cherche sa place dans le rectangle utile, plus de `StyleBoxFlat.new()` par bulle ; volume enregistré au
+relâchement de la réglette (ou à la fermeture) ; `ui_smoke` coupe `Sfx.persist` ; les trois contrôles toujours vrais vérifient
+(bulle de rade dessinée et près du mouillage ; règle de vol des voix `Sfx.pick_voice` testée sans pilote audio ; Heures sup
+révélées et campagne réellement lancée). Descriptions `gate2` / `parking2` corrigées (plus de « seconde file d'entrée »).
+`--event=id [--event-delay=s]` (binaire de l'éditeur) pour les captures d'aléa. Nouvelle classe `Advice` : `--import` lancé une
+fois pour l'enregistrer.
+
+**Contrôles** — `run_all` **206/206** (196 + 10 `test_e_confiance`) · `ui_smoke` **142 contrôles, 141 verts** (131 + 11
+`_e_confiance_checks`) ; le seul rouge, « C7 A1 : un navire qui part… », est un contrôle des vues de navire (`ship_view.gd`,
+piste E-Flux en cours, passe est). Recalés (aucun retiré) : `run_all` « carte Goulot : rouge seulement… » (on ouvre le chapitre du
+parc avant la mesure de l'alerte du parc) ; `ui_smoke` « D-UI 2 / D-Éco : la pastille ne compte que les achats qui rapportent »
+→ « … que les bons achats » (pastille = bons achats + licences) ; les trois contrôles toujours vrais renforcés (voir plus haut).
+
+**Sonde 4 graines identique** à celle d'avant la piste (`pacing_probe --seeds=N --brief`, une graine par processus, comparaison
+ligne à ligne) : T2 11:43 / 13:07 / 12:23 / 12:18 · T3 39:53 / 42:29 / 40:58 / 41:40 · fin 1 h 20 / 1 h 34 / 1 h 14 / 1 h 28. Seule
+ligne changée : « carte Goulot rouge » de la graine 4 au T1, 4 % → 1 % (alerte de la gate avant son chapitre, voulu).
+
+**Captures** (`--fresh`, sauvegardes de bot `scratchpad\ux2\saves`, 540 × 960, toutes regardées), `docs/captures/` :
+`e_conf_t3_hud.png` (« Goulot : postes à quai » → GESTION gris, plus de GNL ; aucune pastille sur Améliorer ; « Sécuriser et
+continuer · 8,54M $ » pour +329K $/s réels au lieu de 116 M$), `e_conf_t3_ameliorer.png` (Quais GOULOT « Quais +1 % · le débit ne
+bouge pas (+16 $/s de services) » et Parc « … · pas le goulot » en gris, aucun vert ; pastille « Vent fort · 12 s » en haut à
+gauche), `e_conf_alea_ameliorer.png` (brouillard : pastille « Brouillard · 22 s », Capitainerie « Suspendu (brouillard) »),
+`e_conf_alea_hud.png` (panne au T3 avant le quai n°3 : « Réparer · 8,62M $ », « AMÉLIORER QUAIS » proposé — le quai n°3 à 200 M$
+n'est pas abordable et un niveau de Quais fait bouger le débit), `e_conf_ceremonie.png` (« Palier T3 atteint ! », la caméra recule
+sur le terre-plein), `e_conf_palier.png` (fenêtre : 3 icônes « ce qui s'ouvre », +10 Ambre, VOIR / OK ; aucune bulle par-dessus),
+`e_conf_encaissement.png` (« +60,4K $ » lisible, pièces d'or de 64 px au-dessus, en arc).
+**Limite vue** : les sauvegardes de bot n'ont pas encore la minute de revenu (format d'avant) — juste après leur chargement, le
+revenu du HUD est mesuré depuis le chargement (bruité les premières secondes) ; les nouvelles sauvegardes l'ont.
+
+## Lot E — Flux : circulation, passe est, croisements, gare (14/10, soir)
+
+Ordre `docs/ORDRE_E_FLUX.md` (revue `REVUE_LOT_D.md`, E7–E12 et mineurs du monde), mené en parallèle de E-Confiance. Fichiers :
+`scripts/world/layout.gd`, `diorama.gd`, `traffic_view.gd`, `ship_view.gd`, **`ship_rules.gd`** (nouveau : règles de passage des
+navires, sans autoload, testées dans `run_all`), `assets/vcol_clip.gdshader` (nouveau, réservé au train), `tests/run_all.gd`
+(`test_e_flux` + recalage de `test_trajets`), `tests/ui_smoke.gd` (`_e_flux_checks`). Simulation et équilibrage inchangés.
+
+### Défauts vérifiés dans le code (tous confirmés)
+- E7 : `traffic_view.gd` visait le cap 0 (est) à l'arrêt alors que le camion arrive vers l'ouest sur la voie B : pivot de 180°.
+- E8 : `truck_route_in(in_x, stop_x, _tier)` envoyait chaque camion vide au bout de la boucle du palier (x 146 au T3).
+- E9 : arrivée z −29 (au sud) et départ z −36 (au nord) : navigation à gauche ; le départ (168 ; −36) → (205 ; −85) croisait
+  l'arrivée (194 ; −108) → (186 ; −29) vers (190 ; −65) ; aucune règle de croisement nulle part.
+- E10 : voie de sortie 1 sans portique ; test (`run_all.gd:890-906`) sur la voie 0 seule et avec une file à deux voies d'entrée.
+- E11 : `pick_tap` ne proposait que `dept_pos` (la tour au T2) ; pavillons posés sur `HARBOR_OFFICE` en dur.
+- E12 : train lancé seulement si les deux bouts de la voie étaient hors champ ; tracteur fixe ; rue des bureaux en z 48…54 ;
+  touchers Douane–barrière de sortie 6,9 u, Gate–barrière de sortie 5,6 u, Gate–barrière d'entrée 3,7 u.
+
+### Fait
+- **E7** camions : arrêt face à l'ouest (`Layout.LOAD_YAW` = π), arrivée et départ en biais doux (`LOAD_APPROACH` 4,5 u le
+  long de la voie B pour 2 u de côté) ; arrêts bornés par `Layout.stop_range` (5 u avant le bout de la boucle ; 10 u après le
+  début de la voie avec gate2). Cap : arrivée → arrêt → départ, 26,6° au plus par changement (run_all) ; 22,9° de rotation à
+  l'arrêt sur un passage complet joué image par image (ui_smoke).
+- **E8** demi-tour par groupe de blocs (`truck_route_in` sans palier → `tier_for_stop`) ; **passages de demi-tour** dessinés
+  (case jaune hachurée, `Layout.crossover_xs` : x −2 au T2–T3, x 45 au T3). Camion d'un bloc du T1 au T3 (gate → tunnel est) :
+  **362 u** (avant 658 u).
+- **E9** passe est **à droite** : arrivée z −36 au nord (près du feu vert), **départ z −25** (et non −29 : à 7 u d'entraxe deux
+  panamax se chevauchent de 1,6 u ; à 11 u ils gardent 2,4 u, contrôle N10 étendu), sortie à l'est de la ligne d'arrivée,
+  (200 ; −25) → (215 ; −90) : plus aucun croisement au large. **Règles de passage** (`ShipRules`, appliquées aux vues par
+  `Diorama._hold_ships` ; la simulation continue, la vue rattrape ensuite) : distance de suivi (inchangée) ; **bande balayée**
+  devant l'étrave contre la coque d'un navire qui coupe la route ; **fenêtres de croisement** à deux courants — « large » (voie
+  au large z −108 contre approche et sortie du chenal ouest, x −50…−10 × z −126…−90, **balisée** : contour jaune pointillé sur
+  l'eau et deux bouées cardinales jaune-noir-jaune), « chenal » (navire mouillé à l'est qui rejoint l'entrée contre la sortie
+  nord), « ouest » et « est » (bassins d'évitage : l'arrivée contre le départ des postes du même bassin — avec la circulation à
+  droite, l'arrivée coupe forcément la voie de départ). Un navire qui va entrer (points de son trajet à 8…56 u devant lui)
+  attend que l'autre courant en soit sorti ; à égalité le plus petit identifiant passe ; deux navires qui s'attendent par deux
+  fenêtres voisines : le plus petit passe ; retenue de plus de 12 s : levée 3 s (aucun interblocage). Vues des navires : le
+  **cap de départ** (à quai, au mouillage, ou celui du trajet précédent) passe peu à peu à la corde, et le **centre de la coque**
+  rejoint en douceur le milieu de la corde étrave–poupe (sur une capture de travail, un navire qui quittait le poste 4 en biais
+  lançait son étrave sur la voie d'arrivée et se superposait au navire qui entrait).
+- **E10** avec gate2 : **second portique** sur la voie x −19,5 (PROPS « and »), guérite sur un **îlot** de béton entre la 2ᵉ voie
+  de sortie et l'entrée (x −17,25, `Layout.GATE_ISLAND`) ; `test_trajets` recalé : file réelle à une voie d'entrée
+  (`road_in_x(gate2)`, places de l'aire), arrêts de `stop_range`, **les deux voies de sortie** (eau, bâtiments, sous un portique).
+  Descriptions `gate2` / `parking2` déjà corrigées par E-Confiance (« deux camions chargés sortent à la fois », plus de
+  « seconde file d'entrée ») : conformes, non retouchées.
+- **E11** au T2 et au-delà, la maison bleue **et** la tour ouvrent la Capitainerie (`Diorama.dept_points`), retour d'achat sur
+  les deux, pavillons de campagne sur le bâtiment actif (la tour sur la butte au T2 ; replacés au changement de palier).
+- **E12** gare vivante : rame découpée à la bouche du tunnel sous la colline (`vcol_clip.gdshader`, x 181) — elle entre, s'arrête
+  16 s au quai et ressort, **visible gare à l'écran** ; **navette du tracteur** (TrafficView) : garage sur la liaison (axe de
+  l'allée x 90,1 ; liaison et ouverture de haie recalées), attente au **passage à niveau signalé** (deux panneaux, marquage)
+  tant qu'un camion est à moins de 26 u, prise d'un conteneur au parc RTG, dépose au quai, retour au garage quand le train
+  repart. Coin gate / douane : **rue des bureaux en z 60…66** (derrière la tête de file), bureaux tournés vers elle, haie et
+  zone 13 prolongées ; touchers Douane (−31,5 ; 38), Gate (−21 ; 56) et barrières à **≥ 11 u** (avec et sans gate2). Non fait
+  (optionnel) : un camion sur N par l'aire d'inspection.
+- **Mineurs** : `_ship_cargo0` vidé à la sortie de tout navire ; douaniers à places réservées (CROWD_MAX ne plafonne plus que les
+  dockers) ; `rade_anchor` = place occupée la plus proche du centre ; zone 8 réduite à la voie et aux parkings (1 404 u² au lieu
+  de 1 728) et discrète ; **zones d'un palier non atteint discrètes** (herbe, pointillés pâles) ; gyrophares **bleus** ; bureau
+  de pilotage avec un **toit** (construit dans Godot, PROPS « roof ») ; crique : le remorqueur n°2 passe à l'avant-port
+  (−45 ; −15,5), bateaux pilotes et remorqueur des paliers hors de la crique et du chenal ; GNL à 4,1 u du poste 4 (case en
+  z 15,5), IMO à 4,1 u du parc RTG et 5,1 u du GNL.
+- Captures : `--stage-trucks=N` (binaire de débogage seulement) fait servir N camions de suite, pour montrer le chargement.
+
+### Contrôles
+- `run_all` `test_e_flux` (8) : E7 caps ; E8 longueur et demi-tours ; E9 passe à droite, pas de croisement au large, N10 ;
+  règle de la fenêtre balisée ; **simulation deux à deux des paires de trajets qui se croisent** (pilotages des 12 places vers
+  les 4 postes, accostage compris, et départs ; départ à 90 u du croisement, cinq retards) avec `ShipRules.holds` :
+  7 croisements hors du mouillage, 35 essais, coques à ≥ 2,3 u au croisement, 27 s au plus, sans interblocage ; bouées à 3,9 u des
+  coques ; E10 ; E12 touchers, rue, tunnel, passage à niveau ; mineurs. `ui_smoke` `_e_flux_checks` (5) : E7 joué image par
+  image ; passages dessinés au T3 ; E11 (toucher, retour, pavillons) ; E12 (train à quai visible et découpé, navette qui attend
+  le camion puis livre) ; mineurs (cargaison, douaniers, bulle de rade, gyrophares, toit).
+- Recalé (aucun retiré) : `run_all` `test_trajets` « camions … » (voir E10). `ui_smoke` « C7 A1 : un navire qui part… » repassé
+  au vert : `ShipView.sync_parting(delta, rules)` — seul le diorama garde ses règles de passage pendant la sortie.
+- Limites : (1) **entre les places du mouillage** (212 croisements à moins de 30 u d'une place, ou dans les 40 premiers u d'un
+  appareillage) les trajets frôlent encore des coques mouillées ou se croisent de près : la grille du mouillage (colonnes à
+  50 u, rangées à 28 u) ne laisse pas passer un panamax de 8,6 u entre deux navires mouillés — à reprendre avec le mouillage ;
+  (2) les arrivées au mouillage depuis le large et les départs furieux (haute mer) ne sont pas simulés ; (3) dans les courbes
+  du chenal, deux feeders sur les voies parallèles passent à ≈ 1,2 u (géométrie du lot D).
+
+### Résultats
+- `run_all` **214/214** (206 + 8 `test_e_flux`) · `ui_smoke` **147/147** (142 + 5 `_e_flux_checks`).
+- Sonde 4 graines (`pacing_probe`, une graine par processus) : jalons, rentabilités, révélations, bandeaux **identiques** à la
+  sonde prise au début de la piste ; seule la ligne « carte Goulot rouge » de la graine 4 bouge (T1 4 % → 1 %), indicateur
+  d'interface modifié par E-Confiance (la sonde ne lit aucun fichier de `scripts/world`).
+- Captures (`--fresh`, 540 × 960, toutes regardées), `docs/captures/` : `e_flux_camions_chargement.png` (camion arrêté face à
+  l'ouest le long du parc, autres sur la voie A, case de demi-tour en x −2), `e_flux_t3_boucle.png` (camions entre les blocs du
+  T1 et du T2, case en x 45, train à quai et tracteur sur la liaison), `e_flux_passe_est.png` (partie de bot du T3 : un navire
+  vide repart sur la voie sud, un autre entre sur la voie nord, le long du brise-lames ; feu vert sur la tête),
+  `e_flux_gate2_portiques.png` (deux portiques jaune-noir sur les deux voies de sortie, guérite sur son îlot, barrières),
+  `e_flux_gare.png` et `e_flux_gare_navette.png` (train à quai, passage à niveau marqué et signalé, tracteur et son conteneur
+  au quai), `e_flux_capitainerie_t2.png` (tour VTS et maison bleue, crique dégagée : seul le bateau de la cale),
+  `e_flux_t1_zones.png` (T1 : seules l'enceinte de la douane et l'allongement se lisent en gris, les zones du T2 / T3 sont
+  discrètes).

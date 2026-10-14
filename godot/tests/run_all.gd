@@ -57,6 +57,8 @@ func _init() -> void:
 	test_d_monde(db)
 	test_d_ui(db)
 	test_d_eco(db)
+	test_e_confiance(db)
+	test_e_flux(db)
 	print("=== %d ok, %d échec(s) ===" % [passes, failures])
 	quit(1 if failures > 0 else 0)
 
@@ -885,30 +887,45 @@ func test_trajets() -> void:
 	# camions : tous les paliers, avec et sans la gate à deux voies, arrêts sur toute la boucle
 	var truck_pts: Array[Vector3] = []
 	var truck_bad: Array[String] = []
+	# (lot E-Flux, E10 — recalé : la vraie file à une seule voie d'entrée, road_in_x(gate2), les arrêts possibles de
+	# Layout.stop_range ; avec gate2, les **deux** voies de sortie, chacune sous un scanner à portique quand il est construit)
+	var no_portal := 0
 	for tier in [1, 2, 3]:
 		for gate2 in [false, true]:
-			var in_lanes := [Layout.ROAD_IN_X[0], Layout.ROAD_IN_X[1]] if gate2 else [Layout.ROAD_IN_X[0]]
-			var x := Layout.LANE_X0 + 7.0
-			while x <= Layout.lane_end_x(tier) - 2.5:
-				for in_x in in_lanes:
-					var routes := [Layout.truck_route_in(float(in_x), x), Layout.truck_route_out(x, tier, gate2)]
-					for r in routes:
-						for p in Layout.sample_path(r, 1.5):
-							truck_pts.append(p)
-							var f := Terrain.field_at(field if tier >= 3 else field_t1, Vector2(p.x, p.z))
-							if f > 0.0:
-								truck_bad.append("eau (%d, %d)" % [int(p.x), int(p.z)])
-							for w in walls:
-								if w.grow(-0.2).has_point(Vector2(p.x, p.z)):
-									truck_bad.append("bâtiment (%d, %d)" % [int(p.x), int(p.z)])
+			var in_x := Layout.road_in_x(gate2)
+			var portals := Layout.portal_rects(["scanner2", "gate2"] if gate2 else ["scanner2"])
+			var rg := Layout.stop_range(tier, gate2)
+			var x: float = rg[0]
+			while x <= float(rg[1]) + 0.01:
+				var routes := [Layout.truck_route_in(in_x, x)]
+				for lane in ([0, 1] if gate2 else [0]):
+					routes.append(Layout.truck_route_out(x, tier, gate2, lane))
+				for ri in routes.size():
+					var under := ri == 0
+					for p in Layout.sample_path(routes[ri], 1.5):
+						truck_pts.append(p)
+						var f := Terrain.field_at(field if tier >= 3 else field_t1, Vector2(p.x, p.z))
+						if f > 0.0:
+							truck_bad.append("eau (%d, %d)" % [int(p.x), int(p.z)])
+						for w in walls:
+							if w.grow(-0.2).has_point(Vector2(p.x, p.z)):
+								truck_bad.append("bâtiment (%d, %d)" % [int(p.x), int(p.z)])
+						for pr in portals:
+							if (pr as Rect2).has_point(Vector2(p.x, p.z)):
+								under = true
+					if not under:
+						no_portal += 1
 				x += 4.4
-	for i in 14:
-		var slot := Vector3(Layout.ROAD_IN_X[i % 2], 0, Layout.QUEUE_Z0 + (i / 2) * Layout.QUEUE_GAP) if i < 10 else Layout.lot_slot(i - 10)
-		for p in Layout.sample_path(Layout.truck_route_arrive(float(Layout.ROAD_IN_X[i % 2]), slot), 1.5):
-			truck_pts.append(p)
-			if Terrain.field_at(field_t1, Vector2(p.x, p.z)) > 0.0:
-				truck_bad.append("eau (%d, %d)" % [int(p.x), int(p.z)])
-	check(truck_bad.is_empty(), "camions : sur la terre, hors des bâtiments, du tunnel ouest au tunnel est (%s)" % str(truck_bad.slice(0, 4)))
+	for gate2 in [false, true]:
+		var lots := 16 if gate2 else 0
+		for i in 9 + lots:
+			var road_z := Layout.QUEUE_Z0 + float(i if i < 5 else i - lots) * Layout.QUEUE_GAP
+			var slot := Vector3(Layout.road_in_x(gate2), 0, road_z) if i < 5 or i >= 5 + lots else Layout.lot_slot(i - 5)
+			for p in Layout.sample_path(Layout.truck_route_arrive(Layout.road_in_x(gate2), slot), 1.5):
+				truck_pts.append(p)
+				if Terrain.field_at(field_t1, Vector2(p.x, p.z)) > 0.0:
+					truck_bad.append("eau (%d, %d)" % [int(p.x), int(p.z)])
+	check(truck_bad.is_empty() and no_portal == 0, "camions : sur la terre, hors des bâtiments, du tunnel ouest au tunnel est ; chaque voie de sortie sous un portique (%d sans) (%s)" % [no_portal, str(truck_bad.slice(0, 4))])
 	# engins : du tablier aux blocs réels, des blocs au bord du parc, retour
 	var eng_pts: Array[Vector3] = []
 	var eng_bad: Array[String] = []
@@ -1762,6 +1779,8 @@ func test_d_eco(db: DataDB) -> void:
 		sh.patience = 0.1 * sh.patience_max
 		pat = a.alert_reason(a.analysis)
 		sh.patience = sh.patience_max
+	# (lot E, recalé : l'alerte du parc n'existe qu'une fois son chapitre ouvert — on l'ouvre pour la mesure)
+	a.features["dept_yard_ops"] = a.time
 	a.yard_pending[0] = a.yard_capacity()
 	var yard := a.alert_reason(a.analysis)
 	a._refresh_analysis()
@@ -1773,3 +1792,500 @@ func test_d_eco(db: DataDB) -> void:
 	var gone := String(a.shown_analysis().get("alert", "x")) == ""
 	check(calm and fog == "fog" and pat == "patience" and yard == "yard" and held and gone,
 		"carte Goulot : rouge seulement si un maillon est bloqué (normal « », brouillard « %s », patience « %s », parc « %s », retombe après %s s)" % [fog, pat, yard, Fmt.num(float(db.cfg("alert_hold", 4.0)))])
+
+
+## Lot E — Confiance (`docs/ORDRE_E_CONFIANCE.md`) : services facturés × interface (E1), bouton Goulot (E2), coût des aléas
+## (E3), noms courts (E4), mineurs de simulation (sauvegarde de `last_tier_t`, `reset()`, alerte avant le chapitre, cache des
+## services facturés, recettes de Stats). Partie de bot réelle : `tests/fixtures/bot_t3.json` (graine 1, T3 + 4 min, goulot
+## « postes à quai », celle de la capture x3 de la revue du lot D).
+func _fixture(db: DataDB, name: String) -> PortSim:
+	var p := PortSim.new(db, 1)
+	var d: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/%s.json" % name))
+	if d is Dictionary and (d as Dictionary).has("sim"):
+		p.from_dict(d.sim)
+	return p
+
+
+func test_e_confiance(db: DataDB) -> void:
+	print("[lot E — Confiance]")
+	var p := _fixture(db, "bot_t3")
+	for i in 40:          # 10 s de jeu : la rade pleine depuis 3 s désigne le maillon suivant (comme à l'écran de la capture)
+		p.step(0.25)
+	var key := String(p.shown_analysis().get("key", ""))
+	# E1 — valeurs inchangées : la part des services ne change pas l'estimation (au bit près)
+	var same := true
+	for d in PortSim.DEPTS:
+		for n in [0, 1, 10]:
+			same = same and float(p.income_parts_with(d, n).total) == p.income_estimate_with(d, n)
+	for ci in [0, 1]:
+		same = same and float(p.income_parts_with("", 1, ci).total) == p.income_estimate_with("", 1, ci)
+	# E1 — pastille ≤ achats rentabilisés en < 10 min (calcul indépendant, avec l'API d'avant), et < achats « qui rapportent »
+	var base := p.income_estimate_with("harbor", 0)
+	var fast := 0
+	var any_gain := 0
+	var goal := String(p.chapter_goal().get("dept", ""))
+	for d in PortSim.DEPTS:
+		var c := p.dept_cost(d, 1)
+		if p.feature("dept_" + d) and c <= p.money:
+			var g := p.upgrade_gain(d, 1, -1, base)
+			if g > 0.0:
+				any_gain += 1
+			if d == goal or (g > 0.0 and c / g < Advice.GOOD_PAYBACK):
+				fast += 1
+	for ci in PortSim.NCARGO:
+		var lc := p.licence_cost(ci, 1)
+		if p.unlocked[ci] == 1 and p.feature("licences") and p.licence_room(ci) > 0 and lc <= p.money:
+			var g2 := p.upgrade_gain("", 1, ci, base)
+			if g2 > 0.0:
+				any_gain += 1
+			if g2 > 0.0 and lc / g2 < Advice.GOOD_PAYBACK:
+				fast += 1
+	var badge := Advice.worthwhile_count(p)
+	check(same and p.tier == 3 and badge <= fast and badge < any_gain,
+		"E1 : au T3 (partie de bot), pastille %d ≤ %d achats rentabilisés en < 10 min (avant : %d achats « qui rapportent ») ; estimations inchangées (%s)" % [badge, fast, any_gain, same])
+	# E1 — un niveau hors goulot : le débit ne bouge pas, seuls les services facturés montent → gris « pas le goulot (+… de
+	# services) », jamais « rentabilisé en 102 h » en vert
+	var off := ""
+	for d in ["yard_ops", "gate", "customs", "cranes", "harbor"]:
+		var parts := p.upgrade_gain_parts(d, 1)
+		if not Advice.moves_flow(parts) and float(parts.fees) > 0.0:
+			off = d
+			break
+	var pb: Dictionary = Advice.payback(p.upgrade_gain_parts(off, 1), p.dept_cost(off, 1), Advice.effect_label(p, off, 1)) if off != "" else {}
+	check(off != "" and String(pb.text).contains("pas le goulot (+") and String(pb.text).contains("de services)") and not bool(pb.good)
+		and not String(pb.text).contains("rentabilisé"),
+		"E1 : hors goulot (%s) — « %s », gris, pas un bon achat" % [off, String(pb.get("text", ""))])
+	# E2 — « postes à quai » au T3 : jamais le GNL (le bâtiment suivant de la chaîne) ; le quai n°4 s'il est disponible, sinon
+	# l'amélioration des Quais, sinon GESTION
+	var act := Advice.hint_action(p)
+	var fb := Advice.fix_building(p, "berth_count")
+	var adds_berth := fb != "" and (db.building_by_id[fb].effects as Array).any(func(e: Dictionary) -> bool: return String(e.type) == "add_berth")
+	check(key == "berth_count" and String(act.id) != "lng" and not String(act.label).contains("GNL") and adds_berth
+		and (String(act.kind) == "dept" and String(act.id) == "berths" or String(act.id) == fb or String(act.kind) == "manage"),
+		"E2 : goulot « postes à quai » au T3 → « %s » (bâtiment qui le règle : %s, %s ; prochain de la chaîne : %s)" % [String(act.label), fb, p.building_state(fb), Zones.first_unbuilt(p)])
+	# E2 — table goulot → bâtiment : chaque goulot qui se règle par un bâtiment désigne un bâtiment dont l'effet le règle
+	var q := PortSim.new(db, 61)
+	q.tier = 2
+	for b in db.buildings:
+		if String(b.id) == "gate2":
+			break
+		q.built.append(String(b.id))
+	q.rebuild_infra()
+	q.features["dept_gate"] = q.time
+	q.money = 1.0e9
+	q.analysis_shown = {"key": "gate", "dept": "gate", "hint": "", "flow": 1.0, "caps": {}}
+	var ag := Advice.hint_action(q)
+	var ys := Advice.fix_building(PortSim.new(db, 66), "yard_space")      # au départ : la friche (+500 EVP au parc)
+	q.money = 0.0
+	q.analysis_shown = {"key": "gate", "dept": "gate", "hint": "", "flow": 1.0, "caps": {}}
+	var ag0 := Advice.hint_action(q)
+	var table_ok := true
+	var bad_fix: Array[String] = []
+	for k in ["berth_count", "yard_space", "gate", "cranes", "inspection", "customs"]:
+		var bid := Advice.fix_building(q, k)
+		if bid != "" and not (db.building_by_id[bid].effects as Array).any(func(e: Dictionary) -> bool: return Advice.fixes(k, e, q)):
+			bad_fix.append("%s → %s" % [k, bid])
+	table_ok = bad_fix.is_empty()
+	check(String(ag.kind) == "build" and String(ag.id) == "gate2" and bool(ag.can) and ys == "gravel2"
+		and String(ag0.id) == "gate2" and not bool(ag0.can) and table_ok,
+		"E2 : goulot gate au T2 → « %s » (sans argent : « %s », gris) ; parc trop petit → %s ; table cohérente (%s)" % [String(ag.label), String(ag0.label), ys, str(bad_fix)])
+	# E3 — coût d'un aléa : revenu réel (et non débit théorique), plafonné à 25 % de la trésorerie ; brouillard « Suspendu »
+	var h := _fixture(db, "bot_t3")
+	for i in 120:
+		h.step(0.25)
+	var real := h.real_income_rate()
+	var theo := h.income_rate_estimate()
+	h.money = 1.0e12
+	Hazards.start(h, "wind")
+	var c_wind := float(h.active_event.get("pay_cost", 0.0))
+	var wind_ok := is_equal_approx(c_wind, real * 25.0) or absf(c_wind - h.real_income_rate() * 25.0) <= 0.02 * c_wind
+	Hazards.end_event(h)
+	h.money = 1000.0
+	Hazards.start(h, "wind")
+	var c_cap := float(h.active_event.get("pay_cost", 0.0))
+	var hit_cr := Info.event_hits(h, "cranes") and not Info.event_hits(h, "gate")
+	Hazards.end_event(h)
+	Hazards.start(h, "fog")
+	h.invalidate()
+	var fog_txt := Info.dept_effect(h, "harbor")
+	var fog_hit := Info.event_hits(h, "harbor")
+	h.money = 1.0e12
+	var fog_badge := Advice.worthwhile_count(h)
+	Hazards.end_event(h)
+	check(real > 0.0 and wind_ok and c_cap <= 250.0 + 0.01 and hit_cr and fog_txt == "Suspendu" and fog_hit and not fog_txt.contains("inf"),
+		"E3 : aléa « Vent fort » au T3 — %s pour 25 s de revenu réel (%s/s ; débit théorique %s/s) ; plafond 25 %% (%s pour 1 000 $) ; brouillard « %s » sur la Capitainerie (pastille %d)" % [
+			Fmt.money(c_wind), Fmt.money(real), Fmt.money(theo), Fmt.money(c_cap), fog_txt, fog_badge])
+	# E4 — noms courts tirés du nom des bâtiments, sans « ᵉ » ni anciens noms
+	var bad_names: Array[String] = []
+	for b in db.buildings:
+		var sh := Info.building_short(p, String(b.id))
+		if not Info.short_matches_name(sh, String(b.name)) or sh.contains("ᵉ") or sh != sh.to_upper():
+			bad_names.append("%s « %s » / « %s »" % [b.id, sh, b.name])
+	check(bad_names.is_empty() and Info.building_short(p, "reefer") == "PÔLE FROID" and Info.building_short(p, "quay_ext") == "ALLONGEMENT DU QUAI",
+		"E4 : %d noms courts cohérents avec le nom du bâtiment (incohérents : %s)" % [db.buildings.size(), str(bad_names)])
+	# mineurs — `last_tier_t` sauvegardé (version inchangée), `reset()` complet
+	var r := PortSim.new(db, 62)
+	r.last_tier_t = 123.5
+	var r2 := PortSim.new(db, 63)
+	r2.from_dict(JSON.parse_string(JSON.stringify(r.to_dict())))
+	r2._alert_why = "yard"
+	r2._alert_left = 3.0
+	var kept := is_equal_approx(r2.last_tier_t, 123.5)
+	r2.reset()
+	check(kept and r2.last_tier_t < -1.0e8 and r2._alert_why == "" and r2._alert_left == 0.0 and r2._live_t == 0.0,
+		"mineurs : last_tier_t sauvegardé (%s) ; reset() remet le palier, l'alerte et la fenêtre du revenu réel à zéro" % Fmt.num(r2.last_tier_t if not kept else 123.5))
+	# mineurs — alerte parc / gate seulement après le chapitre du service
+	var a := PortSim.new(db, 64)
+	a.yard_pending[0] = a.yard_capacity()
+	a.truck_queue = 50.0
+	a.stat_truck_wait = 1.0e4
+	var before := a.alert_reason(a.analysis)
+	a.features["dept_yard_ops"] = a.time
+	var after := a.alert_reason(a.analysis)
+	check(before == "" and after == "yard", "mineurs : alerte du parc seulement après son chapitre (avant « %s », après « %s »)" % [before, after])
+	# mineurs — services facturés en cache : mêmes valeurs que le calcul direct, recalculées quand le panier change
+	var f := PortSim.new(db, 65)
+	var direct := func(s: PortSim) -> float:
+		var n := 0
+		for dd in PortSim.DEPTS:
+			n += int(s.levels[dd]) - 1
+		var mix := s.cargo_shares()
+		var v := 0.0
+		for c in PortSim.NCARGO:
+			v += mix[c] * float(db.cargo[c].value)
+		v *= float(db.tier_def(s.tier).get("value_mult", 1.0)) * s.renown_mult()
+		return float(db.cfg("service_fee")) * float(n) * v * (1.0 + float(db.cfg("gate_fee_ratio")))
+	var fee_ok := true
+	f.levels["cranes"] = 7
+	fee_ok = fee_ok and f.service_fee_rate() == direct.call(f)
+	f.service_fee_rate()
+	f.tier = 2
+	fee_ok = fee_ok and f.service_fee_rate() == direct.call(f)
+	f.unlocked[1] = 1
+	fee_ok = fee_ok and f.service_fee_rate() == direct.call(f)
+	f.renown = 3
+	fee_ok = fee_ok and f.service_fee_rate() == direct.call(f)
+	f.levels["gate"] = 12
+	fee_ok = fee_ok and f.service_fee_rate() == direct.call(f) and f._fee_vals.size() >= 1
+	# recettes de Stats : « fees » et « services » distinctes
+	var sn: Dictionary = Info.SOURCE_NAMES
+	check(fee_ok and sn.has("fees") and sn.has("services") and String(sn.fees) != String(sn.services),
+		"mineurs : services facturés en cache (= calcul direct après niveaux, palier, cargaisons, Renom) ; Stats : « %s » ≠ « %s »" % [String(sn.get("fees", "?")), String(sn.get("services", "?"))])	# mineurs — bulles : au bord de l'écran, la place libre est cherchée dans le rectangle utile (avant : la bulle décalée hors
+	# de l'écran était ramenée par `bound` sur sa voisine)
+	var useful := Rect2(8, 100, 524, 700)
+	var edge := Rect2(380, 200, 150, 54)
+	var moved := Bubbles.bound(Bubbles.settle(Rect2(400, 205, 140, 54), [edge], useful), useful)
+	check(not moved.intersects(edge) and useful.grow(0.5).encloses(moved),
+		"mineurs : bulle au bord de l'écran placée dans le rectangle utile, sans recouvrir sa voisine (%s)" % str(moved))
+
+## Lot E-Flux (docs/ORDRE_E_FLUX.md, revue REVUE_LOT_D.md E7–E12 et mineurs du monde) : contrôles sans scène (les autres
+## sont dans ui_smoke, `_e_flux_checks`).
+func test_e_flux(_db: DataDB) -> void:
+	print("[lot E — Flux : camions, passe est, croisements, gate2, gare, coin gate / douane, mineurs du monde]")
+	# E7 : cap d'un camion à l'arrivée à son arrêt, à l'arrêt (vers l'ouest) et au départ — écart < 30° (plus de pivot)
+	var worst_turn := 0.0
+	var turn_at := ""
+	for tier in [1, 2, 3]:
+		for gate2 in [false, true]:
+			var rg := Layout.stop_range(tier, gate2)
+			var x: float = rg[0]
+			while x <= float(rg[1]) + 0.01:
+				var rin := Layout.truck_route_in(Layout.road_in_x(gate2), x)
+				var a: Vector3 = rin[-1] - rin[-2]
+				var yaw_in := atan2(-a.z, a.x)
+				for lane in ([0, 1] if gate2 else [0]):
+					var rout := Layout.truck_route_out(x, tier, gate2, lane)
+					var d: Vector3 = rout[1] - rout[0]
+					var yaw_out := atan2(-d.z, d.x)
+					for pair in [[yaw_in, Layout.LOAD_YAW], [Layout.LOAD_YAW, yaw_out]]:      # arrivée → arrêt, arrêt → départ
+						var dd := absf(rad_to_deg(angle_difference(float(pair[0]), float(pair[1]))))
+						if dd > worst_turn:
+							worst_turn = dd
+							turn_at = "T%d x %d voie %d" % [tier, int(x), lane]
+				x += 1.1
+	check(worst_turn < 30.0, "E7 : camions au chargement — de l'arrivée à l'arrêt (face à l'ouest) puis au départ, le cap change de %.1f° au plus (%s) : plus de pivot sur place" % [worst_turn, turn_at])
+	# E8 : demi-tour par groupe de blocs — au T3, un camion d'un bloc du T1 fait moins de 450 u (gate → tunnel est)
+	var in_x0 := Layout.road_in_x(true)
+	var stop_t1 := -12.0
+	var len_now := Layout.path_length(Layout.truck_route_in(in_x0, stop_t1)) + Layout.path_length(Layout.truck_route_out(stop_t1, 3, true, 0))
+	var len_before := Layout.path_length(Layout.truck_route_in(in_x0, stop_t1, 3)) + Layout.path_length(Layout.truck_route_out(stop_t1, 3, true, 0))
+	var turns_ok := true
+	for xs in [-12.0, 20.0, 100.0]:
+		var r := Layout.truck_route_in(in_x0, xs)
+		if not is_equal_approx((r[3] as Vector3).x, Layout.lane_end_x(Layout.tier_for_stop(xs))):
+			turns_ok = false
+	check(len_now < 450.0 and turns_ok and Layout.crossover_xs(3) == [-2.0, 45.0] and Layout.crossover_xs(1).is_empty(),
+		"E8 : au T3, camion d'un bloc du T1 : %d u (avant : %d u) ; demi-tour au bout de son groupe de blocs, passages dessinés en x %s" % [
+		int(len_now), int(len_before), str(Layout.crossover_xs(3))])
+	# E9 : passe est naviguée à droite (arrivée au nord, départ au sud) ; le départ quitte la passe à l'est de la ligne
+	# d'arrivée (aucun croisement) ; deux panamax sur les deux voies gardent ≥ 2 u entre leurs coques (N10 étendu)
+	var pm := _ship_half("panamax")
+	var arr := Layout.ship_path_pilot(0, 3)
+	var dep := Layout.ship_path_depart(3, pm.y * 2.0, 3)
+	var cross_east := false
+	for i in arr.size() - 1:
+		for j in dep.size() - 1:
+			var a0 := Vector2(arr[i].x, arr[i].z)
+			var a1 := Vector2(arr[i + 1].x, arr[i + 1].z)
+			if a0.x < 140.0 and a1.x < 140.0:
+				continue          # dans le port : l'évitage devant le poste, réglé par la règle de passage (plus bas)
+			if Geometry2D.segment_intersects_segment(a0, a1, Vector2(dep[j].x, dep[j].z), Vector2(dep[j + 1].x, dep[j + 1].z)) != null:
+				cross_east = true
+	var lanes_gap := absf(Layout.DEPART_E_Z - Layout.ARRIVE_E_Z) - 2.0 * pm.y
+	check(Layout.ARRIVE_E_Z < Layout.DEPART_E_Z and not cross_east and lanes_gap >= 2.0 and (Layout.DEPART_EAST[0] as Vector3).x > (Layout.EAST_APPROACH_E[1] as Vector3).x,
+		"E9 : passe est à droite (arrivée z %s au nord, départ z %s au sud), départ à l'est de la ligne d'arrivée, aucun croisement au large ; deux panamax à %s u (N10)" % [
+		Fmt.num(Layout.ARRIVE_E_Z), Fmt.num(Layout.DEPART_E_Z), Fmt.num(lanes_gap)])
+	# règle d'attente du croisement balisé : l'autre courant attend, à égalité le plus petit identifiant passe ; même courant
+	# (suivi) : pas de règle de croisement
+	var w: Rect2 = Layout.SHIP_CROSSINGS[0].rect
+	var c := w.get_center()
+	var ew_in := {"id": 5, "p": c, "dir": Vector2(1, 0), "len": 45.0, "w": 8.6, "stream": "ew", "ahead": [c + Vector2(8, 0)]}
+	var ns_come := {"id": 2, "p": c + Vector2(0, w.size.y), "dir": Vector2(0, -1), "len": 34.0, "w": 7.5, "stream": "ns",
+		"ahead": [c + Vector2(0, w.size.y * 0.4)]}
+	var ew_come := {"id": 7, "p": c - Vector2(w.size.x, 0), "dir": Vector2(1, 0), "len": 45.0, "w": 8.6, "stream": "ew",
+		"ahead": [c - Vector2(w.size.x * 0.4, 0)]}
+	var h1 := ShipRules.crossing_holds([ew_in, ns_come])
+	var h2 := ShipRules.crossing_holds([ns_come, ew_come])
+	var h3 := ShipRules.crossing_holds([ew_in, ew_come])
+	check(h1.has(2) and not h1.has(5) and h2.has(7) and not h2.has(2) and h3.is_empty(),
+		"E9 : croisement balisé au large (fenêtre x %d…%d) — l'autre courant attend (%s), à égalité le plus petit identifiant passe (%s), même courant libre (%s)" % [
+		int(w.position.x), int(w.end.x), str(h1.keys()), str(h2.keys()), str(h3.keys())])
+	# toutes les paires de trajets qui se croisent (pilotages, départs, arrivées au mouillage, départs furieux) : simulées avec
+	# les règles du diorama, sans contact (coques ≥ 2 u) et sans interblocage
+	var res := _ef_crossings()
+	# bouées du croisement balisé : à ≥ 1,5 u de toute coque sur les pilotages et les départs
+	var buoy_gap := INF
+	var fd2 := _ship_half("feeder")
+	var paths: Array = []
+	for k in 12:
+		for bi in 4:
+			paths.append([Layout.ship_path_pilot(k, bi), pm.y if bi >= 2 else fd2.y])
+	for bi in 4:
+		paths.append([Layout.ship_path_depart(bi, pm.y * 2.0, 3), pm.y if bi >= 2 else fd2.y])
+	for w2 in Layout.SHIP_CROSSINGS:
+		for bp in w2.get("buoys", []):
+			for pp in paths:
+				for p in Layout.sample_path(pp[0], 1.0):
+					buoy_gap = minf(buoy_gap, Vector2(p.x, p.z).distance_to(bp) - float(pp[1]))
+	check(int(res.bad) == 0 and int(res.n) > 20 and int(res.pairs) >= 5 and buoy_gap >= 1.5,
+		"E9 : %d croisements de trajets hors du mouillage (%d essais, %d autres entre les places du mouillage) passés avec les règles d'attente — coques à %s u au plus près (≥ 2), %d s au plus long, sans interblocage %s ; bouées du croisement à %s u des coques" % [
+		int(res.pairs), int(res.n), int(res.anchorage), Fmt.num(float(res.worst)), int(res.tmax), str(res.list), Fmt.num(buoy_gap)])
+	# E10 : avec gate2, guérite sur l'îlot entre la 2ᵉ voie de sortie et l'entrée ; un portique par voie de sortie
+	var booth := Layout.lot_rect("gate2")
+	var out1 := Layout.road_out_x(true, 1)
+	var truck_hw := 1.1
+	var isl: Dictionary = Layout.GATE_ISLAND
+	var isl_r := Rect2((isl.c as Vector2) - (isl.size as Vector2) * 0.5, isl.size)
+	var portals := Layout.portal_rects(["scanner2", "gate2"])
+	check(booth.position.x >= out1 + truck_hw and booth.end.x <= Layout.road_in_x(true) - truck_hw and isl_r.encloses(booth.grow(-0.05))
+		and portals.size() == 2 and Layout.portal_rects(["scanner2"]).size() == 1,
+		"E10 : guérite de gate2 sur son îlot (x %s…%s, entre les camions des voies x %s et %s), %d portiques avec gate2" % [
+		Fmt.num(booth.position.x), Fmt.num(booth.end.x), Fmt.num(out1), Fmt.num(Layout.road_in_x(true)), portals.size()])
+	# E12 : touchers Douane / barrières / Gate séparés d'au moins 10 u (avec et sans gate2) ; rue des bureaux derrière la tête de
+	# file (z ≥ 60) ; gare : la rame coupée à la bouche du tunnel, sous la colline ; passage à niveau signalé sur la liaison
+	var tap_min := INF
+	for g2 in [false, true]:
+		var pts: Array = [["douane", Layout.dept_pos("customs", 2)], ["gate", Layout.dept_pos("gate", 2)]]
+		for p in Layout.PROPS:
+			if String(p.get("tag", "")).begins_with("barrier") and (String(p.cond) == "" or (g2 and String(p.cond) == "gate2")) \
+					and not (g2 and String(p.get("not", "")) == "gate2"):
+				var ry := deg_to_rad(float(p.get("ry", 0.0)))
+				var s := float(p.get("s", 1.0))
+				pts.append(["barrière", Vector3(float(p.p[0]) + 1.9 * s * cos(ry), 0, float(p.p[2]) - 1.9 * s * sin(ry))])
+		for i in pts.size():
+			for j in range(i + 1, pts.size()):
+				if String(pts[i][0]) == "barrière" and String(pts[j][0]) == "barrière":
+					continue          # deux barrières : le même geste
+				tap_min = minf(tap_min, (pts[i][1] as Vector3).distance_to(pts[j][1]))
+	var street_ok := false
+	for g in Layout.GROUNDS:
+		if String(g.cond) == "t2" and String(g.type) == "road_x" and float(g.r[2]) == float(Layout.ROAD_X[0]) and float(g.r[1]) >= 60.0:
+			street_ok = true
+	var hill_ok := false
+	for p in Layout.PROPS:
+		if String(p.m) == "hill" and absf(float(p.p[0]) - Layout.RAIL_TUNNEL_X) < 4.0 and absf(float(p.p[2]) - Layout.RAIL_Z) < 3.0:
+			hill_ok = true
+	var signs := Layout.PROPS.filter(func(p: Dictionary) -> bool: return String(p.cond) == "rail" and String(p.m) == "sign").size()
+	var marks := 0
+	for it in Layout.street_props(3, ["rail", "berth3"]):
+		if String(it.m) == "crosswalk" and absf((it.p as Vector3).x - float(Layout.RAIL_SHUTTLE.x)) < 3.0:
+			marks += 1
+	check(tap_min >= 10.0 and street_ok and hill_ok and signs >= 2 and marks >= 2,
+		"E12 : touchers Douane / barrières / Gate à %s u au plus près ; rue des bureaux derrière la tête de file ; bouche du tunnel sous la colline ; passage à niveau signalé (%d panneaux, %d marquages)" % [
+		Fmt.num(tap_min), signs, marks])
+	# mineurs : GNL à ≥ 4 u du bout du poste 4, IMO à ≥ 4 u du parc RTG ; bureau de pilotage avec un toit ; zone 8 réduite à la
+	# voie et aux parkings, discrète ; crique : rien d'autre que la cale et son bateau à moins de 4 u de la cale
+	var lng := Layout.lot_rect("lng")
+	var b4 := Layout.lot_rect("berth4")
+	var gap_lng := lng.position.y - b4.end.y
+	var gap_rtg := Layout.lot_rect("imo").position.x - Layout.lot_rect("rtg").end.x
+	var roof := Layout.PROPS.filter(func(p: Dictionary) -> bool: return String(p.cond) == "rpilot" and p.has("roof")).size() == 1
+	var z8 := Layout.zone_by_id(8)
+	var z8_area := absf(_poly_area(z8.poly))
+	var sw_to: Vector3 = Layout.SLIPWAY.to
+	var creek_bad: Array[String] = []
+	var boats: Array = [Layout.lot_rect("tug2")]
+	for it in Layout.STAGE_PROPS.harbor:
+		if String(it.m) in ["pilot_boat", "tug"]:
+			boats.append(Rect2(float(it.p[0]) - 3.0, float(it.p[2]) - 3.0, 6.0, 6.0))
+	for r in boats:
+		if _rect_dist(r as Rect2, Vector2(sw_to.x, sw_to.z)) < 4.0:
+			creek_bad.append(str((r as Rect2).get_center()))
+	check(gap_lng >= 4.0 and gap_rtg >= 4.0 and roof and bool(z8.get("discreet", false)) and z8_area < 1500.0 and creek_bad.is_empty(),
+		"E mineurs : GNL à %s u du poste 4, IMO à %s u du parc RTG, bureau de pilotage avec un toit, zone 8 réduite (%d u²) et discrète, crique dégagée (%s)" % [
+		Fmt.num(gap_lng), Fmt.num(gap_rtg), int(z8_area), str(creek_bad)])
+
+
+static func _poly_area(poly: Array) -> float:
+	var a := 0.0
+	for i in poly.size():
+		var p: Vector2 = poly[i]
+		var q: Vector2 = poly[(i + 1) % poly.size()]
+		a += p.x * q.y - q.x * p.y
+	return a * 0.5
+
+
+## E9 : toutes les paires de trajets de navires qui se croisent, simulées deux à deux avec les règles du diorama
+## (ShipRules.holds : suivi, navire qui coupe la route devant soi, croisement balisé ; HOLD_MAX) — un essai par croisement
+## (point arrondi à 6 u, courants), départ à 90 u du croisement avec cinq retards ; hors du mouillage (croisements à 30 u d'une place, ou dans les 40 premiers u d'un appareillage).
+func _ef_crossings() -> Dictionary:
+	var pm := _ship_half("panamax")
+	var fd := _ship_half("feeder")
+	var P: Array = []
+	for k in 12:
+		for bi in 4:
+			var hp: Vector2 = pm if bi >= 2 else fd
+			var pil := Layout.ship_path_pilot(k, bi)
+			pil.append(Layout.berth_ship_pos(bi, hp.y * 2.0))          # puis l'accostage
+			P.append({"name": "pilotage %d→%d" % [k, bi], "p": pil, "stream": "ew" if bi >= 2 else "ns",
+				"h": pm if bi >= 2 else fd, "anchor": k, "berth": bi, "yaw0": 0.35, "leave": 40.0,
+				"streams": ShipRules.ship_streams(Ship.State.PILOTING, bi)})
+	for bi in 4:
+		var h: Vector2 = pm if bi >= 2 else fd
+		P.append({"name": "départ %d" % bi, "p": Layout.ship_path_depart(bi, h.y * 2.0, 3), "stream": "ns" if bi < 2 else "", "h": h, "anchor": -1, "berth": bi,
+			"streams": ShipRules.ship_streams(Ship.State.DEPARTING, bi)})
+	var seen := {}
+	var out := {"pairs": 0, "n": 0, "bad": 0, "worst": INF, "tmax": 0.0, "list": [], "anchorage": 0}
+	for i in P.size():
+		for j in range(i + 1, P.size()):
+			var A: Dictionary = P[i]
+			var B: Dictionary = P[j]
+			if int(A.anchor) >= 0 and int(A.anchor) == int(B.anchor):
+				continue          # même place de mouillage : un seul navire à la fois
+			if int(A.berth) >= 0 and int(A.berth) == int(B.berth):
+				continue          # même poste : le navire suivant n'y est piloté qu'une fois le poste libéré
+			var c := _ef_cross(A.p, B.p)
+			if c.is_empty():
+				continue
+			var q: Vector2 = c[0]
+			var at_anchor := false
+			for kk in 12:
+				if Vector2(Layout.anchor_pos(kk).x, Layout.anchor_pos(kk).z).distance_to(q) < 30.0:
+					at_anchor = true
+			if at_anchor:
+				out.anchorage = int(out.anchorage) + 1
+				continue          # au mouillage, entre les places : hors de ces règles (voir le journal)
+			var key := "%d,%d|%s|%s" % [roundi(q.x / 6.0), roundi(q.y / 6.0), String(A.stream), String(B.stream)]
+			if seen.has(key):
+				continue
+			seen[key] = true
+			out.pairs = int(out.pairs) + 1
+			for dl in [[0.0, 0.0], [0.0, 2.0], [2.0, 0.0], [0.0, 4.0], [4.0, 0.0]]:          # retards au départ (s)
+				var r := _ef_sim(A, B, float(c[1]) - 90.0, float(c[2]) - 90.0, float(c[1]) + 60.0, float(c[2]) + 60.0, q, dl)
+				out.n = int(out.n) + 1
+				out.worst = minf(float(out.worst), float(r[0]))
+				out.tmax = maxf(float(out.tmax), float(r[1]))
+				if float(r[0]) < 2.0 or float(r[1]) >= 150.0:
+					out.bad = int(out.bad) + 1
+					if (out.list as Array).size() < 4:
+						(out.list as Array).append("%s × %s (%d, %d) %.1f u" % [A.name, B.name, int(q.x), int(q.y), float(r[0])])
+	return out
+
+
+## Premier croisement de deux polylignes (hors sommets communs) : [point, abscisse sur a, abscisse sur b], [] sinon.
+func _ef_cross(a: Array, b: Array) -> Array:
+	var sa := 0.0
+	for i in a.size() - 1:
+		var a0 := Vector2(a[i].x, a[i].z)
+		var a1 := Vector2(a[i + 1].x, a[i + 1].z)
+		var sb := 0.0
+		for j in b.size() - 1:
+			var b0 := Vector2(b[j].x, b[j].z)
+			var b1 := Vector2(b[j + 1].x, b[j + 1].z)
+			var r: Variant = Geometry2D.segment_intersects_segment(a0, a1, b0, b1)
+			if r != null:
+				var q: Vector2 = r
+				if q.distance_to(a0) > 0.5 and q.distance_to(a1) > 0.5 and q.distance_to(b0) > 0.5 and q.distance_to(b1) > 0.5:
+					return [q, sa + a0.distance_to(q), sb + b0.distance_to(q)]
+			sb += b0.distance_to(b1)
+		sa += a0.distance_to(a1)
+	return []
+
+
+func _ef_at(path: Array, len: float, s: float) -> Vector2:
+	var q: Vector3 = Layout.polyline_at(path, clampf(s / len, 0.0, 1.0))[0]
+	return Vector2(q.x, q.z)
+
+
+## Deux navires (10 u/s) sur leurs trajets à partir des abscisses sa0, sb0, avec ShipRules.holds et la levée après HOLD_MAX :
+## [écart minimal entre les coques, durée].
+func _ef_sim(A: Dictionary, B: Dictionary, sa0: float, sb0: float, sa_end: float, sb_end: float, cross: Vector2, delay: Array = [0.0, 0.0]) -> Array:
+	var ships := [A, B]
+	var lens := [Layout.path_length(A.p), Layout.path_length(B.p)]
+	var s := [maxf(0.0, sa0), maxf(0.0, sb0)]
+	var ends := [minf(float(lens[0]), sa_end), minf(float(lens[1]), sb_end)]
+	var held_t := [0.0, 0.0]
+	var was := [false, false]
+	var force_t := [0.0, 0.0]
+	var gmin := INF
+	var t := 0.0
+	var dt := 0.1
+	while t < 150.0 and (float(s[0]) < float(ends[0]) or float(s[1]) < float(ends[1])):
+		var items: Array = []
+		var pose: Array = []
+		for k in 2:
+			var sh: Dictionary = ships[k]
+			var hh: Vector2 = sh.h
+			var L := float(lens[k])
+			var p := _ef_at(sh.p, L, s[k])
+			var bow := _ef_at(sh.p, L, s[k] + hh.x)
+			var st := _ef_at(sh.p, L, s[k] - hh.x)
+			# centre de la coque au milieu de la corde, comme ShipView.hull_center
+			p = p.lerp((bow + st) * 0.5, clampf(minf(float(s[k]), L - float(s[k])) / hh.x, 0.0, 1.0))
+			var d := (bow - st).normalized() if bow.distance_to(st) > 0.5 else (_ef_at(sh.p, L, s[k] + 1.0) - p).normalized()
+			if float(s[k]) < hh.x:          # poupe pas encore sur le trajet : du cap de départ à la corde (ShipView._chord_yaw)
+				var yb := lerp_angle(float(sh.get("yaw0", 0.0)), atan2(-d.y, d.x), float(s[k]) / hh.x)
+				d = Vector2(cos(yb), -sin(yb))
+			pose.append([p, d])
+			if float(s[k]) < float(ends[k]) and t >= float(delay[k]):
+				var ah: Array[Vector2] = []
+				for dd in ShipRules.AHEAD:
+					ah.append(_ef_at(sh.p, L, s[k] + dd))
+				var hs := ShipRules.hull_and_sweep(sh.p, float(s[k]), hh.x * 2.0, float(sh.get("yaw0", 0.0)))
+				items.append({"id": k + 1, "p": p, "dir": d, "len": hh.x * 2.0, "w": hh.y * 2.0, "stream": sh.stream, "streams": sh.get("streams", {}), "ahead": ah, "k": k,
+					"body": hs[0], "sweep": hs[1], "was_held": was[k]})
+		var p0: Vector2 = pose[0][0]
+		var p1: Vector2 = pose[1][0]
+		# (coques comparées tant que les deux navires sont en route : un navire encore à sa place de départ — à quai, au
+		# mouillage — n'est pas un croisement ; le bassin d'évitage reste celui du lot D)
+		var en_route: bool = items.size() == 2 and float(s[0]) > float(A.get("leave", A.h.x)) and float(s[1]) > float(B.get("leave", B.h.x))      # (chacun a quitté sa place : poste, ou manœuvre d'appareillage au mouillage)
+		# au croisement : l'un des deux navires à moins d'une demi-longueur (du plus long) du point de croisement — ailleurs,
+		# ce sont les voies parallèles du chenal ou de la passe (N10)
+		en_route = en_route and minf((pose[0][0] as Vector2).distance_to(cross), (pose[1][0] as Vector2).distance_to(cross)) < maxf(float(A.h.x), float(B.h.x))
+		if en_route and p0.distance_to(p1) < A.h.x + B.h.x + 4.0:
+			gmin = minf(gmin, _hulls_gap(p0, pose[0][1], A.h.x, A.h.y, p1, pose[1][1], B.h.x, B.h.y))
+		var held := ShipRules.holds(items)
+		for it in items:
+			var k: int = it.k
+			was[k] = held.has(it.id) and float(force_t[k]) <= 0.0
+			if held.has(it.id) and float(force_t[k]) <= 0.0:
+				held_t[k] = float(held_t[k]) + dt
+				if float(held_t[k]) > ShipRules.HOLD_MAX:
+					force_t[k] = ShipRules.HOLD_FORCE
+					held_t[k] = 0.0
+			else:
+				held_t[k] = 0.0
+				s[k] = minf(float(ends[k]), float(s[k]) + 10.0 * dt)
+			force_t[k] = maxf(0.0, float(force_t[k]) - dt)
+		t += dt
+	return [gmin, t]

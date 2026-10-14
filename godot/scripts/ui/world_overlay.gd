@@ -18,6 +18,9 @@ var frame_rects: Dictionary = {}        # idem, pour l'image courante seulement 
 var useful := Rect2()                   # rectangle utile de l'écran (sous le HUD du haut, au-dessus des boutons du bas)
 var zone_info: Dictionary = {}          # bulle d'information d'une zone grise touchée : {p, text, t} (2 s)
 var popups_added := 0                   # gains ajoutés depuis le lancement (tests)
+## Boîtes de style réutilisées d'une bulle à l'autre (`draw_style_box` dessine tout de suite : on peut les modifier ensuite).
+var _sb_pill := StyleBoxFlat.new()
+var _sb_bar := StyleBoxFlat.new()
 const ZONE_INFO_TIME := 2.0
 
 
@@ -253,13 +256,13 @@ func _pill(center: Vector2, t: String, bg: Color, icon_name: String, fg: Color =
 		r = Bubbles.bound(r, useful)
 		if not r.has_area():
 			return r
-		r = Bubbles.bound(Bubbles.settle(r, _placed), useful)
+		r = Bubbles.bound(Bubbles.settle(r, _placed, useful), useful)
 		_placed.append(r)
 	if key != "":
 		last_rects[key] = r
 		frame_rects[key] = r
 	center = r.get_center()
-	var sb := StyleBoxFlat.new()
+	var sb := _sb_pill          # lot E : une seule boîte réutilisée (plus de StyleBoxFlat.new() par bulle et par image)
 	sb.bg_color = bg
 	sb.set_corner_radius_all(int(h * 0.5))
 	sb.shadow_color = Color(0, 0, 0, 0.15 * bg.a)
@@ -282,19 +285,20 @@ func _gauge(center: Vector2, fill: float, small_yard: bool = false) -> void:
 	var outer := Bubbles.bound(Rect2(center - Vector2(w * 0.5 + 8, h * 0.5 + 8), Vector2(w + 16, h + 16)), useful)
 	if not outer.has_area():
 		return
-	outer = Bubbles.bound(Bubbles.settle(outer, _placed), useful)
+	outer = Bubbles.bound(Bubbles.settle(outer, _placed, useful), useful)
 	last_rects["yard"] = outer
 	frame_rects["yard"] = outer
 	_placed.append(outer)
 	center = outer.get_center()
 	var col := UI.MONEY if fill < 0.65 else (UI.AMBER if fill < 0.9 else UI.BAD)
-	var bg := StyleBoxFlat.new()
+	var bg := _sb_pill
 	bg.bg_color = Color.WHITE
 	bg.set_corner_radius_all(22)
 	bg.shadow_color = Color(0, 0, 0, 0.15)
 	bg.shadow_size = 4
+	bg.shadow_offset = Vector2.ZERO
 	draw_style_box(bg, outer)
-	var fg := StyleBoxFlat.new()
+	var fg := _sb_bar
 	fg.bg_color = Color("#E3E6F0")
 	fg.set_corner_radius_all(18)
 	draw_style_box(fg, Rect2(center - Vector2(w, h) * 0.5, Vector2(w, h)))

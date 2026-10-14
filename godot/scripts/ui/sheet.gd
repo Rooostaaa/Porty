@@ -122,7 +122,7 @@ func _ready() -> void:
 		var trow := UI.hbox(10)
 		hv.add_child(trow)
 		for i in tabs.size():
-			var b := UI.button(tabs[i], UI.INDIGO_DARK, 30, 84 if half else 84)
+			var b := UI.button(tabs[i], UI.INDIGO_DARK, 30, 96)      # cible tactile ≥ 96 px (lot E ; 84 avant)
 			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			b.clip_text = true
 			b.pressed.connect(_select_tab.bind(i))
@@ -176,6 +176,8 @@ func _gui_input(event: InputEvent) -> void:
 		return
 	var mb := event as InputEventMouseButton
 	if mb != null and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT and mb.position.y < top_y():
+		# l'appui est pris ici : la caméra ne le voit pas, donc son relâchement n'est jamais un toucher du monde (lot E, E5 ;
+		# voir `CameraRig.input_enabled`)
 		accept_event()
 		close()
 

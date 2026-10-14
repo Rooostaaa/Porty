@@ -81,29 +81,35 @@ static func reward(c: Control, text: String, color: Color = UI.MONEY, big: bool 
 
 
 ## Pièces qui volent d'un point de l'écran jusqu'au compteur (encaissement d'un navire, lot D-UI) ; `on_arrive` est appelé
-## à l'arrivée de chaque pièce (le compteur pulse en encaissant).
-static func coins(from: Vector2, to: Vector2, count: int = 7, on_arrive: Callable = Callable()) -> void:
+## à l'arrivée de chaque pièce (le compteur pulse en encaissant). Lot E : vraies pièces de 64 px, qui naissent **au-dessus**
+## du texte « +X $ » (`lift` px plus haut) après `delay` s, et partent en arc vers le haut : le montant reste lisible.
+const COIN_SIZE := 64.0
+
+
+static func coins(from: Vector2, to: Vector2, count: int = 7, on_arrive: Callable = Callable(), delay: float = 0.0, lift: float = 0.0) -> void:
 	var layer := _layer()
 	if layer == null:
 		return
-	var tex := UI.icon_tex("money")
+	var tex := UI.coin_tex()
 	for i in count:
 		var c := TextureRect.new()
 		c.texture = tex
 		c.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		c.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		c.size = Vector2(46, 46)
+		c.size = Vector2(COIN_SIZE, COIN_SIZE)
 		c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		c.z_index = 9
+		c.set_meta("coin", true)
 		layer.add_child(c)
-		var start := from + Vector2(randf_range(-40.0, 40.0), randf_range(-30.0, 20.0)) - c.size * 0.5
+		var start := from + Vector2(randf_range(-50.0, 50.0), -lift + randf_range(-24.0, 8.0)) - c.size * 0.5
 		c.global_position = start
 		c.modulate.a = 0.0
-		# un petit arc : la pièce saute d'abord vers le haut puis file vers le compteur
+		# un arc : la pièce saute d'abord vers le haut (jamais vers le texte en dessous) puis file vers le compteur
 		var mid := start.lerp(to - c.size * 0.5, 0.35) + Vector2(randf_range(-120.0, 120.0), -160.0)
+		mid.y = minf(mid.y, start.y - 120.0)
 		var end := to - c.size * 0.5
 		var tw := c.create_tween()
-		tw.tween_interval(i * 0.06)
+		tw.tween_interval(delay + i * 0.06)
 		tw.tween_property(c, "modulate:a", 1.0, 0.08)
 		var fly := func(t: float) -> void:
 			var a := start.lerp(mid, t)

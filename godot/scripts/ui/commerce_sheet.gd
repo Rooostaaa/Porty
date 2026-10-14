@@ -98,7 +98,7 @@ func _build_traffic() -> void:
 		var tag := "construit" if st == "built" else ("palier T%d" % int(b.tier) if st == "tier" else Fmt.money(float(b.cost)))
 		line.add_child(UI.label(tag, 26, UI.MONEY if st == "built" else UI.MUTED, true))
 		v2.add_child(line)
-	var go := UI.button("BÂTIMENTS", UI.INDIGO, 28, 90)
+	var go := UI.button("BÂTIMENTS", UI.INDIGO, 28, 100)      # cible tactile ≥ 96 px (lot E)
 	go.pressed.connect(func() -> void:
 		close()
 		Hud.main.open_sheet(ManageSheet.new(0)))

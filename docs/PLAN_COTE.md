@@ -1,9 +1,9 @@
-# Plan coté définitif — « La baie et le terre-plein » (13/10/2026, réorganisé au lot D le 14/10)
+# Plan coté définitif — « La baie et le terre-plein » (13/10/2026, réorganisé au lot D le 14/10, flux du lot E le 14/10 au soir)
 
 Source unique des cotes : `godot/scripts/world/layout.gd` (constantes citées entre parenthèses). Repère du jeu : **x vers l'est**
 (droite-bas de l'écran), **z vers le sud** (gauche-bas), mer en z négatif, bord des quais à **z = −6**. Captures de validation :
 `docs/captures/plan_cote_vue_dessus.png` (plan vu de dessus, avant le lot D), `docs/captures/d_monde_*.png` (lot D, dont
-`d_monde_plan_dessus.png`, le plan vu de dessus après réorganisation).
+`d_monde_plan_dessus.png`, le plan vu de dessus après réorganisation), `docs/captures/e_flux_*.png` (lot E).
 **Règle d'or : rien n'est posé « là où il reste de la place » ; chaque bâtiment a sa case, dessinée dès le départ (empreinte
 `ghost_lot`).** Lot D (revue `REVUE_CRITIQUE_PORT.md`, axe 1) : circulation à droite, douane côté sortie dans une enceinte, pôle
 nautique sur le cap, bureaux du port côté public, gare contre le terre-plein, brise-lames et passe est au palier 3.
@@ -32,12 +32,12 @@ nautique sur le cap, bureaux du port côté public, gare contre le terre-plein, 
 | 5 | Dragage du chenal | `dredge1` | bande de 14 u le long du chenal | dredge1 |
 | 6 | Quai n°2 | `berth2` | L : 0…48 × −6…5 et 0…36 × 5…30 | berth2 · asphalt · quickmoor (repère : grue mobile du quai n°2) |
 | 7 | Pôle froid | `reefer` | 36…48 × 5…30 | reefer (bâtiment renommé « Pôle froid ») |
-| 8 | Deuxième voie de gate | `gate2` | −18…6 × 36…108 | gate2 (guérite −10,5 ; 44 : **2ᵉ voie de sortie**) · parking1 · parking2 |
+| 8 | Deuxième voie de gate (grise « discrète ») | `gate2` | voie x −18…−12 × 36…54 et parkings −18…6 × 54…108 (lot E) | gate2 (guérite **−17,25 ; 46,5 sur un îlot** entre la 2ᵉ voie de sortie et l'entrée : **2ᵉ voie de sortie**, second portique sur x −19,5 si scanner2) · parking1 · parking2 |
 | 9 | **Pôle nautique** (butte, grise « discrète ») | palier 2 | cap : (−77,−31) (−58,6,−31) (−57,−24) (−57,−13) (−60,5,−5) (−77,−5) | **tour VTS** (−62 ; −16, ≈ 35 u de la passe) · rpilot (−69 ; −14, au pied) · repair (−63 ; −27 · 90°, atelier + cale sur la crique) |
 | 10 | Quai profond n°3 (terre-plein) | `berth3` | 48…121 × −6…44 | berth3 · rtg (84 ; 18 · 70×22) · berth4 · vacmoor ; sous-station |
-| 11 | Station de soutage GNL | `lng` | 121…152 × −6…42 | lng (145 ; 12,5) + appontement · imo (127 ; 11,5 : **7,3 u du GNL**) · oog (127 ; 24) |
-| 12 | **Terminal rail** (gare) | `rail` | contre le terre-plein : (56,44)…(150,41,5) → z 70 | rail (100 ; 52 · 18,5×3,7, quai) ; voie z = 57 de x 62 au tunnel est (184 ; 58) ; liaison x 84…90, z 36…48 avec la voie des camions du terre-plein |
-| 13 | **Bureaux du port** (ex-Colline) | palier 2 | −66…−24 × 46…64 | ewindow (−30 ; 57,5) · ecustoms (−39 ; 57,5) · tos (−48 ; 57,5), au bord de la **rue des bureaux** (z 48…54) reliée à la route d'accès |
+| 11 | Station de soutage GNL | `lng` | 121…152 × −6…42 | lng (145 ; **15,5** : 4,1 u du poste 4) + appontement (156 ; 15,5) · imo (**129,1** ; 11,5 : 4,1 u du parc RTG, 5,1 u du GNL) · oog (129,1 ; 24) |
+| 12 | **Terminal rail** (gare) | `rail` | contre le terre-plein : (56,44)…(150,41,5) → z 70 | rail (100 ; 52 · 18,5×3,7, quai) ; voie z = 57 de x 62 au tunnel est (184 ; 58) ; liaison x 87…93 (axe de l'allée x 90,1), z 36…48 avec la voie des camions du terre-plein, **passage à niveau signalé** (lot E) |
+| 13 | **Bureaux du port** (ex-Colline) | palier 2 | −66…−24 × 46…67 | ewindow (−31 ; 54) · ecustoms (−40 ; 54) · tos (−49 ; 54), tournés vers la **rue des bureaux** (x −54…−24, **z 60…66**, lot E : derrière la tête de file) reliée à la route d'accès |
 
 La zone logistique (z 84…126) reste en arrière-plan, grise jusqu'à la gare. Plus de bande d'herbe vide : bosquets entre
 x 9 et 52, z 36…80 (végétation `scatter`), gare dans la bande x 56…150.
@@ -46,27 +46,39 @@ x 9 et 52, z 36…80 (végétation `scatter`), gare dans la bande x 56…150.
 - **Camions — circulation à droite** (`LANE_*`, `ROAD_*`, `truck_route_*`) : tunnel ouest (x −128) → autoroute, voie vers l'est
   **au sud** (z 142, `HIGHWAY_LANE_E` ; vers l'ouest z 140) → virage à gauche sur la **voie d'entrée à l'est** de la route
   (x −19,5 ; −15 avec gate2) → file depuis z 49, aire d'attente x −12…6 → **barrière d'entrée** (pivot −18, z 45) → voie A
-  (aller, à vide) **z 34,6 vers l'est** jusqu'au bout de la boucle (x −2 / 45 / 146) → demi-tour → voie B (retour) **z 32,4 vers
-  l'ouest, le long du parc** : arrêt devant le bloc (z 30,4), chargement → **voie de sortie à l'ouest** (x −22,5, et −19,5 une
-  fois sur deux avec gate2) : devant la douane, **sous le scanner à portique**, barrière de sortie (pivot −24, z 43) → route vers
+  (aller, à vide) **z 34,6 vers l'est** jusqu'au **bout du groupe de blocs de son arrêt** (x −2 / 45 / 146, `tier_for_stop` ;
+  lot E : cases de demi-tour dessinées en x −2 et 45) → demi-tour → voie B (retour) **z 32,4 vers l'ouest, le long du parc** :
+  arrêt devant le bloc (z 30,4), **face à l'ouest**, arrivée et départ en biais doux (4,5 u pour 2 u, `LOAD_APPROACH`),
+  chargement → **voie de sortie à l'ouest** (x −22,5, et −19,5 une
+  fois sur deux avec gate2) : devant la douane, **sous un scanner à portique** (un par voie de sortie), barrière de sortie (pivot −24, z 43) → route vers
   le sud → virage à gauche sur l'autoroute vers l'est → tunnel est (x 183). Aucun croisement entre entrée et sortie.
 - **Engins** : inchangés (côté mer, allées z 3,4 / 17,2, allées verticales −20,3 / 16,3 / 90,1).
 - **Navires** : mouillage, chenal, passe ouest, bassin d'évitage inchangés. **Postes 1–2** : arrivée et départ par la passe ouest
   **à tous les paliers**. **Postes 3–4** (palier 3) : du mouillage, entre deux colonnes de places puis voie au large z = −108
-  (au nord du début du chenal : jamais à travers une ligne de bouées), le large à l'est (194 ; −108) → (186 ; −29), **passe
-  est**, voie d'arrivée est z −29 vers l'ouest, **évitage devant le poste** (boucle côté quai), voie d'arrivée z −21 vers l'est,
-  accostage ; départ par la voie z −36, la passe est (168 ; −36), (205 ; −85), hors écran.
-- **Haies** : enceinte | cap (x −48,8, z 2…44,6), enceinte | bureaux (z 44,6), bureaux | arrière-pays, 2ᵉ voie de gate |
-  arrière-pays (x 6,6), gare | arrière-pays (z 70,6), terre-plein | herbe (ouverte au droit de la liaison avec la gare).
+  (au nord du début du chenal : jamais à travers une ligne de bouées), le large à l'est (194 ; −108) → (186 ; −36), **passe
+  est à droite** (lot E) : voie d'arrivée **z −36 au nord** vers l'ouest, **évitage devant le poste** (boucle côté quai), voie
+  d'arrivée z −21 vers l'est, accostage ; départ par la voie **z −25 au sud** (11 u d'entraxe : deux panamax à 2,4 u), sortie à
+  l'est de la ligne d'arrivée (200 ; −25) → (215 ; −90), hors écran.
+- **Règles de passage des navires** (lot E, `ShipRules`, vues seulement) : distance de suivi ; on cède au navire qui coupe la
+  route devant l'étrave ; **croisements** (`SHIP_CROSSINGS`) : « large » (voie z −108 × chenal ouest, x −50…−10 × z −126…−90,
+  **balisé** : contour jaune et bouées cardinales en (−30 ; −128,5) et (−46 ; −87,5)), « chenal » (entrée du chenal, x −40…−8 ×
+  z −146…−100), bassins « ouest » (x −42…20 × z −40…−14) et « est » (x 80…128 × z −33…−14) : l'autre courant attend, à égalité
+  le plus petit identifiant, retenue levée après 12 s.
+- **Haies** : enceinte | cap (x −48,8, z 2…44,6), enceinte | bureaux (z 44,6), bureaux | arrière-pays (z 67,6), aire
+  d'attente | arrière-pays (x 6,6, z 54…108), gare | arrière-pays (z 70,6), terre-plein | herbe (ouverte au droit de la liaison avec la gare).
 - **Personnages** : dockers fixes du quai, douaniers dans l'aire d'inspection, responsables à leur poste ; **foule du lot D**
   (MultiMesh, 28 au plus) : dockers sur le tablier (1 + agents des Quais, 2 à 5 par navire à quai) et sur le pont pendant le
-  déchargement (agents des Portiques, 1 à 3), douaniers (agents de la Douane, 1 à 4) ; demi-tour progressif pour tous.
+  déchargement (agents des Portiques, 1 à 3), douaniers (agents de la Douane, 1 à 4, places réservées) ; demi-tour progressif.
+- **Gare** (lot E) : la rame sort du tunnel (coupée en x 181, sous la colline), attend 16 s au quai, repart ; un tracteur fait la
+  navette parc RTG ↔ quai tant que le train est à quai et attend au passage à niveau qu'aucun camion n'approche (26 u).
 
 ## 4. Départements et responsables (`dept_pos`, `MANAGER_POS`)
 Capitainerie (−43 ; 6), puis **tour VTS (−62 ; −16)** au palier 2 · Quais (**−32** ; −3) · Portiques (**−21** ; −3) (11 u :
-touchers séparés) · Parc (−20,3 ; 17,2) · Gate (**−21 ; 48,5**, tête de la file : toucher une barrière reste possible) · Douane
-(**−28,5 ; 40,5**). Responsables : capitainerie (−38,5 ; 9,5) / **pied de la tour (−58,6 ; −12,5)**, quai (−28 ; −4,4), grues
-(−20 ; −4,4), parc (−47 ; 22), gate (−26,2 ; 55), douane (−27 ; 37).
+touchers séparés) · Parc (−20,3 ; 17,2) · Gate (**−21 ; 56**, lot E : sur la route au sud de la tête de file) · Douane
+(**−31,5 ; 38**, lot E : parvis du bureau) — Douane, Gate et bras des barrières à ≥ 11 u l'un de l'autre. Au palier 2, la
+maison bleue de la capitainerie et la tour ouvrent toutes deux la Capitainerie. Responsables : capitainerie (−38,5 ; 9,5) /
+**pied de la tour (−58,6 ; −12,5)**, quai (−28 ; −4,4), grues (−20 ; −4,4), parc (−47 ; 22), gate (−26,4 ; 47,4), douane
+(−27 ; 37).
 
 ## 5. Cadrage
 Départ `CameraRig.START` = (−45 ; −29), largeur 58 u : vieux port, passe, cap (la zone grise du pôle nautique y est « discrète » :

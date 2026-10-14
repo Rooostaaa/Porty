@@ -32,6 +32,13 @@ var input_enabled := true:
 			_dragging = false
 			_touches.clear()
 			_pinch_dist = 0.0
+			# lot E (E5) : un relâchement qui suit la fermeture d'un écran n'est jamais un toucher du monde (l'appui a été pris
+			# par l'écran : la caméra ne l'a pas vu, et `_press_pos` datait d'un ancien toucher)
+			_pressed = false
+			_press_pos = OFFSCREEN
+
+const OFFSCREEN := Vector2(-1.0e6, -1.0e6)
+var _pressed := false         # un appui gauche a été reçu par la caméra (le relâchement correspondant peut être un toucher)
 
 var _touches: Dictionary = {}
 var _drag_from := Vector2.ZERO
@@ -154,9 +161,13 @@ func handle_input(event: InputEvent) -> bool:
 				_dragging = true
 				_drag_from = mb.position
 				_press_pos = mb.position
+				_pressed = true
 			else:
 				_dragging = false
-				if mb.position.distance_to(_press_pos) < 14.0:
+				var was := _pressed
+				_pressed = false
+				if was and mb.position.distance_to(_press_pos) < 14.0:
+					_press_pos = OFFSCREEN
 					tapped.emit(screen_to_ground(mb.position), mb.position)
 			return true
 	elif event is InputEventMouseMotion and _dragging and _touches.size() < 2:

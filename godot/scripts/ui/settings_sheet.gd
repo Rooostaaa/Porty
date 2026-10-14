@@ -44,10 +44,12 @@ func build() -> void:
 		sl.add_theme_stylebox_override("grabber_area", UI.flat(UI.VIOLET, 12, 0, 12))
 		sl.add_theme_stylebox_override("grabber_area_highlight", UI.flat(UI.VIOLET, 12, 0, 12))
 		var bn := String(bus[0])
+		# lot E : le volume s'applique à chaque cran, mais n'est écrit sur le disque qu'au relâchement (ou à la fermeture)
 		sl.value_changed.connect(func(x: float) -> void:
-			Sfx.set_volume(bn, x / 100.0)
+			Sfx.set_volume(bn, x / 100.0, false)
 			if bn == "Sons":
 				Sfx.play("click", 0.15))
+		sl.drag_ended.connect(func(_changed: bool) -> void: Sfx.save_volumes())
 		h.add_child(sl)
 		v.add_child(h)
 		sliders[bn] = sl
@@ -86,6 +88,11 @@ func _reset() -> void:
 	if Hud.main != null and Hud.main.tutorial != null:
 		Hud.main.tutorial.restart()
 	close()
+
+
+func close() -> void:
+	Sfx.save_volumes()          # un cran posé sans glisser (toucher sur la piste) est écrit à la fermeture
+	super.close()
 
 
 func refresh() -> void:

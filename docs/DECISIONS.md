@@ -528,3 +528,28 @@ leur instant ne l'est pas : une fonction chargée compte comme révélée « dep
   trou d'achat ≤ 90 s au T3 (1 min 19 – 1 min 35 à l'entrée, 2 – 3 min sur le palier : les bâtiments T3 valent 1,5–3 min de revenu).
 - Chapitres du T1 plus tôt (Douane ≈ 3 min 30, gate ≈ 6 min, Commerce ≈ 7 min). Format de sauvegarde inchangé.
 - Sonde : `--curve`, `--maxh=`, `--bot-save=` ; bot : valorise les services facturés (`fee_rel`), épargne réglable (`save_horizon`, 150 s).
+
+
+## Confiance (lot E) — 14/10 (ordre `docs/ORDRE_E_CONFIANCE.md`, journal `JOURNAL_PLAN_BAIE.md` § « Lot E — Confiance »)
+- **Bon achat = débit qui bouge et rentabilisé en moins de 10 min** (`Advice.GOOD_PAYBACK` = 600 s). Seuil fixe plutôt que
+  « 2 × la médiane du palier » : lisible, stable d'une partie à l'autre, et la médiane du meilleur achat reste entre 2 et 6 min
+  (sonde). Seuls les bons achats passent au vert, comptent dans la pastille d'Améliorer et portent ★ MEILLEUR ACHAT.
+- **Les services facturés ne sont pas un gain du port** pour l'interface : le gain d'un achat est séparé en part « débit » et
+  part « services » (`PortSim.upgrade_gain_parts`, mêmes valeurs que `upgrade_gain` au bit près). Un niveau qui ne fait monter
+  que les services s'affiche « Portiques +6 % · pas le goulot (+15 $/s de services) » en gris (« le débit ne bouge pas » sur le
+  service goulot lui-même), jamais « rentabilisé en 102 h » en vert. Le revenu, lui, les compte (ils sont encaissés).
+- **Bouton Goulot = ce qui règle le goulot** : table goulot → effets de `buildings.json` (postes à quai → `add_berth`, parc trop
+  petit → `yard_cap` du parc, gate → voies / aire / débit de gate, grue → grues, douane → bureau / scanners / formalités…).
+  Le bâtiment n'est proposé que s'il est le prochain de la liste (ordre strict inchangé) ; sinon l'amélioration du service qui
+  le soulage — pour « postes à quai » et « escales au plancher », seulement si elle fait bouger le débit — ; sinon le bâtiment
+  à viser (gris) ; sinon GESTION. Brouillard : PATIENTER. Logique dans `scripts/ui/advice.gd` (testable par run_all).
+- **Coût des aléas sur le revenu réel** (fenêtre d'une minute, `PortSim.real_income_rate`), plafonné à 25 % de la trésorerie
+  (`hazard_cost_cap`) ; moins de 15 s mesurées (partie tout juste chargée d'une ancienne sauvegarde) : estimation plafonnée,
+  recalculée dès que 15 s sont mesurées. Sauvegarde : la dernière minute de revenu et `last_tier_t` sont enregistrées (champs
+  facultatifs, **version inchangée**) — le revenu affiché ne tombe plus à « +41K $/s » juste après un chargement.
+- **Noms courts tirés du nom du bâtiment** (ses mots, dans l'ordre, sans « ᵉ ») : pancarte et Gestion gardent le nom complet,
+  le bouton un extrait (« ALLONGEMENT DU QUAI », « PÔLE FROID », « DEUXIÈME VOIE »).
+- Feuille : l'aléa en cours reste visible en pastille au-dessus d'une feuille mi-hauteur. Cérémonie de palier : la fenêtre dit
+  ce qui s'ouvre (`tiers.json` → `opens`, 3 icônes par palier) et VOIR cadre la zone du prochain bâtiment du palier ; la couche
+  de cérémonie passe sous les fenêtres ; la surcouche monde est masquée sous une fenêtre.
+- Volume enregistré au relâchement de la réglette (ou à la fermeture de Réglages) ; `Sfx.persist` faux pendant les tests.

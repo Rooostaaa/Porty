@@ -55,7 +55,8 @@ var _rade_full_t: float = 0.0          # secondes (lissées) de rade pleine : le
 var _bn_time: Dictionary = {}          # secondes « lissées » où chaque service est le goulot (condition « bottleneck » + « for »)
 var _bn_last: float = 0.0
 var last_reveal_id: String = ""         # dernière fonction révélée : sa condition « used » raccourcit l'attente
-var last_tier_t: float = -1.0e9         # dernier passage de palier : aucune révélation pendant `reveal_tier_hold` s (non sauvegardé)
+var last_tier_t: float = -1.0e9         # dernier passage de palier : aucune révélation pendant `reveal_tier_hold` s (sauvegardé depuis le lot E)
+var _live_t: float = 0.0                # secondes simulées depuis la création ou le chargement (fenêtre du revenu réel ; non sauvegardé)
 var owners_on: Dictionary = {}         # armateurs démarchés (salon maritime) : id -> true
 var lines: Dictionary = {}             # lignes régulières signées : armateur -> nombre
 var line_offers: Array[String] = []    # armateurs qui proposent une ligne (après un contrat réussi)
@@ -159,6 +160,12 @@ func reset() -> void:
 	features.clear()
 	last_reveal_t = -1.0e9
 	last_reveal_id = ""
+	last_tier_t = -1.0e9          # lot E : `reset()` complet (palier, alerte de la carte Goulot, fenêtre du revenu réel)
+	_alert_why = ""
+	_alert_left = 0.0
+	_live_t = 0.0
+	_fee_key = -1
+	_fee_vals.clear()
 	_rade_full_t = 0.0
 	_bn_time.clear()
 	_bn_last = 0.0
@@ -381,12 +388,38 @@ func service_fee_rate() -> float:
 	var n := 0
 	for d in DEPTS:
 		n += int(levels[d]) - 1
+	# lot E : en cache (il était recalculé à chaque pas et à chaque estimation) — clé : palier, Renom, cargaisons débloquées,
+	# bâtiments, armateurs démarchés, contrats en cours (le « panier » du port) ; une valeur par somme des niveaux
+	var k := _fee_cache_key(f)
+	if k != _fee_key:
+		_fee_key = k
+		_fee_vals.clear()
+	if _fee_vals.has(n):
+		return float(_fee_vals[n])
 	var mix := cargo_shares()
 	var v := 0.0
 	for c in NCARGO:
 		v += mix[c] * float(db.cargo[c].value)
 	v *= float(db.tier_def(tier).get("value_mult", 1.0)) * renown_mult()
-	return f * float(n) * v * (1.0 + float(db.cfg("gate_fee_ratio")))
+	var r := f * float(n) * v * (1.0 + float(db.cfg("gate_fee_ratio")))
+	_fee_vals[n] = r
+	return r
+
+
+var _fee_key := -1
+var _fee_vals: Dictionary = {}       # somme des niveaux -> services facturés ($/s), pour la clé `_fee_key`
+
+
+## Tout ce dont dépend le prix de base d'un EVP des services facturés, hors niveaux (voir `cargo_shares`).
+func _fee_cache_key(f: float) -> int:
+	var ub := 0
+	for c in unlocked.size():
+		if unlocked[c] != 0:
+			ub |= 1 << c
+	var ck := 0
+	for ct in contracts_active:
+		ck = ck * 31 + hash(String(ct.get("owner", ""))) + hash(String(ct.get("cargo", ""))) * 7
+	return hash([tier, renown, ub, built.size(), owners_on.size(), contracts_active.size(), ck, f])
 
 
 ## Bonus permanent de prestige : +10 % de revenus par point de Renom.
@@ -614,6 +647,7 @@ func step(dt: float) -> void:
 	if dt <= 0.0:
 		return
 	time += dt
+	_live_t += dt
 	invalidate()
 	Hazards.update(self, dt)
 	_arrivals(dt)
@@ -1416,6 +1450,18 @@ func income_per_min() -> float:
 	return _sum(income_buckets) * 60.0 / clampf(time, 1.0, 60.0)
 
 
+## Revenu net **réel** par seconde (fenêtre glissante d'une minute) : comme `income_per_min`, mais la fenêtre ne compte que le
+## temps réellement mesuré (partie chargée d'une sauvegarde sans seaux : depuis le chargement). Lot E : revenu du HUD et coût
+## des aléas (qui suivait le débit théorique, 3 à 4 fois le revenu réel au T3 de la partie de bot).
+func real_income_rate() -> float:
+	return _sum(income_buckets) / clampf(real_income_window(), 1.0, 60.0)
+
+
+## Secondes de revenu réellement mesurées dans les seaux (au plus 60).
+func real_income_window() -> float:
+	return minf(60.0, minf(time, _live_t))
+
+
 func evp_per_min() -> float:
 	return _sum(evp_buckets) * 60.0 / clampf(time, 1.0, 60.0)
 
@@ -1665,9 +1711,11 @@ func alert_reason(a: Dictionary) -> String:
 	for s in ships:
 		if s.state == Ship.State.ANCHORED and s.patience < float(db.cfg("alert_patience", 0.3)) * s.patience_max:
 			return "patience"
-	if yard_fill() >= float(db.cfg("alert_yard_fill", 0.9)):
+	# parc et gate : seulement une fois leur chapitre ouvert (lot E : la carte ne rougit pas pour un service que le joueur
+	# ne voit pas encore)
+	if feature("dept_yard_ops") and yard_fill() >= float(db.cfg("alert_yard_fill", 0.9)):
 		return "yard"
-	if trucks_honking() > 0:
+	if feature("dept_gate") and trucks_honking() > 0:
 		return "gate"
 	return ""
 
@@ -1804,6 +1852,37 @@ func income_estimate_with(dept: String, n: int, cargo_i: int = -1) -> float:
 func upgrade_gain(dept: String, n: int, cargo_i: int = -1, base: float = -1.0) -> float:
 	var b := base if base >= 0.0 else income_estimate_with(dept, 0, cargo_i)
 	return income_estimate_with(dept, n, cargo_i) - b
+
+
+## Lot E (affichage) : même estimation que `income_estimate_with` (mêmes valeurs, au bit près), avec la part des services
+## facturés : {"total": revenu net estimé, "fees": services facturés} ($/s).
+func income_parts_with(dept: String, n: int, cargo_i: int = -1) -> Dictionary:
+	if cargo_i >= 0:
+		licences[cargo_i] += n
+	else:
+		levels[dept] = int(levels[dept]) + n
+	invalidate()
+	var flow := float(_compute_analysis().flow)
+	var v := avg_value_per_evp() * (1.0 + float(db.cfg("gate_fee_ratio")))
+	var fee := service_fee_rate()
+	var r := maxf(0.0, flow * v + fee - salaries_per_day() / float(db.cfg("day_seconds")))
+	if cargo_i >= 0:
+		licences[cargo_i] -= n
+	else:
+		levels[dept] = int(levels[dept]) - n
+	invalidate()
+	return {"total": r, "fees": fee}
+
+
+## Lot E (affichage) : gain d'un achat séparé en part « débit » (le port traite et vend plus : goulot, licences) et part
+## « services » (services facturés, qui montent à chaque niveau, goulot ou non). {"total", "flow", "fees"} ($/s) ;
+## `base` : `income_parts_with("harbor", 0)`, à fournir quand on évalue plusieurs achats d'affilée.
+func upgrade_gain_parts(dept: String, n: int, cargo_i: int = -1, base: Dictionary = {}) -> Dictionary:
+	var b := base if not base.is_empty() else income_parts_with(dept, 0, cargo_i)
+	var a := income_parts_with(dept, n, cargo_i)
+	var total := float(a.total) - float(b.total)
+	var fees := float(a.fees) - float(b.fees)
+	return {"total": total, "fees": fees, "flow": total - fees}
 
 
 # =====================================================================
@@ -2100,7 +2179,7 @@ func to_dict() -> Dictionary:
 		"licences": Array(licences), "built": built.duplicate(), "policy": policy, "tariff": tariff,
 		"boost_until": boost_until, "boost_ready_at": boost_ready_at, "relations": relations.duplicate(),
 		"counters": counters.duplicate(), "missions_claimed": missions_claimed.duplicate(),
-		"renown": renown, "prestiges": prestiges, "lifetime": lifetime.duplicate(), "features": features.duplicate(), "last_reveal_t": last_reveal_t, "last_reveal_id": last_reveal_id, "owners_on": owners_on.keys(), "lines": lines.duplicate(),
+		"renown": renown, "prestiges": prestiges, "lifetime": lifetime.duplicate(), "features": features.duplicate(), "last_reveal_t": last_reveal_t, "last_reveal_id": last_reveal_id, "last_tier_t": last_tier_t, "owners_on": owners_on.keys(), "lines": lines.duplicate(),
 		"line_offers": line_offers.duplicate(), "campaign_ready_at": campaign_ready_at.duplicate(),
 		"ships": sh, "next_ship_id": next_ship_id, "arrival_accum": arrival_accum,
 		"apron": Array(apron), "yard_pending": Array(yard_pending), "yard_cleared": Array(yard_cleared),
@@ -2112,6 +2191,9 @@ func to_dict() -> Dictionary:
 		"stat_rade_wait": stat_rade_wait, "stat_truck_wait": stat_truck_wait,
 		"rng_state": str(rng.state), "pending_arrival": pending_arrival.duplicate(),
 		"t_second": _second_timer, "t_analysis": _analysis_timer, "bucket_time": bucket_time, "bucket_index": bucket_index,
+		# lot E (champs facultatifs, version inchangée) : la dernière minute de revenu, pour que le revenu affiché et le coût
+		# des aléas restent justes juste après un chargement
+		"income_buckets": Array(income_buckets), "evp_buckets": Array(evp_buckets), "ship_buckets": Array(ship_buckets),
 	}
 
 
@@ -2161,6 +2243,8 @@ func from_dict(d: Dictionary) -> void:
 			features[String(f)] = true
 	last_reveal_t = float(d.get("last_reveal_t", -1.0e9))
 	last_reveal_id = String(d.get("last_reveal_id", ""))
+	# lot E : champ facultatif (version de sauvegarde inchangée) ; une partie plus ancienne n'a plus d'attente de palier
+	last_tier_t = float(d.get("last_tier_t", -1.0e9))
 	for o in d.get("owners_on", []):
 		owners_on[String(o)] = true
 	for k in d.get("lines", {}):
@@ -2205,6 +2289,16 @@ func from_dict(d: Dictionary) -> void:
 	_analysis_timer = float(d.get("t_analysis", 0.0))
 	bucket_time = float(d.get("bucket_time", 0.0))
 	bucket_index = int(d.get("bucket_index", 0))
+	var ib: Array = d.get("income_buckets", [])
+	if ib.size() == 60:
+		income_buckets = PackedFloat64Array(ib)
+		var eb: Array = d.get("evp_buckets", [])
+		var sb: Array = d.get("ship_buckets", [])
+		if eb.size() == 60:
+			evp_buckets = PackedFloat64Array(eb)
+		if sb.size() == 60:
+			ship_buckets = PackedFloat64Array(sb)
+		_live_t = minf(time, 60.0)          # la fenêtre d'une minute est pleine (seaux sauvegardés)
 	if not d.has("features"):
 		_upgrade_legacy_save()
 	if not d.has("owners_on"):

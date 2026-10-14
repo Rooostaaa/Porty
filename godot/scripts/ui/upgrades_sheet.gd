@@ -8,8 +8,8 @@ static var mult_index: int = 0
 var focus_dept: String = ""
 var cards: Array[Dictionary] = []
 var mult_btn: Button
-var _gain_cache: Dictionary = {}     # « d:cranes:10 » / « c:2:1 » -> gain de revenu estimé (par seconde)
-var _gain_base := -1.0               # revenu estimé sans achat, commun à toutes les cartes
+var _gain_cache: Dictionary = {}     # « d:cranes:10 » / « c:2:1 » -> gain estimé {total, flow, fees} (par seconde)
+var _gain_base: Dictionary = {}      # revenu estimé sans achat {total, fees}, commun à toutes les cartes
 var _gain_at := 0                    # instant (ms) du dernier calcul
 var _burst_n := 0                    # achats réussis (pour ne jouer qu'un son sur 3 pendant un appui long)
 var _feat_n := -1                    # fonctions révélées à la construction des cartes
@@ -250,7 +250,11 @@ func show_stages(def: Dictionary, d: String, ci: int) -> Control:
 
 ## Appui bref : un achat. Appui long : achats en rafale qui accélèrent, un seul effet à la fin.
 func _hold(b: Button, single: Callable, again: Callable) -> void:
-	var h := HoldRepeat.attach(b, single, func(_n: int) -> bool: return again.call())
+	# `_burst_n` repart de zéro à chaque rafale (lot E : la hauteur du son dérivait d'une rafale à l'autre)
+	var h := HoldRepeat.attach(b, single, func(n: int) -> bool:
+		if n <= 1:
+			_burst_n = 0
+		return again.call())
 	h.burst_ended.connect(func(n: int) -> void:
 		if n > 0 and is_instance_valid(b):
 			Fx.reward(b, "+%d niveaux" % n if n > 1 else "", UI.MONEY))
@@ -263,28 +267,41 @@ func _n_for(max_fn: Callable) -> int:
 	return maxi(1, max_fn.call())
 
 
-## Gain de revenu d'un achat. Chaque estimation rejoue l'analyse du goulot : on les recalcule une fois par seconde
-## (et après un achat) au lieu de 5 fois, avec une seule estimation de référence pour toutes les cartes.
-func _gain_for(key: String, dept: String, n: int, cargo_i: int = -1) -> float:
+## Gain de revenu d'un achat ({"total", "flow", "fees"} : `PortSim.upgrade_gain_parts`). Chaque estimation rejoue l'analyse
+## du goulot : on les recalcule une fois par seconde (et après un achat) au lieu de 5 fois, avec une seule estimation de
+## référence pour toutes les cartes.
+func _gain_for(key: String, dept: String, n: int, cargo_i: int = -1) -> Dictionary:
 	var now := Time.get_ticks_msec()
 	if now - _gain_at > 1000:
 		_gain_cache.clear()
-		_gain_base = -1.0
+		_gain_base = {}
 		_gain_at = now
 	if not _gain_cache.has(key):
 		var s := sim()
-		if _gain_base < 0.0:
-			_gain_base = s.income_estimate_with("harbor", 0)
-		_gain_cache[key] = s.upgrade_gain(dept, n, cargo_i, _gain_base)
-	return float(_gain_cache[key])
+		if _gain_base.is_empty():
+			_gain_base = s.income_parts_with("harbor", 0)
+		_gain_cache[key] = s.upgrade_gain_parts(dept, n, cargo_i, _gain_base)
+	return _gain_cache[key]
 
 
-## Texte de rentabilité : gain de revenu et temps pour rentabiliser l'achat.
-func _payback(gain: float, cost: float) -> Dictionary:
-	if gain * 60.0 < 0.05:
-		return {"text": "Pas le goulot : pas de gain immédiat", "secs": INF}
-	var secs := cost / gain
-	return {"text": "+%s/s · rentabilisé en %s" % [Fmt.money(gain), Fmt.duration(secs)], "secs": secs}
+## Lot E : règles d'un « bon achat » dans `Advice` (sans dépendance aux autoloads, testées par run_all).
+const GOOD_PAYBACK := Advice.GOOD_PAYBACK
+
+
+static func is_good(parts: Dictionary, cost: float) -> bool:
+	return Advice.is_good(parts, cost)
+
+
+static func moves_flow(parts: Dictionary) -> bool:
+	return Advice.moves_flow(parts)
+
+
+static func _payback(parts: Dictionary, cost: float, label: String = "", bottleneck: bool = false) -> Dictionary:
+	return Advice.payback(parts, cost, label, bottleneck)
+
+
+static func _effect_label(s: PortSim, d: String, n: int) -> String:
+	return Advice.effect_label(s, d, n)
 
 
 func refresh() -> void:
@@ -304,7 +321,13 @@ func refresh() -> void:
 				continue
 			var n := _n_for(s.dept_max_affordable.bind(d))
 			var cost := s.dept_cost(d, n)
-			(c.eff as Label).text = "%s  →  %s" % [Info.dept_effect(s, d), Info.dept_effect(s, d, n)]
+			var hit := Info.event_hits(s, d)          # aléa en cours sur ce service (lot E, E3)
+			var e0 := Info.dept_effect(s, d)
+			var e1 := Info.dept_effect(s, d, n)
+			if hit and (e0 == "Suspendu" or s.stat(Info.dept_stat_name(d)) <= 0.0):
+				(c.eff as Label).text = "Suspendu (%s)" % Info.event_name(s)
+			else:
+				(c.eff as Label).text = "%s  →  %s" % [e0, e1] + ("  (%s)" % Info.event_name(s) if hit else "")
 			var mgr := "Responsable ✓" if s.managers[d] else "Sans responsable"
 			(c.det as Label).text = "%s\nAgents %d/%d · %s" % [Info.dept_detail(s, d), s.agents(d), s.agents_max(), mgr]
 			var nm := s.next_dept_milestone(lv)
@@ -320,17 +343,19 @@ func refresh() -> void:
 			# bouton gris : ce qui manque, pas seulement le prix (revue D-UI)
 			b.text = "AMÉLIORER ×%d\n%s" % [n, Fmt.money(cost)] if not b.disabled else "Il manque\n%s" % Fmt.money(cost - s.money)
 			(c.dot as Label).visible = s.shown_analysis().get("dept", "") == d
-			var pb := _payback(_gain_for("d:%s:%d" % [d, n], d, n), cost)
+			var parts := _gain_for("d:%s:%d" % [d, n], d, n)
+			var pb := _payback(parts, cost, _effect_label(s, d, n), String(s.shown_analysis().get("dept", "")) == d)
 			var goal := s.chapter_goal()
-			if float(pb.secs) == INF and String(goal.get("dept", "")) == d:
+			if not moves_flow(parts) and String(goal.get("dept", "")) == d:
 				# le service du chapitre en cours : même sans gain immédiat, chaque niveau rapproche du chapitre suivant
-				pb = {"text": "Niveau %d : ouvre « %s » (%d/%d)" % [int(goal.min), String(goal.name), mini(lv, int(goal.min)), int(goal.min)], "secs": INF, "goal": true}
+				pb = {"text": "Niveau %d : ouvre « %s » (%d/%d)" % [int(goal.min), String(goal.name), mini(lv, int(goal.min)), int(goal.min)], "secs": INF, "good": false, "goal": true}
+			if hit:
+				pb.good = false          # sous un aléa, jamais le meilleur achat (son gain n'est pas représentatif)
 			(c.pay as Label).text = String(pb.text)
-			var pay_col := UI.MONEY if float(pb.secs) < INF else (UI.VIOLET if pb.has("goal") else UI.MUTED)
-			if cost > s.money and float(pb.secs) < INF:
-				pay_col = UI.MUTED          # vert si l'achat est possible, gris sinon
+			# vert seulement pour un bon achat (rentabilisé en moins de 10 min) qu'on peut payer ; gris sinon (lot E)
+			var pay_col := UI.MONEY if bool(pb.good) and cost <= s.money else (UI.VIOLET if pb.has("goal") else UI.MUTED)
 			(c.pay as Label).add_theme_color_override("font_color", pay_col)
-			if float(pb.secs) < best_secs:
+			if bool(pb.good) and float(pb.secs) < best_secs:
 				best_secs = float(pb.secs)
 				best_card = c
 		else:
@@ -376,9 +401,9 @@ func refresh() -> void:
 				else "Palier %s au niveau %d" % [Fmt.mult(float(nxt[1])), int(nxt[0])]
 			b2.disabled = cost2 > s.money
 			b2.text = "LICENCE ×%d\n%s" % [n2, Fmt.money(cost2)] if not b2.disabled else "Il manque\n%s" % Fmt.money(cost2 - s.money)
-			var pb2 := _payback(_gain_for("c:%d:%d" % [ci, n2], "", n2, ci), cost2)
+			var pb2 := _payback(_gain_for("c:%d:%d" % [ci, n2], "", n2, ci), cost2, "Licence")
 			(c.pay as Label).text = String(pb2.text)
-			(c.pay as Label).add_theme_color_override("font_color", UI.MONEY if float(pb2.secs) < INF and cost2 <= s.money else UI.MUTED)
+			(c.pay as Label).add_theme_color_override("font_color", UI.MONEY if bool(pb2.good) and cost2 <= s.money else UI.MUTED)
 	best_dept = String(best_card.get("dept", ""))
 	# « meilleur achat » : le département qui rentabilise le plus vite (parmi ceux qui rapportent)
 	for c in cards:

@@ -296,7 +296,7 @@ func _refresh_stats() -> void:
 		_tags_at = s.time
 		_refresh_tags(s)
 	if stat_bars.has("sources"):
-		var names := {"handling": "Manutention", "dues": "Droits de port", "gate": "Gate", "inspection": "Inspections", "reefer": "Prises frigo", "fees": "Services facturés", "contract": "Contrats", "auction": "Enchères", "salaries": "Salaires"}
+		var names := Info.SOURCE_NAMES      # (lot E : « fees » et « services » distingués)
 		var txt := ""
 		for k in names:
 			if s.last_income.has(k):
@@ -505,6 +505,9 @@ func _check_text(chk: Dictionary) -> String:
 	if chk.get("money", false):
 		return "Coût : %s" % Fmt.money(float(chk.need))
 	if chk.label == "Réputation":
+		# lot E : avant sa révélation, la Réputation (★) n'est pas citée — c'est la satisfaction des navires qu'elle mesure
+		if not sim().feature("stars"):
+			return "Navires satisfaits : %d %% / %d %%" % [roundi((float(chk.have) - 1.0) * 25.0), roundi((float(chk.need) - 1.0) * 25.0)]
 		return "Réputation : %s / %s ★" % [("%.1f" % float(chk.have)).replace(".", ","), ("%.1f" % float(chk.need)).replace(".", ",")]
 	return "%s : %s / %s" % [chk.label, Fmt.num(float(chk.have)), Fmt.num(float(chk.need))]
 

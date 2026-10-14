@@ -21,6 +21,8 @@ var _state: int = -1
 var _state_dur: float = 1.0
 var _shown := -1
 var _yaw := 0.0
+var _off := Vector3.ZERO              # écart du centre de la coque au point du trajet (E-Flux, lissé)
+var _yaw0 := 0.0                     # cap au début du trajet affiché (poupe hors trajet, E-Flux)
 var _bob := 0.0
 var _path: Array[Vector3] = []       # trajet affiché : reste du trajet précédent (s'il n'était pas fini) + trajet de l'état
 var _len := 0.0                      # longueur du trajet affiché
@@ -30,6 +32,9 @@ var _angry := false
 var _horn_done := false
 var wake: MeshInstance3D
 var hold := false                    # Diorama : navire retenu derrière un autre, ou dont le poste n'est pas encore construit à l'écran
+var held_t := 0.0                    # Diorama (E-Flux) : depuis combien de temps la vue est retenue sans interruption (s)
+var force_t := 0.0                   # Diorama (E-Flux) : retenue levée pendant ce temps (s) après HOLD_MAX s d'attente
+var berth_i := -1                    # poste du navire (le diorama le lit encore quand la simulation l'a retiré)
 ## Rattrapage après une retenue : la vue avance le long de son trajet au plus CATCHUP_K fois sa vitesse nominale (au moins
 ## CATCHUP_MIN u/s), jamais en ligne droite vers la position de la simulation.
 const CATCHUP_K := 2.0
@@ -198,6 +203,7 @@ func place(s: Ship, sim: PortSim) -> void:
 	_set_path(_make_path(s, _state_start(s), sim.tier), 0.0)
 	_d = _eased(s) * _len
 	var p: Vector3 = Layout.polyline_at(_path, _frac())[0]
+	_off = Vector3.ZERO          # (posé sur son trajet ; le centre de la coque rejoint la corde en douceur)
 	position = Vector3(p.x, Layout.WATER_Y, p.z)
 	if _stationary(s.state):
 		_yaw = 0.35 if s.state == Ship.State.ANCHORED else 0.0
@@ -209,6 +215,7 @@ func place(s: Ship, sim: PortSim) -> void:
 
 
 func _set_path(p: Array[Vector3], prefix: float) -> void:
+	_yaw0 = _yaw
 	_path = p
 	_len = Layout.path_length(p)
 	_d = 0.0
@@ -254,7 +261,43 @@ func _chord_yaw() -> float:
 	var pb: Vector3 = Layout.polyline_at(_path, (_d - hl) / _len)[0]
 	if pa.distance_to(pb) > 0.5:
 		yaw_goal = atan2(-(pa.z - pb.z), pa.x - pb.x)
+	if _d < hl and hl > 0.01:
+		# (E-Flux) tant que la poupe n'est pas sur le trajet, le cap passe peu à peu du cap de départ (à quai, au mouillage, ou
+		# celui du trajet précédent) à la corde : le navire tourne en avançant au lieu de pivoter d'un coup vers sa route
+		yaw_goal = lerp_angle(_yaw0, yaw_goal, _d / hl)
 	return yaw_goal
+
+
+## Centre de la coque (E-Flux) : au milieu de la corde étrave–poupe, l'une et l'autre posées sur le trajet — dans un virage ou
+## en quittant un poste en biais, la coque reste sur sa route au lieu de pivoter autour d'un point du trajet (l'étrave ne
+## déborde plus sur la voie voisine) ; aux bouts du trajet (poupe ou étrave pas encore dessus), on revient au point du trajet.
+func hull_center() -> Vector3:
+	var p: Vector3 = Layout.polyline_at(_path, _frac())[0]
+	var hl := length * 0.5
+	if _len <= 1.0 or hl <= 0.01:
+		return p
+	var w := clampf(minf(_d, _len - _d) / hl, 0.0, 1.0)
+	if w <= 0.0:
+		return p
+	var pa: Vector3 = Layout.polyline_at(_path, (_d + hl) / _len)[0]
+	var pb: Vector3 = Layout.polyline_at(_path, (_d - hl) / _len)[0]
+	return p.lerp((pa + pb) * 0.5, w)
+
+
+## Points du trajet à ces distances devant la vue (règle du croisement balisé, Diorama.crossing_holds).
+func ahead(dists: Array) -> Array[Vector2]:
+	var out: Array[Vector2] = []
+	if _len <= 0.5:
+		return out
+	for dd in dists:
+		var q: Vector3 = Layout.polyline_at(_path, minf(1.0, (_d + float(dd)) / _len))[0]
+		out.append(Vector2(q.x, q.z))
+	return out
+
+
+## Coque (points du trajet sous la coque) et bande que l'étrave va balayer (règles de passage, ShipRules.holds).
+func hull_sweep() -> Array:
+	return ShipRules.hull_and_sweep(_path, _d, length, _yaw0)
 
 
 ## La vue a-t-elle encore du chemin à faire (en route, ou en retard sur la simulation) ?
@@ -268,6 +311,7 @@ func shown_path() -> Array[Vector3]:
 
 
 func sync(s: Ship, sim: PortSim, delta: float) -> void:
+	berth_i = s.berth
 	if s.state != _state:
 		# la vue finit d'abord le trajet précédent (retenue, image lente), puis enchaîne le nouveau : elle reste toujours
 		# sur une polyligne du plan (revue C7 A1 : plus de ligne droite à travers la terre au relâchement)
@@ -306,8 +350,10 @@ func sync(s: Ship, sim: PortSim, delta: float) -> void:
 
 ## Le navire a quitté la simulation (départ terminé) : la vue finit son trajet jusqu'à la sortie, hors champ, puis le
 ## diorama la libère (revue C7 A1 : plus de disparition en pleine vue). Renvoie true une fois au bout.
-func sync_parting(delta: float) -> bool:
-	hold = false
+func sync_parting(delta: float, rules := false) -> bool:
+	# (E-Flux) `rules` : le diorama applique encore ses règles de passage (retenue bornée par HOLD_MAX) ; sinon, plus de retenue
+	if not rules:
+		hold = false
 	_advance(_len, delta, true)
 	_pose(_state, delta)
 	if _angry:
@@ -331,7 +377,12 @@ func _advance(target: float, delta: float, steady: bool = false) -> void:
 ## Position (sur le trajet), cap, roulis, sillage.
 func _pose(state: int, delta: float) -> void:
 	var prev := position
-	var want: Vector3 = Layout.polyline_at(_path, _frac())[0]
+	# centre de la coque (milieu de la corde) : son écart au point du trajet suit en douceur — un changement d'état remet le
+	# trajet à zéro sous le navire, sans saut ; retenu, le navire ne bouge pas du tout
+	var at_path: Vector3 = Layout.polyline_at(_path, _frac())[0]
+	if not hold:
+		_off = _off.lerp(hull_center() - at_path, 1.0 - exp(-delta * 4.0))
+	var want := at_path + _off
 	position.x = want.x
 	position.z = want.z
 	var mv := position - prev

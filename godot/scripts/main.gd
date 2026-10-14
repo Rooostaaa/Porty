@@ -27,6 +27,11 @@ func _ready() -> void:
 	var cheats := DebugArgs.apply(a, GameState.sim, GameState.db, DebugArgs.allowed())
 	if float(cheats.speed) > 0.0:
 		Sim.speed = float(cheats.speed)
+	# --event=wind [--event-delay=3] : un aléa démarre après quelques secondes (captures, binaire de l'éditeur seulement ; lot E)
+	if a.has("event") and DebugArgs.allowed():
+		get_tree().create_timer(float(a.get("event-delay", "3"))).timeout.connect(func() -> void:
+			if GameState.sim.db.event_by_id.has(String(a.event)):
+				Hazards.start(GameState.sim, String(a.event)))
 	diorama = Diorama.new()
 	add_child(diorama)
 	diorama.bind(GameState.sim)

@@ -106,6 +106,29 @@ static func circle_tex(size: int, c: Color) -> Texture2D:
 	return ImageTexture.create_from_image(img)
 
 
+## Pièce d'or de 64 px (encaissement d'un navire, lot E) : dessinée depuis un SVG en mémoire (pas de fichier à importer).
+const COIN_SVG := """<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+<circle cx="32" cy="34" r="29" fill="#B9770E"/>
+<circle cx="32" cy="31" r="29" fill="#F5B82E"/>
+<circle cx="32" cy="31" r="22" fill="#FFD25A" stroke="#D99A1C" stroke-width="3"/>
+<path d="M39 22.5c-1.8-2-4.4-3-7.2-3-4.2 0-7.3 2.2-7.3 5.6 0 7.4 15 3.9 15 11.3 0 3.4-3.3 5.8-7.7 5.8-3.1 0-5.9-1.2-7.8-3.3"
+ fill="none" stroke="#9C5F06" stroke-width="4.2" stroke-linecap="round"/>
+<path d="M32 15.5v31" stroke="#9C5F06" stroke-width="4" stroke-linecap="round"/>
+<ellipse cx="22" cy="17" rx="7" ry="3.2" fill="#FFF3C4" opacity="0.8" transform="rotate(-30 22 17)"/>
+</svg>"""
+static var _coin: Texture2D
+
+
+static func coin_tex() -> Texture2D:
+	if _coin == null:
+		var img := Image.new()
+		if img.load_svg_from_string(COIN_SVG, 1.0) == OK:
+			_coin = ImageTexture.create_from_image(img)
+		else:
+			_coin = icon_tex("money")
+	return _coin
+
+
 static func icon_tex(name: String) -> Texture2D:
 	if not _icons.has(name):
 		var p := "res://assets/icons/%s.svg" % name

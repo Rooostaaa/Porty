@@ -5,6 +5,7 @@
   "start_amber": 0,
   "start_satisfaction": 0.55,
   "seed": 12345,
+  "hazard_cost_cap": 0.25,
 
   "arrive_time": 7,
   "depart_time": 7,

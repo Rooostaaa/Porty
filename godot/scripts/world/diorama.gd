@@ -72,7 +72,13 @@ var ships_paid := 0                     # signaux ship_paid émis (tests)
 var purchase_feedbacks := 0             # retours d'achat joués (tests)
 
 
+var _stage_trucks := 0
+
+
 func _ready() -> void:
+	var ca := Capture.args()
+	if ca.has("stage-trucks") and DebugArgs.allowed():
+		_stage_trucks = int(ca["stage-trucks"])
 	_build_env()
 	_build_water()
 	static_root = Node3D.new()
@@ -435,6 +441,8 @@ func rebuild() -> void:
 			continue
 		if p.has("not") and _cond_ok(String(p.not)):      # retiré par un bâtiment ou un palier (hangar → halle au T3)
 			continue
+		if p.has("and") and not _cond_ok(String(p["and"])):      # seconde condition (E-Flux : 2ᵉ portique avec gate2)
+			continue
 		var m := String(p.m)
 		var sc := float(p.get("s", 1.0))
 		if p.has("alt") and not Assets.exists(m):      # modèle pas encore livré : repli
@@ -453,6 +461,8 @@ func rebuild() -> void:
 		if sc != 1.0:
 			n.scale = Vector3.ONE * sc
 			n.set_meta("rest_scale", sc)
+		if p.has("roof"):          # toit construit dans Godot sur un modèle livré sans toit (bureau de pilotage, E-Flux)
+			n.add_child(_roof_for(m, String(p.roof)))
 		var zid := Zones.zone_for_cond(String(p.cond), n.position)
 		_add(n, zid)
 		if zid > 0 and (Layout.ZONE_LANDMARKS.get(zid, "") == m or Layout.ZONE_LANDMARKS.get(zid, "") == String(p.m)):
@@ -472,6 +482,9 @@ func rebuild() -> void:
 	_build_channel()
 	_build_slipway()
 	_build_jetties()
+	_build_gate_island()
+	_build_crossovers()
+	_build_crossing_marks()
 	# personnel : chacun fait l'aller-retour entre deux points (le long du quai, devant la douane, sur le perron)
 	traffic.walkers.clear()
 	for i in 3:
@@ -490,6 +503,8 @@ func rebuild() -> void:
 	_rebuild_cranes()
 	if overtime_on:
 		_place_crane_beacons()      # les grues sont recréées : leurs gyrophares aussi
+	if campaign_on and _campaign_tier != sim.tier:
+		_apply_campaign()           # nouveau palier : les pavillons passent sur la tour VTS (E-Flux, E11)
 	_build_lots()
 	yard.rebuild(sim)
 	rig.set_tier_bounds(sim.tier)
@@ -531,6 +546,12 @@ func _build_terrain() -> void:
 		zone_nodes[int(Layout.LOTS[Layout.RECLAIM_BUILDING].zone)].reclaim = rec
 
 
+## Zone grise « discrète » (sol d'herbe, pointillés pâles) : marquée « discreet » (pôle nautique, 2ᵉ voie de gate), ou d'un
+## palier pas encore atteint (E-Flux : au T1, les zones du T2 et du T3 se lisent moins que le port actif).
+func faint_zone(z: Dictionary, st: String) -> bool:
+	return st == Zones.GRAY and (bool(z.get("discreet", false)) or int(z.get("tier", 1)) > sim.tier)
+
+
 ## Sols des zones (couleur ouverte, gris voilé, contour en pointillés ; doré qui respire pour la zone prochaine).
 ## Une zone du terre-plein encore en mer : seul son contour est tracé sur l'eau.
 func _build_zones() -> void:
@@ -545,7 +566,7 @@ func _build_zones() -> void:
 		if not water and not quay:
 			var col := Terrain.lin(String(z.ground)) if String(z.ground) != "" else Terrain.lin("grass")
 			var mat: ShaderMaterial = Terrain.land_material.duplicate() if st == Zones.OPEN else Terrain.gray_material
-			if bool(z.get("discreet", false)) and st == Zones.GRAY:
+			if faint_zone(z, st):
 				# lot D : zone grise « discrète » (pôle nautique sur le cap, dans le cadrage du tutoriel) : l'herbe du cap, sans voile
 				col = Terrain.lin("grass")
 				mat = Terrain.land_material.duplicate()
@@ -573,7 +594,7 @@ func _build_zones() -> void:
 				gb.set_meta("zone_id", id)
 				static_root.add_child(gb)
 		else:
-			if bool(z.get("discreet", false)) and st == Zones.GRAY:
+			if faint_zone(z, st):
 				dm = dash_faint
 			var dsh := Terrain.dashes(poly, y, 1.2 if st == Zones.NEXT else 0.7, 3.0 if st == Zones.NEXT else 2.5, 1.6, dm)
 			dsh.set_meta("zone_id", id)
@@ -758,6 +779,137 @@ func _build_jetties() -> void:
 			p.material_override = _concrete()
 			p.position = Vector3(c.x - sz.x * 0.5 + 1.0 + k * (sz.x - 2.0) / 3.0, -1.6, c.y + sz.y * 0.5 - 0.3)
 			_add(p, zid)
+
+
+## Îlot de la guérite de gate2 (Layout.GATE_ISLAND, E-Flux E10) : bordure de béton entre la 2ᵉ voie de sortie et l'entrée.
+func _build_gate_island() -> void:
+	var gi: Dictionary = Layout.GATE_ISLAND
+	if not _cond_ok(String(gi.cond)):
+		return
+	var c: Vector2 = gi.c
+	var sz: Vector2 = gi.size
+	var isl := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(sz.x, float(gi.h), sz.y)
+	isl.mesh = bm
+	isl.material_override = _concrete()
+	isl.position = Vector3(c.x, float(gi.h) * 0.5, c.y)
+	isl.set_meta("gate_island", true)
+	_add(isl, Zones.zone_for_cond(String(gi.cond), isl.position))
+
+
+static var _mark_mat: StandardMaterial3D
+
+
+## Marquage jaune fixe (passages de demi-tour, croisement balisé) : pas la pulsation des pointillés de la zone prochaine.
+static func _mark_material() -> StandardMaterial3D:
+	if _mark_mat == null:
+		_mark_mat = Terrain.dash_material(Assets.color("mark_yellow"))
+		_mark_mat.albedo_color.a = 0.9
+	return _mark_mat
+
+
+## Passages de demi-tour de la voie des camions (E-Flux, E8) : là où les camions d'un groupe de blocs font demi-tour au
+## milieu de la boucle du palier, une case jaune hachurée sur la chaussée (x −2 au T2–T3, x 45 au T3).
+var crossovers_shown := 0          # (tests)
+
+
+func _build_crossovers() -> void:
+	crossovers_shown = 0
+	for x in Layout.crossover_xs(sim.tier):
+		var x0 := float(x) - 1.0
+		var x1 := float(x) + 2.8
+		var z0 := Layout.LANE_B_Z - 0.9
+		var z1 := Layout.LANE_A_Z + 0.9
+		var box := Terrain.dashes([Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1)], 0.07, 0.3, 0.9, 0.5, _mark_material())
+		box.set_meta("crossover", true)
+		static_root.add_child(box)
+		for k in 3:          # hachures en biais : on y traverse d'une voie à l'autre
+			var a := Vector2(x0 + 0.6 + float(k) * 1.1, z0 + 0.3)
+			var hatch := Terrain.dashes([a, a + Vector2(1.2, z1 - z0 - 0.6)], 0.07, 0.25, 10.0, 10.0, _mark_material())      # un trait plein (contour aller-retour superposé)
+			static_root.add_child(hatch)
+		crossovers_shown += 1
+
+
+## Croisement balisé au large (E-Flux, E9) : contour pointillé de la fenêtre de la règle d'attente sur l'eau et deux bouées
+## cardinales (jaune-noir-jaune) aux coins hors des routes.
+func _build_crossing_marks() -> void:
+	for w in Layout.SHIP_CROSSINGS:
+		if not bool(w.get("mark", false)):
+			continue
+		var r: Rect2 = w.rect
+		var outline := Terrain.dashes([r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)],
+			Layout.WATER_Y + 0.14, 0.6, 2.4, 1.8, _mark_material())
+		outline.set_meta("crossing", String(w.id))
+		static_root.add_child(outline)
+		for bp in w.get("buoys", []):
+			var b := _crossing_buoy()
+			b.position = Vector3((bp as Vector2).x, Layout.WATER_Y, (bp as Vector2).y)
+			static_root.add_child(b)
+
+
+static var _cb_parts: Array = []
+
+
+static func _crossing_buoy() -> Node3D:
+	if _cb_parts.is_empty():
+		var y := StandardMaterial3D.new()
+		y.albedo_color = Assets.color("mark_yellow")
+		y.roughness = 1.0
+		var k := StandardMaterial3D.new()
+		k.albedo_color = Assets.color("dark")
+		k.roughness = 1.0
+		var body := CylinderMesh.new()
+		body.top_radius = 0.5
+		body.bottom_radius = 0.8
+		body.height = 2.1
+		body.radial_segments = 10
+		var band := CylinderMesh.new()
+		band.top_radius = 0.6
+		band.bottom_radius = 0.66
+		band.height = 0.6
+		band.radial_segments = 10
+		var cone := CylinderMesh.new()
+		cone.top_radius = 0.0
+		cone.bottom_radius = 0.42
+		cone.height = 0.55
+		cone.radial_segments = 8
+		_cb_parts = [y, k, body, band, cone]
+	var root := Node3D.new()
+	var parts := [[2, 0, 1.05, false], [3, 1, 1.1, false], [4, 1, 2.45, false], [4, 1, 3.1, true]]
+	for pr in parts:
+		var mi := MeshInstance3D.new()
+		mi.mesh = _cb_parts[int(pr[0])]
+		mi.material_override = _cb_parts[int(pr[1])]
+		mi.position.y = float(pr[2])
+		if bool(pr[3]):
+			mi.rotation.z = PI        # deux cônes pointe contre pointe : marque cardinale ouest
+		root.add_child(mi)
+	root.set_meta("crossing_buoy", true)
+	return root
+
+
+## Toit à deux pans construit dans Godot sur un modèle qui n'en a pas (PROPS « roof » : couleur de palette), à la taille de
+## sa boîte englobante, faîtage selon le grand côté.
+func _roof_for(model: String, col: String) -> MeshInstance3D:
+	var bb := Assets.aabb(model)
+	var pm := PrismMesh.new()
+	var along_x := bb.size.x >= bb.size.z
+	var w := (bb.size.z if along_x else bb.size.x) + 0.5
+	var l := (bb.size.x if along_x else bb.size.z) + 0.5
+	pm.size = Vector3(w, 1.3, l)
+	var mi := MeshInstance3D.new()
+	mi.mesh = pm
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Assets.color(col)
+	m.roughness = 1.0
+	m.metallic_specular = 0.0
+	mi.material_override = m
+	mi.position = Vector3(bb.get_center().x, bb.end.y + 0.65, bb.get_center().z)
+	if along_x:
+		mi.rotation.y = PI * 0.5
+	mi.set_meta("roof", true)
+	return mi
 
 
 ## Personnage qui marche entre a et b (demi-tour instantané, léger balancement) ; ry = orientation au repos.
@@ -1266,6 +1418,7 @@ func _on_ship_spawned(s: Ship) -> void:
 ## Navire retiré de la simulation : s'il partait encore à l'écran (retenu, en retard), sa vue finit son trajet jusqu'à la
 ## sortie avant d'être libérée (revue C7 A1).
 func _on_ship_removed(s: Ship) -> void:
+	_ship_cargo0.erase(s.id)      # (E-Flux : aussi pour un navire reparti furieux, sans escale)
 	if ship_views.has(s.id):
 		var v: ShipView = ship_views[s.id]
 		ship_views.erase(s.id)
@@ -1337,9 +1490,10 @@ func feedback_purchase(dept_id: String) -> void:
 	if sim == null or not PortSim.DEPTS.has(dept_id):
 		return
 	purchase_feedbacks += 1
-	var p := dept_anchor(dept_id)
-	_dust(p, 16)
-	_sparks(p + Vector3(0, 2.0, 0))
+	feedback_points = dept_points(dept_id)
+	for p in feedback_points:      # (E-Flux, E11 : sur les deux bâtiments de la capitainerie au T2)
+		_dust(p, 16)
+		_sparks(p + Vector3(0, 2.0, 0))
 	match dept_id:
 		"cranes", "berths":
 			_crane_rush = 2.5
@@ -1353,7 +1507,7 @@ func feedback_purchase(dept_id: String) -> void:
 			Sfx.play("ship_horn", 0.4)
 
 
-## Heures sup ×2 visibles dans le monde : gyrophares sur les grues et les engins, grues plus rapides, lumière plus chaude.
+## Heures sup ×2 visibles dans le monde : gyrophares bleus sur les grues et les engins, grues plus rapides, lumière plus chaude.
 func set_overtime(on: bool) -> void:
 	if on == overtime_on:
 		return
@@ -1369,14 +1523,27 @@ func set_campaign(on: bool) -> void:
 	_apply_campaign()
 
 
+## Bâtiments d'un service qu'on peut toucher et où se voit le retour d'achat : son poste ; la Capitainerie au T2 et au-delà a
+## deux bâtiments, la tour VTS (poste actif) et la maison bleue de la capitainerie (E-Flux, E11).
+func dept_points(dept_id: String) -> Array[Vector3]:
+	var tier := sim.tier if sim != null else 1
+	var out: Array[Vector3] = [Layout.dept_pos(dept_id, tier)]
+	if dept_id == "harbor" and tier >= 2:
+		out.append(Layout.HARBOR_OFFICE)
+	return out
+
+
+var feedback_points: Array[Vector3] = []      # lieux du dernier retour d'achat (tests)
+
+
 ## Point du monde où cadrer la caméra pour un service (poste du service sur le plan réorganisé, palier courant).
 func dept_anchor(dept_id: String) -> Vector3:
 	var tier := sim.tier if sim != null else 1
 	return Layout.dept_pos(dept_id, tier)
 
 
-## Point du mouillage où poser la bulle « n/n en rade » : centre des places occupées par des navires en rade (à défaut,
-## la place n°1), un peu au-dessus de l'eau.
+## Point du mouillage où poser la bulle « n/n en rade » : la place occupée la plus proche du centre des places occupées (à
+## défaut, la place n°1), un peu au-dessus de l'eau.
 func rade_anchor() -> Vector3:
 	var acc := Vector3.ZERO
 	var n := 0
@@ -1386,6 +1553,16 @@ func rade_anchor() -> Vector3:
 				acc += Layout.anchor_pos(s.anchor_slot)
 				n += 1
 	var c := acc / float(n) if n > 0 else Layout.anchor_pos(0)
+	# (E-Flux : la place occupée la plus proche de ce centre, pas le centre lui-même — un point dans le vide entre deux groupes)
+	if n > 0:
+		var best := INF
+		var cc := c
+		for s in sim.ships:
+			if s.state == Ship.State.ANCHORED and s.anchor_slot >= 0:
+				var ap := Layout.anchor_pos(s.anchor_slot)
+				if ap.distance_to(cc) < best:
+					best = ap.distance_to(cc)
+					c = ap
 	return Vector3(c.x, 4.0, c.z)
 
 
@@ -1394,6 +1571,7 @@ func rade_anchor() -> Vector3:
 # ---------------------------------------------------------------------------
 ## Plafond de la foule (mobile) ; échelle des personnages (lisibles au zoom par défaut, 58 u de large) ; marche.
 const CROWD_MAX := 28
+const CROWD_CUSTOMS := 4         # douaniers (MultiMesh à part, places réservées)
 const CROWD_SCALE := 1.45
 const CROWD_SPEED := 1.6          # u/s
 const CROWD_TURN := 7.0           # vitesse du demi-tour progressif (1/s)
@@ -1429,7 +1607,7 @@ func _build_crowd() -> void:
 	var mm2 := MultiMesh.new()
 	mm2.transform_format = MultiMesh.TRANSFORM_3D
 	mm2.mesh = mesh2 if mesh2 != null else mesh
-	mm2.instance_count = 4
+	mm2.instance_count = CROWD_CUSTOMS
 	mm2.visible_instance_count = 0
 	crowd_mm2.multimesh = mm2
 	crowd_mm2.material_override = Assets.vcol_material
@@ -1453,11 +1631,12 @@ func crowd_plan() -> Array:
 		if sh.state == Ship.State.UNLOADING:
 			for k in clampi(sim.agents("cranes"), 1, 3):
 				out.append({"key": "d%d_%d" % [bi, k], "kind": "deck", "berth": bi, "ship": sid, "k": k})
-	if sim.built.has("customs1"):
-		for k in clampi(sim.agents("customs"), 1, 4):
-			out.append({"key": "c%d" % k, "kind": "customs", "berth": -1, "ship": -1, "k": k})
+	# (E-Flux : plafond des dockers seulement — les douaniers ont leurs places, jamais tronqués)
 	if out.size() > CROWD_MAX:
 		out.resize(CROWD_MAX)
+	if sim.built.has("customs1"):
+		for k in clampi(sim.agents("customs"), 1, CROWD_CUSTOMS):
+			out.append({"key": "c%d" % k, "kind": "customs", "berth": -1, "ship": -1, "k": k})
 	return out
 
 
@@ -1526,8 +1705,8 @@ func _sync_crowd(delta: float) -> void:
 	var n := 0
 	var n2 := 0
 	for c in crowd:
-		if n >= CROWD_MAX:
-			break
+		if String(c.kind) != "customs" and n >= CROWD_MAX:
+			continue
 		var a: Vector3 = c.a
 		var b: Vector3 = c.b
 		var len := maxf(0.5, a.distance_to(b))
@@ -1603,10 +1782,12 @@ var _warm := 0.0                   # 0 → 1 : étalonnage chaud des Heures sup
 var _sun_base := Color.WHITE
 var _amb_base := Color.WHITE
 const OVERTIME_WARM_SUN := Color(1.0, 0.84, 0.66)
+const BEACON_ON := Color(0.25, 0.6, 1.0)
+const BEACON_OFF := Color(0.12, 0.22, 0.45)
 const OVERTIME_WARM_AMB := Color(1.0, 0.9, 0.78)
 
 
-## Gyrophare orange partagé (un maillage, un matériau pour tous : il clignote en une seule écriture par image).
+## Gyrophare bleu partagé (un maillage, un matériau pour tous : il clignote en une seule écriture par image).
 static func beacon_parts() -> Array:
 	if _beacon_mesh == null:
 		_beacon_mesh = SphereMesh.new()
@@ -1615,9 +1796,9 @@ static func beacon_parts() -> Array:
 		_beacon_mesh.radial_segments = 8
 		_beacon_mesh.rings = 4
 		_beacon_mat = StandardMaterial3D.new()
-		_beacon_mat.albedo_color = Color(1.0, 0.55, 0.1)
+		_beacon_mat.albedo_color = BEACON_ON      # bleus (E-Flux : un gyrophare orange ne se voyait pas sur une grue orange)
 		_beacon_mat.emission_enabled = true
-		_beacon_mat.emission = Color(1.0, 0.5, 0.05)
+		_beacon_mat.emission = Color(0.2, 0.5, 1.0)
 		_beacon_mat.emission_energy_multiplier = 2.0
 		_beacon_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	return [_beacon_mesh, _beacon_mat]
@@ -1658,12 +1839,14 @@ func _sync_overtime(delta: float) -> void:
 	if overtime_on and _beacon_mat != null:
 		var on := fmod(_t * 3.2, 1.0) < 0.55
 		_beacon_mat.emission_energy_multiplier = 3.2 if on else 0.4
-		_beacon_mat.albedo_color = Color(1.0, 0.6, 0.15) if on else Color(0.55, 0.3, 0.1)
+		_beacon_mat.albedo_color = BEACON_ON if on else BEACON_OFF
 
 
 # --- Campagne de démarchage : pavillons et guirlande de fanions sur la capitainerie ---
 var _flags: Node3D
 var flags_shown := 0                # fanions posés (tests)
+var campaign_at := Vector3.INF      # bâtiment pavoisé (tests)
+var _campaign_tier := 0
 const FLAG_COLORS := ["box_red", "box_yellow", "box_blue", "box_green", "white"]
 
 
@@ -1690,9 +1873,18 @@ func _apply_campaign() -> void:
 	pennant.size = Vector3(0.7, 0.8, 0.05)
 	var banner := BoxMesh.new()
 	banner.size = Vector3(1.9, 1.15, 0.06)
-	var office := Layout.HARBOR_OFFICE
-	var ridge := office + Vector3(0, maxf(3.0, Assets.top_y("harbor_office") - 0.4), 0)
-	var poles := [office + Vector3(-4.6, 0, -3.8), office + Vector3(4.6, 0, -3.8)]
+	# (E-Flux, E11) : sur le bâtiment actif de la Capitainerie — la maison bleue au T1, la tour VTS (sur la butte) ensuite
+	var tier := sim.tier if sim != null else 1
+	_campaign_tier = tier
+	var bm := "control_tower" if tier >= 2 else "harbor_office"
+	var office := Layout.dept_pos("harbor", tier)
+	office.y = Layout.ground_y(Vector2(office.x, office.z))
+	campaign_at = office
+	var bb := Assets.aabb(bm)
+	var hx := bb.size.x * 0.5 + 1.5
+	var hz := bb.size.z * 0.5 + 1.15
+	var ridge := office + Vector3(0, clampf(Assets.top_y(bm) - 0.4, 3.0, 9.0), 0)
+	var poles := [office + Vector3(-hx, 0, -hz), office + Vector3(hx, 0, -hz)]
 	for i in poles.size():
 		var pp: Vector3 = poles[i]
 		var pole := MeshInstance3D.new()
@@ -1746,14 +1938,18 @@ func _process(delta: float) -> void:
 		_sig = sig
 		if static_root.get_child_count() > 0:
 			rebuild()
-	_hold_ships()
+	_hold_ships(delta)
+	# captures (binaire de débogage seulement, --stage-trucks=N) : N camions servis à la suite, pour montrer le chargement
+	if _stage_trucks > 0 and traffic._out_cool <= 0.0:
+		traffic.on_truck_served(sim)
+		_stage_trucks -= 1
 	for s in sim.ships:
 		var v: ShipView = ship_views.get(s.id)
 		if v != null:
 			v.sync(s, sim, delta)
 	for i in range(parting.size() - 1, -1, -1):
 		var pv: ShipView = parting[i]
-		if not is_instance_valid(pv) or pv.sync_parting(delta):
+		if not is_instance_valid(pv) or pv.sync_parting(delta, true):
 			if is_instance_valid(pv):
 				pv.queue_free()
 			parting.remove_at(i)
@@ -1909,7 +2105,8 @@ func pick_tap(wp: Vector3) -> Dictionary:
 		consider.call("lot", wp, -float(Layout.TAP_RADIUS.lot_k), {"id": lot})     # empreinte touchée : rapport fixe (une surface, pas un point)
 	for d in PortSim.DEPTS:
 		if sim.feature("dept_" + d):
-			consider.call("dept", Layout.dept_pos(d, sim.tier), float(Layout.TAP_RADIUS.dept), {"id": d})
+			for dp in dept_points(d):      # (E-Flux, E11 : la capitainerie et la tour VTS au T2)
+				consider.call("dept", dp, float(Layout.TAP_RADIUS.dept), {"id": d})
 	var best: Dictionary = st.best
 	if best.is_empty():
 		var z := Zones.zone_at(wp)
@@ -2006,8 +2203,15 @@ static func _degreen_material() -> ShaderMaterial:
 
 ## Navires retenus (revue N10) : un navire en route qui en rattrape un autre allant dans le même sens attend derrière lui
 ## (distance de suivi : demi-longueurs + Layout.SHIP_FOLLOW_GAP) ; un navire dont le poste appartient à la zone en cours
-## d'ouverture attend que ses quais sortent de terre.
-func _hold_ships() -> void:
+## d'ouverture attend que ses quais sortent de terre. Lot E-Flux (E9) : on cède aussi au navire qui coupe sa route juste
+## devant soi (`cuts_ahead`), et le croisement balisé au large a sa règle d'attente (`crossing_holds`) ; un navire retenu
+## plus de HOLD_MAX s passe (HOLD_FORCE s) : jamais d'interblocage. Les navires sortis de la simulation qui finissent leur
+## trajet (`parting`) comptent aussi.
+const HOLD_MAX := ShipRules.HOLD_MAX
+const HOLD_FORCE := ShipRules.HOLD_FORCE
+
+
+func _hold_ships(delta: float = 0.0) -> void:
 	var moving := [Ship.State.ARRIVING, Ship.State.PILOTING, Ship.State.MOORING, Ship.State.DEPARTING, Ship.State.LEAVING]
 	var op_zone: int = int(opening.get("id", -1)) if not opening.is_empty() else -1
 	var items: Array = []
@@ -2015,6 +2219,7 @@ func _hold_ships() -> void:
 		var v: ShipView = ship_views.get(s.id)
 		if v == null:
 			continue
+		var was := v.hold
 		v.hold = false
 		# en route : d'après la simulation, ou parce que la vue n'a pas fini son trajet (rattrapage après une retenue)
 		var mv := moving.has(s.state) or v.is_moving()
@@ -2022,31 +2227,45 @@ func _hold_ships() -> void:
 			v.hold = true
 			continue
 		if mv:
-			items.append({"id": s.id, "p": Vector2(v.position.x, v.position.z), "dir": Vector2(cos(v.rotation.y), -sin(v.rotation.y)),
-				"len": v.length, "view": v})
+			items.append(_hold_item(v, s.id, s.state, s.berth, was))
+	for pv in parting:
+		if is_instance_valid(pv):
+			var was2 := pv.hold
+			pv.hold = false
+			items.append(_hold_item(pv, pv.ship_id, pv._state, pv.berth_i, was2))
 	var held := holds(items)
 	for it in items:
-		if held.has(it.id):
-			(it.view as ShipView).hold = true
+		var v2: ShipView = it.view
+		if held.has(it.id) and v2.force_t <= 0.0:
+			v2.hold = true
+			v2.held_t += delta
+			if v2.held_t > HOLD_MAX:
+				v2.force_t = HOLD_FORCE
+				v2.held_t = 0.0
+		else:
+			v2.held_t = 0.0
+		v2.force_t = maxf(0.0, v2.force_t - delta)
 
 
-## Navires qui doivent attendre (distance de suivi) parmi `items` [{id, p, dir, len}] : {id: true}. Cas symétrique (chacun
-## « suit » l'autre, caps proches) : un seul des deux cède, celui de plus grand identifiant (revue C7 A1 : plus de blocage
-## mutuel).
+func _hold_item(v: ShipView, id: int, state: int, berth: int, was_held: bool) -> Dictionary:
+	var hs := v.hull_sweep()
+	return {"id": id, "p": Vector2(v.position.x, v.position.z), "dir": Vector2(cos(v.rotation.y), -sin(v.rotation.y)),
+		"len": v.length, "w": v.width, "view": v, "stream": ship_stream(state, berth), "streams": ShipRules.ship_streams(state, berth), "ahead": v.ahead(ShipRules.AHEAD),
+		"body": hs[0], "sweep": hs[1], "was_held": was_held}
+
+
+## Règles de passage : voir ShipRules (renvois gardés pour les appels existants).
+static func ship_stream(state: int, berth: int) -> String:
+	return ShipRules.ship_stream(state, berth)
+
+
 static func holds(items: Array) -> Dictionary:
-	var held := {}
-	for a in items:
-		for b in items:
-			if a == b or not follows(a.p, a.dir, a.len, b.p, b.dir, b.len):
-				continue
-			if follows(b.p, b.dir, b.len, a.p, a.dir, a.len) and int(a.id) < int(b.id):
-				continue
-			held[a.id] = true
-			break
-	return held
+	return ShipRules.holds(items)
 
 
-## Le navire A (position, cap unitaire, longueur) rattrape-t-il B, qui va dans le même sens juste devant lui ?
+static func crossing_holds(items: Array) -> Dictionary:
+	return ShipRules.crossing_holds(items)
+
+
 static func follows(pa: Vector2, da: Vector2, la: float, pb: Vector2, db: Vector2, lb: float) -> bool:
-	var rel := pb - pa
-	return rel.dot(da) > 0.0 and da.dot(db) > 0.5 and rel.length() < (la + lb) * 0.5 + Layout.SHIP_FOLLOW_GAP
+	return ShipRules.follows(pa, da, la, pb, db, lb)

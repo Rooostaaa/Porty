@@ -4,7 +4,8 @@ extends Node3D
 ## Camions : sortie du tunnel ouest → autoroute → voie d'entrée → file / aire d'attente → gate d'entrée → voie des camions
 ## → arrêt devant le bloc qui le sert → le conteneur descend de l'engin sur la remorque → bout de la boucle → gate de sortie
 ## → autoroute → tunnel est. Ils n'apparaissent et ne disparaissent que sous les collines-tunnels, hors écran.
-## Engins (côté mer) : grue → tablier → bloc réel → bord du parc → camion. Train (T3), personnel, voitures civiles.
+## Engins (côté mer) : grue → tablier → bloc réel → bord du parc → camion. Train (T3) et navette du tracteur entre le parc
+## RTG et la gare, personnel, voitures civiles.
 
 const QUEUE_X := -22.5          # voie d'entrée (vers le nord, la gate)
 const ROAD_SLOTS := 5           # places de file sur la route avant de passer dans l'aire d'attente
@@ -27,7 +28,7 @@ var _out_cool := 0.0
 var _vehicle_kind := ""
 var train: Node3D
 var _train_t := -1.0
-var _train_next := 20.0
+var _train_next := 3.0
 var rng := RandomNumberGenerator.new()
 var yard: YardView
 ## Personnages qui marchent : {node, a, b, t (0→1 vers b), dir (+1 vers b, −1 vers a), wait (pause au bout, s), phase}
@@ -42,7 +43,8 @@ var _honk_cool := 0.0
 var _tier := 1
 var _gate2 := false
 var loads_done := 0             # camions chargés (tests)
-## Point du monde visible à l'écran ? (réglé par le diorama) : le train n'apparaît et ne disparaît que hors écran.
+## Point du monde visible à l'écran ? (réglé par le diorama ; depuis E-Flux, le train ne s'en sert plus : il est découpé à la
+## bouche du tunnel).
 var on_screen: Callable
 
 
@@ -194,15 +196,17 @@ func on_truck_served(sim: PortSim) -> void:
 		if absf(hp.x - in_x) > 0.5:      # depuis l'aire d'attente : on rejoint la voie d'entrée
 			route.append(Vector3(hp.x, 0, hp.z - 3.0))
 			route.append(Vector3(in_x, 0, hp.z - 5.0))
-	# lot D : la boucle se fait à l'aller (voie A), le chargement au retour (voie B, le long du parc)
-	route.append_array(Layout.truck_route_in(in_x, stop_x, _tier))
+	# lot D : la boucle se fait à l'aller (voie A), le chargement au retour (voie B, le long du parc) ; E-Flux (E8) : demi-tour
+	# au bout du groupe de blocs de l'arrêt (Layout.tier_for_stop), plus au bout de la boucle du palier
+	route.append_array(Layout.truck_route_in(in_x, stop_x))
 	trucks.append({"node": head, "route": route, "phase": "in", "stop_x": stop_x, "t": 0.0, "container": null, "loader": -1})
 
 
 ## Arrêt d'un camion : devant une travée réelle du parc (un conteneur y est stocké), dans la boucle du palier.
 func _pick_stop() -> float:
-	var x0 := Layout.LANE_X0 + 7.0
-	var x1 := Layout.lane_end_x(_tier) - 2.5
+	var rg := Layout.stop_range(_tier, _gate2)      # (E-Flux, E7 : de quoi se ranger et repartir en biais doux)
+	var x0 := float(rg[0])
+	var x1 := float(rg[1])
 	var cands: Array[float] = []
 	if yard != null:
 		for p in yard.visible_slots(0):
@@ -271,6 +275,7 @@ func sync(sim: PortSim, delta: float) -> void:
 	_sync_barriers(delta)
 	_sync_vehicles(sim, delta)
 	_sync_train(sim, delta)
+	_sync_shuttle(sim, delta)
 	_sync_cars(delta)
 	_sync_walkers(delta)
 
@@ -290,7 +295,8 @@ func _sync_trucks(sim: PortSim, delta: float) -> void:
 					tk.t = 0.0
 					_call_loader(tk, sim)
 			"wait":
-				n.rotation.y = lerp_angle(n.rotation.y, 0.0, 1.0 - exp(-delta * 8.0))
+				# E-Flux (E7) : arrêté sur la voie B, face à l'ouest (cap d'arrivée et de départ à moins de 30°) — plus de pivot
+				n.rotation.y = lerp_angle(n.rotation.y, Layout.LOAD_YAW, 1.0 - exp(-delta * 8.0))
 				if int(tk.loader) < 0 and float(tk.t) > 0.8:
 					_call_loader(tk, sim)
 				var ld: int = tk.loader
@@ -561,58 +567,201 @@ func _apron_x(sim: PortSim) -> float:
 	return rng.randf_range(float(b.x0) + 3.0, x1 - 3.0)
 
 
-## Train (gare, T3) : il sort du tunnel est, s'arrête au terminal, puis repart vers l'est ; jamais d'apparition à l'écran.
+## Train (gare, T3) : il sort du tunnel est, s'arrête au quai de la gare (Layout.TRAIN_DWELL s), puis repart vers l'est.
+## Lot E-Flux (E12) : la rame est découpée à la bouche du tunnel, sous la colline (shader vcol_clip, Layout.RAIL_TUNNEL_X) —
+## elle entre et sort sous la colline et reste visible quand la gare est à l'écran (avant : elle n'apparaissait que si les
+## deux bouts de la voie étaient hors champ, donc presque jamais en regardant la gare).
+var _clip_mat: ShaderMaterial
+var trains_run := 0             # passages de train commencés (tests)
+
+
+func _train_material(tint: Color = Color.WHITE) -> ShaderMaterial:
+	if _clip_mat == null:
+		_clip_mat = ShaderMaterial.new()
+		_clip_mat.shader = load("res://assets/vcol_clip.gdshader")
+		_clip_mat.set_shader_parameter("vertex_is_srgb", Assets.VERTEX_IS_SRGB)
+		_clip_mat.set_shader_parameter("clip_x", Layout.RAIL_TUNNEL_X)
+	if tint == Color.WHITE:
+		return _clip_mat
+	var m: ShaderMaterial = _clip_mat.duplicate()
+	m.set_shader_parameter("tint", tint)
+	return m
+
+
+## Abscisses de la rame : caché dans le tunnel (toute la rame à l'est de la bouche), arrêt au quai.
+static func train_x_hidden() -> float:
+	return Layout.RAIL_TUNNEL_X + 5.0
+
+
+static func train_x_stop() -> float:
+	return (Layout.LOTS.rail.p as Vector3).x - 6.0
+
+
+func _train_run() -> float:
+	return (train_x_hidden() - train_x_stop()) / 12.0
+
+
+## Le train est-il arrêté au quai (la navette du tracteur travaille) ?
+func train_at_quay() -> bool:
+	var run := _train_run()
+	return train != null and _train_t >= run and _train_t < run + Layout.TRAIN_DWELL
+
+
 func _sync_train(sim: PortSim, delta: float) -> void:
 	if not sim.built.has("rail"):
 		if train != null:        # nouvelle concession : le terminal rail n'existe plus, le train ne doit pas rester figé sur la voie
 			train.queue_free()
 			train = null
 			_train_t = -1.0
-			_train_next = 20.0
+			_train_next = 3.0
 		return
 	if train == null:
 		train = Node3D.new()
 		add_child(train)
-		var loco := Assets.instance("locomotive")
+		var loco := Assets.instance("locomotive", _train_material())
 		loco.rotation.y = PI          # la locomotive en tête vers l'ouest
 		train.add_child(loco)
 		for i in 4:
-			var w := Assets.instance("wagon")
+			var w := Assets.instance("wagon", _train_material())
 			w.position = Vector3(9.6 * (i + 1), 0, 0)
 			train.add_child(w)
 			for sx in [-2.1, 2.1]:
 				var c := MeshInstance3D.new()
 				c.mesh = Assets.mesh("container20")
-				var m: ShaderMaterial = Assets.vcol_material.duplicate()
-				m.set_shader_parameter("tint", ShipView.cargo_color(sim, 0, rng.randi()).linear_to_srgb())
-				c.material_override = m
+				c.material_override = _train_material(ShipView.cargo_color(sim, 0, rng.randi()).linear_to_srgb())
 				c.position = Vector3(sx, 0.95, 0)
 				w.add_child(c)
-		train.visible = false
-	# la rame (locomotive + 4 wagons, ≈ 48 u) part et revient sous la colline-tunnel est ; elle ne paraît ni ne
-	# disparaît tant que le bout de la voie est à l'écran
-	var x_tunnel := float(Layout.RAIL_X[1]) - 2.0
-	var x_stop: float = (Layout.LOTS.rail.p as Vector3).x - 6.0
-	var hidden_end := Vector3(x_tunnel + 48.0, 0, Layout.RAIL_Z)
+		train.position = Vector3(train_x_hidden(), 0.2, Layout.RAIL_Z)
+	var x_hidden := train_x_hidden()
+	var x_stop := train_x_stop()
+	var run := _train_run()
 	_train_next -= delta
-	if _train_t < 0.0 and _train_next <= 0.0 and not _seen(Vector3(x_tunnel, 0, Layout.RAIL_Z)) and not _seen(hidden_end):
+	if _train_t < 0.0 and _train_next <= 0.0:
 		_train_t = 0.0
-		train.visible = true
+		trains_run += 1
+	var x := x_hidden
 	if _train_t >= 0.0:
 		_train_t += delta
-		var run := (x_tunnel - x_stop) / 12.0
-		var x := x_tunnel
 		if _train_t < run:
-			x = lerpf(x_tunnel, x_stop, smoothstep(0.0, 1.0, _train_t / run))
-		elif _train_t < run + 6.0:
+			x = lerpf(x_hidden, x_stop, smoothstep(0.0, 1.0, _train_t / run))
+		elif _train_t < run + Layout.TRAIN_DWELL:
 			x = x_stop
 		else:
-			x = lerpf(x_stop, x_tunnel, smoothstep(0.0, 1.0, (_train_t - run - 6.0) / run))
-		train.position = Vector3(x, 0.2, Layout.RAIL_Z)
-		if _train_t > run * 2.0 + 6.0 and not _seen(Vector3(x_tunnel, 0, Layout.RAIL_Z)) and not _seen(hidden_end):
+			x = lerpf(x_stop, x_hidden, smoothstep(0.0, 1.0, (_train_t - run - Layout.TRAIN_DWELL) / run))
+		if _train_t > run * 2.0 + Layout.TRAIN_DWELL:
 			_train_t = -1.0
-			_train_next = 35.0
-			train.visible = false
+			_train_next = 30.0
+			x = x_hidden
+	train.position = Vector3(x, 0.2, Layout.RAIL_Z)
+	train.visible = x < x_hidden - 0.01      # rentré dans le tunnel : rien à dessiner
+
+
+## Navette du tracteur de terminal (E-Flux, E12) : tant que le train est à quai, il prend un conteneur au parc RTG (allée
+## x 90,1), traverse la voie des camions au passage à niveau signalé — il attend qu'aucun camion n'en approche — et le
+## dépose au quai de la gare ; sinon il attend à son garage, sur la liaison.
+var tractor: Node3D
+var _sh := {"phase": "park", "route": [], "t": 0.0, "box": null}
+var shuttles_done := 0          # conteneurs déposés à la gare (tests)
+var shuttle_waits := 0          # attentes au passage à niveau (tests)
+const SHUTTLE_SPEED := 9.0
+## Un camion à moins de cette distance (x) du passage, sur la voie des camions, le ferme au tracteur (u).
+const CROSSING_GUARD := 26.0
+
+
+func crossing_clear() -> bool:
+	var sx := float(Layout.RAIL_SHUTTLE.x)
+	for tk in trucks:
+		var n: Node3D = tk.node
+		if not is_instance_valid(n):
+			continue
+		var p := n.position
+		if p.z > float(Layout.LANE_BAND[0]) - 1.5 and p.z < float(Layout.LANE_BAND[1]) + 1.5 and absf(p.x - sx) < CROSSING_GUARD:
+			return false
+	return true
+
+
+func _sync_shuttle(sim: PortSim, delta: float) -> void:
+	if not sim.built.has("rail") or not sim.built.has(Layout.RECLAIM_BUILDING):
+		if tractor != null:
+			tractor.queue_free()
+			tractor = null
+		return
+	var S: Dictionary = Layout.RAIL_SHUTTLE
+	var sx := float(S.x)
+	if tractor == null:
+		tractor = Assets.instance("tractor")
+		add_child(tractor)
+		tractor.position = S.park
+		tractor.rotation.y = deg_to_rad(HEAD_NORTH)
+		_sh = {"phase": "park", "route": [], "t": 0.0, "box": null}
+	var route: Array = _sh.route
+	match String(_sh.phase):
+		"park":
+			if train_at_quay():
+				_sh.route = [Vector3(sx, 0, float(S.hold))]
+				_sh.phase = "to_cross_s"
+		"to_cross_s":
+			if _drive(tractor, route, SHUTTLE_SPEED, delta):
+				_sh.phase = "cross_s"
+				_sh.t = 0.0
+		"cross_s":
+			if not train_at_quay():          # le train est reparti : retour au garage
+				_sh.route = [S.park]
+				_sh.phase = "home"
+			elif crossing_clear():
+				_sh.route = [Vector3(sx, 0, float(S.pick_z))]
+				_sh.phase = "down"
+			elif float(_sh.t) == 0.0:
+				shuttle_waits += 1
+				_sh.t = 1.0
+		"down":
+			if _drive(tractor, route, SHUTTLE_SPEED, delta):
+				_sh.phase = "pick"
+				_sh.t = 0.0
+				var c := _make_container(sim)
+				tractor.add_child(c)
+				c.position = Vector3(-0.9, 2.6, 0)
+				c.create_tween().tween_property(c, "position", Vector3(-0.9, 1.05, 0), 0.5).set_trans(Tween.TRANS_QUAD)
+				_sh.box = c
+		"pick":
+			_sh.t = float(_sh.t) + delta
+			if float(_sh.t) > 0.9:
+				_sh.phase = "cross_n"
+				_sh.t = 0.0
+		"cross_n":
+			if crossing_clear():
+				var lz := float(S.lane_z)
+				_sh.route = [Vector3(sx, 0, float(S.hold)), Vector3(sx, 0, lz), Vector3(float(S.turn_x), 0, lz), S.drop]
+				_sh.phase = "to_station"
+			elif float(_sh.t) == 0.0:
+				shuttle_waits += 1
+				_sh.t = 1.0
+		"to_station":
+			if _drive(tractor, route, SHUTTLE_SPEED, delta):
+				_sh.phase = "drop"
+				_sh.t = 0.0
+				var box: Node3D = _sh.box
+				if box != null and is_instance_valid(box) and train != null:
+					# le conteneur passe sur le wagon le plus proche (il y disparaît)
+					var wx := train.position.x + 9.6 * clampf(roundf((tractor.position.x - train.position.x) / 9.6), 1.0, 4.0)
+					var tw := box.create_tween()
+					tw.tween_property(box, "global_position", Vector3(wx, 2.4, Layout.RAIL_Z), 0.7).set_trans(Tween.TRANS_QUAD)
+					tw.tween_callback(box.queue_free)
+				shuttles_done += 1
+				_sh.box = null
+		"drop":
+			_sh.t = float(_sh.t) + delta
+			if float(_sh.t) > 1.0:
+				var lz2 := float(S.lane_z)
+				_sh.route = [Vector3(float(S.turn_x), 0, lz2), Vector3(sx, 0, lz2)]
+				_sh.route.append(Vector3(sx, 0, float(S.hold)) if train_at_quay() else S.park)
+				_sh.phase = "to_cross_s" if train_at_quay() else "home"
+				_sh.t = 0.0
+		"home":
+			if _drive(tractor, route, SHUTTLE_SPEED, delta, deg_to_rad(HEAD_NORTH)):
+				_sh.phase = "park"
+
+
 
 
 ## Heures sup (lot D, Diorama.set_overtime) : un gyrophare sur chaque engin du parc (maillage et matériau partagés du

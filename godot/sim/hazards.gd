@@ -2,6 +2,8 @@ class_name Hazards
 extends RefCounted
 ## Aléas : vent, brouillard, pannes, grèves, audits, pics saisonniers, enchères.
 
+## Secondes de revenu réel mesurées en dessous desquelles le coût d'un aléa est provisoire (partie tout juste chargée).
+const MIN_WINDOW := 15.0
 const TARGET_STAT := {"cranes": "crane_rate", "yard_ops": "transfer_rate", "gate": "gate_rate", "customs": "inspect_rate"}
 
 
@@ -9,6 +11,12 @@ static func update(sim: PortSim, _dt: float) -> void:
 	sim.mods.purge(sim.time)
 	if not sim.active_event.is_empty() and sim.time >= float(sim.active_event.until):
 		end_event(sim)
+	var ev := sim.active_event
+	if not ev.is_empty() and bool(ev.get("cost_pending", false)) and sim.real_income_window() >= MIN_WINDOW:
+		ev.erase("cost_pending")
+		var e: Dictionary = sim.db.event_by_id.get(String(ev.id), {})
+		if e.has("pay") and not bool(ev.get("paid", false)):
+			ev.pay_cost = cost_for(sim, float(e.pay.income_seconds))
 	# pas de nouvel aléa tant que le joueur n'a pas découvert cette mécanique (un aléa en cours se termine quand même)
 	if sim.feature("events") and sim.active_event.is_empty() and sim.time >= sim.next_event_at:
 		var id := _pick_event(sim)
@@ -46,6 +54,30 @@ static func _pick_event(sim: PortSim) -> String:
 	return ids[sim._pick(w)]
 
 
+## Coût d'un aléa (« Sécuriser », « Réparer », amende d'un contrôle) : `secs` secondes du revenu **réel** (lot E — le débit
+## théorique donnait « Sécuriser · 116 M$ » pour 41 K$/s de revenu), plafonné à `hazard_cost_cap` (25 %) de la trésorerie.
+static func cost_for(sim: PortSim, secs: float) -> float:
+	# (moins de MIN_WINDOW s de revenu mesuré — partie chargée sans les seaux du revenu : l'estimation, toujours plafonnée)
+	var rate := sim.real_income_rate() if sim.real_income_window() >= MIN_WINDOW else sim.income_rate_estimate()
+	var c := maxf(0.0, rate) * secs
+	return minf(c, float(sim.db.cfg("hazard_cost_cap", 0.25)) * maxf(0.0, sim.money))
+
+
+## Statistiques touchées par l'aléa en cours (avant ou après « Sécuriser »), [] sans aléa.
+static func hit_stats(sim: PortSim) -> Array[String]:
+	var out: Array[String] = []
+	if sim.active_event.is_empty() or not sim.db.event_by_id.has(String(sim.active_event.get("id", ""))):
+		return out
+	var e: Dictionary = sim.db.event_by_id[String(sim.active_event.id)]
+	var mods: Array = e.get("mods", [])
+	if bool(sim.active_event.get("paid", false)) and e.has("pay"):
+		mods = e.pay.get("mods", [])
+	for m in mods:
+		if float(m.mult) < 1.0:
+			out.append(_stat_for(sim, String(m.stat)))
+	return out
+
+
 static func _stat_for(sim: PortSim, raw: String) -> String:
 	if raw == "$target":
 		return TARGET_STAT.get(String(sim.active_event.get("target", "cranes")), "crane_rate")
@@ -63,7 +95,7 @@ static func start(sim: PortSim, id: String) -> void:
 			sim.satisfaction = lerpf(sim.satisfaction, 1.0, 0.1)
 			sim.notify.emit("Contrôle surprise : le terminal est en règle. +1 Ambre", "good")
 		else:
-			var fine := sim.income_rate_estimate() * 60.0
+			var fine := cost_for(sim, 60.0)
 			sim.money = maxf(0.0, sim.money - fine)
 			sim.notify.emit("Contrôle surprise : politique trop laxiste, amende de %s." % Fmt.money(fine), "bad")
 		return
@@ -80,7 +112,9 @@ static func start(sim: PortSim, id: String) -> void:
 		ev.pay_label = "Organiser l'enchère"
 	elif e.has("pay"):
 		ev.pay_label = e.pay.label
-		ev.pay_cost = sim.income_rate_estimate() * float(e.pay.income_seconds)
+		ev.pay_cost = cost_for(sim, float(e.pay.income_seconds))
+		if sim.real_income_window() < MIN_WINDOW:
+			ev.cost_pending = true        # recalculé dès que MIN_WINDOW s de revenu réel sont mesurées (partie tout juste chargée)
 	sim.active_event = ev
 	for m in e.get("mods", []):
 		sim.mods.add("event", _stat_for(sim, m.stat), float(m.mult), String(e.name), float(ev.until))

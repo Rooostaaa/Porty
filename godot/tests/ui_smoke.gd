@@ -46,6 +46,7 @@ func _run() -> void:
 	var st: Node = get_tree().root.get_node("Settings")
 	save_node.set("enabled", false)
 	st.set("persist_tuto", false)
+	get_tree().root.get_node("Sfx").set("persist", false)      # lot E : jamais d'écriture dans user://audio.cfg du joueur
 	st.set("tuto_step", 1)      # le tutoriel démarre à l'étape « navire en rade »
 	gs.call("new_game")
 	var main := (load("res://scenes/main.tscn") as PackedScene).instantiate()
@@ -609,6 +610,10 @@ func _run() -> void:
 	await _dui_phase4(hud, ns)
 	# lot D-Monde (contrôles dans leur propre fonction)
 	await _d_monde_checks(hud, ns)
+	# lot E — Confiance (contrôles dans leur propre fonction ; la partie de bot du T3 y est chargée puis rendue)
+	await _e_confiance_checks(hud, ns)
+	# lot E-Flux (contrôles dans leur propre fonction)
+	await _e_flux_checks(hud)
 
 	print("=== %d échec(s) ===" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
@@ -1115,12 +1120,27 @@ func _dui_phase2(hud: Hud, s: PortSim) -> void:
 	hud._aff_t = -10.0
 	var n_aff := hud._affordable_count(s)
 	var n_dept := 0
+	var n_good := 0
 	var base1 := s.income_estimate_with("harbor", 0)
+	var goal1 := String(s.chapter_goal().get("dept", ""))
 	for d in PortSim.DEPTS:
-		if s.feature("dept_" + d) and s.dept_cost(d, 1) <= s.money and s.upgrade_gain(d, 1, -1, base1) > 0.0:
-			n_dept += 1
-	check(n_nofee < raw and n_dept == raw and n_aff >= n_dept,
-		"D-UI 2 / D-Éco : la pastille ne compte que les achats qui rapportent (sans services facturés %d sur %d services abordables ; avec : %d, pastille %d)" % [n_nofee, raw, n_dept, n_aff])
+		var c1 := s.dept_cost(d, 1)
+		if s.feature("dept_" + d) and c1 <= s.money:
+			var g1 := s.upgrade_gain(d, 1, -1, base1)
+			if g1 > 0.0:
+				n_dept += 1
+			if d == goal1 or (not Info.event_hits(s, d) and UpgradesSheet.is_good(s.upgrade_gain_parts(d, 1), c1)):
+				n_good += 1
+	var n_lic_good := 0
+	for ci in PortSim.NCARGO:
+		var lc1 := s.licence_cost(ci, 1)
+		if s.unlocked[ci] == 1 and s.feature("licences") and s.licence_room(ci) > 0 and lc1 <= s.money \
+				and UpgradesSheet.is_good(s.upgrade_gain_parts("", 1, ci), lc1):
+			n_lic_good += 1
+	# (lot E, recalé : la pastille ne compte plus « tout ce qui rapporte » — avec les services facturés, c'est tout — mais
+	# les achats qui valent le coup : le débit bouge et l'achat se rentabilise en moins de 10 min)
+	check(n_nofee < raw and n_dept == raw and n_aff == n_good + n_lic_good and n_aff <= n_dept + n_lic_good,
+		"D-UI 2 / D-Éco / E1 : la pastille ne compte que les bons achats (sans services facturés %d sur %d rapportent ; avec : %d ; bons achats %d + %d licences = pastille %d)" % [n_nofee, raw, n_dept, n_good, n_lic_good, n_aff])
 	# fermeture : la caméra revient au cadrage du joueur
 	up.close()
 	await _wait(3)
@@ -1257,7 +1277,10 @@ func _dui_phase3(hud: Hud, s: PortSim) -> void:
 	var rr: Rect2 = hud.overlay.frame_rects.get("rade", Rect2())
 	var ra: Vector3 = hud.diorama.call("rade_anchor") if hud.diorama.has_method("rade_anchor") else Layout.anchor_pos(0)
 	var ras := hud.diorama.to_screen(ra)
-	var near := not rr.has_area() or not hud.overlay.useful.grow(-120.0).has_point(ras) or rr.get_center().distance_to(ras) < 260.0
+	# (lot E : le contrôle vérifie vraiment — la bulle doit être dessinée, et près du mouillage ramené dans le rectangle utile ;
+	# avant, il passait sans bulle ou avec un mouillage près du bord)
+	var uf := hud.overlay.useful
+	var near := rr.has_area() and rr.get_center().distance_to(ras.clamp(uf.position, uf.end)) < 260.0
 	hud.open_upgrades("")
 	await _wait(4)
 	var up2: UpgradesSheet = hud.sheet_layer.get_child(0)
@@ -1315,7 +1338,23 @@ func _dui_phase4(hud: Hud, s: PortSim) -> void:
 			all_busy = false
 	var d0: int = sfx.get("dropped")
 	sfx.call("play", "clank", 0.0)
-	var kept: bool = int(sfx.get("dropped")) == d0 + 1 or not all_busy
+	var kept_live: bool = int(sfx.get("dropped")) == d0 + 1 or not all_busy
+	# (lot E : la règle est vérifiée sans dépendre du pilote audio — en --headless les voix ne restent pas toujours
+	# « en lecture », et l'ancien contrôle passait alors sans rien vérifier)
+	var p3: Array[int] = []
+	var b_all: Array[bool] = []
+	for i in 10:
+		p3.append(3)
+		b_all.append(true)
+	var p_mix := p3.duplicate()
+	p_mix[4] = 1
+	p_mix[7] = 0
+	var b_free := b_all.duplicate()
+	b_free[6] = false
+	var rule := int(sfx.call("pick_voice", p3, b_all, 0)) == -1 and int(sfx.call("pick_voice", p3, b_all, 3)) == -1 \
+		and int(sfx.call("pick_voice", p_mix, b_all, 1)) == 7 and int(sfx.call("pick_voice", p_mix, b_all, 0)) == 7 \
+		and int(sfx.call("pick_voice", p_mix, b_free, 0)) == 6 and int(sfx.call("pick_voice", [2, 2] as Array[int], [true, true] as Array[bool], 1)) == -1
+	var kept: bool = kept_live and rule
 	var pitches := {}
 	for p in (sfx.get("_players") as Array):
 		pitches[snappedf((p as AudioStreamPlayer).pitch_scale, 0.0001)] = true
@@ -1336,21 +1375,28 @@ func _dui_phase4(hud: Hud, s: PortSim) -> void:
 	await _wait(2)
 	check(n_sl == 2 and is_equal_approx(v1, 0.35), "D-UI 4 : Réglages — volumes Sons et Ambiance (Ambiance 35 %% → %s)" % str(v1))
 	# Heures sup et campagne visibles dans le monde (D-Monde) : set_overtime / set_campaign appelés
+	# (lot E : contrôle rendu réel — les Heures sup sont révélées et une campagne est vraiment lancée ; avant, une propriété
+	# absente ou aucune campagne disponible le faisait passer)
+	s.features["boost"] = s.time
 	s.boost_ready_at = s.time - 1.0
 	s.boost_until = s.time - 1.0
 	hud._on_boost()
 	hud._refresh(s)
 	var ot: Variant = hud.diorama.get("overtime_on")
-	var camp_ok := true
+	var camp_ok := false
+	var camp_id := ""
+	s.features["commerce"] = s.time
 	for c in Commerce.campaigns(s):
-		if Commerce.campaign_available(s, c) and Commerce.campaign_ready(s, String(c.id)):
-			s.money = maxf(s.money, Commerce.campaign_cost(s, String(c.id)) + 1.0)
-			Commerce.start_campaign(s, String(c.id))
+		if Commerce.campaign_available(s, c) and not Commerce.campaign_active(s, String(c.id)):
+			camp_id = String(c.id)
+			s.campaign_ready_at.erase(camp_id)
+			s.money = maxf(s.money, Commerce.campaign_cost(s, camp_id) + 1.0)
+			var started: bool = Commerce.start_campaign(s, camp_id)
 			hud._refresh(s)
 			var co: Variant = hud.diorama.get("campaign_on")
-			camp_ok = co == null or bool(co)
+			camp_ok = started and co != null and bool(co)
 			break
-	check((ot == null or bool(ot)) and camp_ok, "D-UI 4 : Heures sup et campagne envoyées au monde (heures sup %s, campagne %s)" % [str(ot), str(hud.diorama.get("campaign_on"))])
+	check(ot != null and bool(ot) and camp_ok, "D-UI 4 : Heures sup et campagne envoyées au monde (heures sup %s, campagne « %s » %s)" % [str(ot), camp_id, str(hud.diorama.get("campaign_on"))])
 
 
 ## Ouvertures de zone en attente (le passage au T3 en a mis en file) : jouées et passées, pour que le HUD soit à l'écran.
@@ -1463,3 +1509,444 @@ func _d_monde_checks(hud: Hud, s: PortSim) -> void:
 	check(g_args == 3 and Hud.gesture_text("Rangé ! +12 EVP", 12.0) == Hud.gesture_text("Rangé ! +12 EVP")
 		and Hud.gesture_text("Rangé ! +12 EVP", 24.0) != Hud.gesture_text("Rangé ! +12 EVP"),
 		"D-Monde : gesture_done porte les EVP (%d paramètres), le montant en $ vient du paramètre" % g_args)
+
+
+## Lot E — Confiance : toucher de fermeture d'une feuille (E5), bandeaux sous une feuille et caméra rendue (E6), Améliorer
+## et carte Goulot sur une vraie partie de bot du T3 (E1, E2), aléa pendant la feuille (E3), cérémonie qui montre, pièces,
+## cibles ≥ 96 px, volume enregistré au relâchement, rafale d'achats.
+func _e_confiance_checks(hud: Hud, s: PortSim) -> void:
+	var gs: Node = get_tree().root.get_node("GameState")
+	var dio := hud.diorama
+	var rg := dio.rig
+	await _dui_skip_openings(hud)
+	hud._finish_ceremony()
+	for p in hud.popup_layer.get_children():
+		p.queue_free()
+	for c in hud.sheet_layer.get_children():
+		c.queue_free()
+	hud.tutorial.active = false
+	hud._banner_queue.clear()
+	if hud._banner != null and is_instance_valid(hud._banner):
+		hud._banner.queue_free()
+	hud._banner = null
+	s.active_event = {}
+	await _wait(3)
+	var vs := hud.get_viewport_rect().size
+	# --- E5 : un toucher sur le port referme la feuille ; son relâchement n'atteint jamais le monde -------------------------
+	var tp := Vector2(vs.x * 0.5, vs.y * 0.3)
+	var ev_p := InputEventMouseButton.new()
+	ev_p.button_index = MOUSE_BUTTON_LEFT
+	ev_p.pressed = true
+	ev_p.position = tp
+	ev_p.global_position = tp
+	var ev_r := ev_p.duplicate() as InputEventMouseButton
+	ev_r.pressed = false
+	rg.input_enabled = true
+	# un toucher du monde au même endroit (c'est lui qui ouvrait le service : `_press_pos` restait là)
+	get_viewport().push_input(ev_p, true)
+	get_viewport().push_input(ev_r, true)
+	await _wait(2)
+	for p in hud.popup_layer.get_children():
+		p.queue_free()
+	hud.overlay.zone_info = {}
+	if not hud.any_sheet_open():
+		hud.open_upgrades("cranes")
+	await _wait(3)
+	var taps := [0]
+	var on_tap := func(_w: Vector3, _p: Vector2) -> void: taps[0] += 1
+	rg.tapped.connect(on_tap)
+	var pops0 := _npop(hud)
+	get_viewport().push_input(ev_p, true)       # appui au-dessus de la feuille : elle se ferme
+	await _wait(2)
+	var closed := not hud.any_sheet_open()
+	get_viewport().push_input(ev_r, true)       # relâchement : rien dans le monde
+	await _wait(3)
+	rg.tapped.disconnect(on_tap)
+	check(closed and taps[0] == 0 and not hud.any_sheet_open() and _npop(hud) == pops0,
+		"E5 : toucher le port au-dessus d'Améliorer la referme ; le relâchement n'atteint pas le monde (touchers du monde %d, réouverture %s, fenêtres %d → %d)" % [taps[0], hud.any_sheet_open(), pops0, _npop(hud)])
+	for c in hud.sheet_layer.get_children():
+		c.queue_free()
+	await _wait(2)
+	# --- E6 : bandeaux sous une feuille, minuterie suspendue, VOIR avant le suivant, caméra rendue au joueur ----------------
+	hud.open_upgrades("")
+	await _wait(3)
+	# (la partie tourne pendant le test : un bandeau du jeu peut s'intercaler — on ne regarde que les nôtres)
+	hud._banner_queue.clear()
+	if hud._banner != null and is_instance_valid(hud._banner):
+		hud._banner.queue_free()
+	hud._banner = null
+	hud._queue_banner("E6 un", "", "info", UI.VIOLET)
+	hud._queue_banner("E6 deux", "", "info", UI.VIOLET)
+	await _wait(2)
+	var none_under := hud._banner == null
+	hud.current_sheet().close()
+	await _wait(3)
+	var first_shown := hud._banner != null and hud._banner.visible
+	hud.open_upgrades("")
+	await _wait(3)
+	var btw: Variant = hud._banner.get_meta("tween", null) if hud._banner != null else null
+	var paused := hud._banner != null and not hud._banner.visible and btw is Tween and not (btw as Tween).is_running()
+	hud._close_banner(hud._banner)
+	var no_chain := hud._banner == null and hud._banner_queue.any(func(b: Dictionary) -> bool: return String(b.title) == "E6 deux")
+	hud._banner_queue.assign(hud._banner_queue.filter(func(b: Dictionary) -> bool: return String(b.title) == "E6 deux"))
+	hud.current_sheet().close()
+	await _wait(3)
+	var second := hud._banner != null and hud._banner.visible
+	check(none_under and first_shown and paused and no_chain and second,
+		"E6 : bandeaux — aucun sous une feuille (%s), minuterie suspendue quand il est masqué (%s), fermé sous la feuille sans enchaîner (%s), le suivant au retour (%s)" % [none_under, paused, no_chain, second])
+	if hud._banner != null and is_instance_valid(hud._banner):
+		hud._banner.queue_free()
+	hud._banner = null
+	hud._banner_queue.clear()
+	hud._queue_banner("Nouveau : Responsables", "", "people", UI.VIOLET, Vector3.INF, false, "managers")
+	hud._queue_banner("E6 suivant", "", "info", UI.VIOLET, Layout.anchor_pos(0))
+	await _wait(2)
+	var goal_v := rg.goal
+	if hud.banner_voir != null:
+		hud.banner_voir.pressed.emit()
+	await _wait(2)
+	var voir_ok := hud.current_sheet() is ManageSheet and hud._banner == null and hud._banner_queue.any(func(b: Dictionary) -> bool: return String(b.title) == "E6 suivant") and rg.goal.distance_to(goal_v) < 0.5
+	if hud.current_sheet() != null:
+		hud.current_sheet().close()
+	await _wait(2)
+	hud._banner_queue.clear()
+	if hud._banner != null and is_instance_valid(hud._banner):
+		hud._banner.queue_free()
+	hud._banner = null
+	# Améliorer ouvert d'un toucher sur un poste (le monde vise le poste avant d'ouvrir) : la caméra revient à la vue du joueur
+	var player := Vector3(-12, 0, 18)
+	rg.focus(player)
+	rg.target = rg.goal
+	rg._apply()
+	rg.focus(Layout.dept_pos("cranes", s.tier))        # comme Diorama._on_tapped (« dept »)
+	dio.place_tapped.emit("cranes")
+	await _wait(3)
+	if hud.current_sheet() != null:
+		hud.current_sheet().close()
+	await _wait(3)
+	var back1 := rg.goal.distance_to(player) < 0.5
+	# pendant le regard de 2 s d'un chapitre (`view_home`) : la vue d'avant
+	rg.focus(player)
+	rg.target = rg.goal
+	dio.view_home = player
+	rg.focus(Vector3(30, 0, 30))
+	rg.target = rg.goal
+	hud.open_upgrades("")
+	await _wait(3)
+	if hud.current_sheet() != null:
+		hud.current_sheet().close()
+	await _wait(3)
+	var back2 := rg.goal.distance_to(player) < 0.5
+	dio.view_home = Vector3.INF
+	check(voir_ok and back1 and back2, "E6 : VOIR ouvre l'écran avant le bandeau suivant (%s) ; caméra rendue au joueur après Améliorer ouvert depuis le monde (%s) et pendant un regard de chapitre (%s)" % [voir_ok, back1, back2])
+	# --- E1 / E2 / E3 sur une vraie partie de bot du T3 (goulot « postes à quai ») ----------------------------------------
+	var saved := s.to_dict()
+	var fx: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/bot_t3.json"))
+	s.from_dict(fx.sim)
+	for i in 40:          # 10 s de jeu (comme run_all) : la rade pleine depuis 3 s désigne le maillon suivant
+		s.step(0.25)
+	gs.emit_signal("sim_replaced", s)
+	s._refresh_analysis()
+	hud._aff_t = -10.0
+	hud._refresh(s)
+	var key := String(s.shown_analysis().get("key", ""))
+	var hb := hud.hint_btn.text
+	var badge := hud._aff_n
+	var worth := Hud.worthwhile_count(s)
+	check(key == "berth_count" and not hb.contains("GNL") and hb == String(Hud.hint_action(s).label) and badge == worth and hud.upgrade_badge.visible == (badge > 0),
+		"E1/E2 : partie de bot au T3 — « %s » → « %s » (jamais le GNL) ; pastille %d = bons achats %d" % [hud.hint_title.text, hb, badge, worth])
+	await _wait(2)
+	await _dui_skip_openings(hud)
+	hud._finish_ceremony()
+	for p in hud.popup_layer.get_children():
+		p.queue_free()
+	UpgradesSheet.mult_index = 0
+	s.money = 4.0e8
+	hud.open_upgrades("")
+	await _wait(4)
+	var up := hud.current_sheet() as UpgradesSheet
+	up._gain_at = 0
+	up.refresh()
+	var green_bad: Array[String] = []
+	var fee_only := 0
+	var best_bad := false
+	for c in up.cards:
+		if not c.has("dept"):
+			continue
+		var d := String(c.dept)
+		var cost := s.dept_cost(d, 1)
+		var parts := s.upgrade_gain_parts(d, 1)
+		var col := (c.pay as Label).get_theme_color("font_color")
+		var txt := (c.pay as Label).text
+		if col == UI.MONEY and not UpgradesSheet.is_good(parts, cost):
+			green_bad.append("%s « %s »" % [d, txt])
+		if txt.contains("pas le goulot (+"):
+			fee_only += 1
+		if (c.best as Label).visible and not UpgradesSheet.is_good(parts, cost):
+			best_bad = true
+	check(green_bad.is_empty() and fee_only >= 1 and not best_bad,
+		"E1 : Améliorer au T3 — aucun « rentabilisé » en vert au-delà de 10 min (%s) ; %d carte(s) « pas le goulot (+… de services) » en gris ; ★ seulement sur un bon achat" % [str(green_bad), fee_only])
+	# E3 : vent fort pendant la feuille — aléa visible en pastille, Portiques « Suspendu », jamais le meilleur achat ; coût
+	# plafonné à 25 % de la trésorerie
+	Hazards.start(s, "wind")
+	hud._refresh(s)
+	up._gain_at = 0
+	up.refresh()
+	await _wait(2)
+	var cc := up._card_for("dept", "cranes")
+	var eff_txt := (cc.eff as Label).text if not cc.is_empty() else "?"
+	var pill_ok := hud.ev_pill.visible and hud.ev_pill.get_global_rect().end.y < vs.y * Sheet.HALF_TOP and hud.ev_pill_l.text.begins_with(String(s.active_event.name))
+	var cost_ok := float(s.active_event.get("pay_cost", INF)) <= 0.25 * s.money + 0.01
+	check(pill_ok and eff_txt.begins_with("Suspendu (vent fort)") and not (cc.best as Label).visible and up.best_dept != "cranes" and cost_ok,
+		"E3 : aléa pendant la feuille — pastille « %s », Portiques « %s », pas le meilleur achat, « Sécuriser » %s (≤ 25 %% de %s)" % [hud.ev_pill_l.text, eff_txt, Fmt.money(float(s.active_event.get("pay_cost", 0.0))), Fmt.money(s.money)])
+	Hazards.end_event(s)
+	# rafale : `_burst_n` repart de zéro à chaque rafale
+	up._burst_n = 7
+	var hr: HoldRepeat = null
+	for ch in (up._card_for("dept", "gate").buy as Node).get_children():
+		if ch is HoldRepeat:
+			hr = ch
+	s.money = 1.0e12
+	if hr != null:
+		hr.repeat.call(1)
+	var burst_ok := hr != null and up._burst_n == 1
+	# cibles ≥ 96 px : onglets des feuilles, barre de palier, « POURQUOI ? », « BÂTIMENTS »
+	var small: Array[String] = []
+	for b in up.tab_buttons:
+		if b.size.y < 95.5:
+			small.append("onglet %d" % int(b.size.y))
+	var fr := up.show_stages(s.db.dept_by_id["gate"], "gate", -1)
+	await _wait(2)
+	for b in fr.find_children("*", "Button", true, false):
+		if (b as Button).text == "POURQUOI ?" and (b as Control).size.y < 95.5:
+			small.append("POURQUOI ? %d" % int((b as Control).size.y))
+	fr.queue_free()
+	up.close()
+	await _wait(2)
+	hud._refresh(s)
+	await _wait(1)
+	if hud.prog_btn.is_visible_in_tree() and (hud.prog_btn.size.y < 95.5 or hud.prog_btn.size.x < 95.5):
+		small.append("barre de palier %dx%d" % [int(hud.prog_btn.size.x), int(hud.prog_btn.size.y)])
+	s.features["commerce"] = s.time
+	hud.open_sheet(CommerceSheet.new(CommerceSheet.TAB_TRAFFIC))
+	await _wait(3)
+	var cs := hud.current_sheet()
+	var bat := 0
+	for b in cs.find_children("*", "Button", true, false):
+		if (b as Button).text == "BÂTIMENTS":
+			bat += 1
+			if (b as Control).size.y < 95.5:
+				small.append("BÂTIMENTS %d" % int((b as Control).size.y))
+	cs.close()
+	await _wait(2)
+	check(burst_ok and small.is_empty() and bat == 1 and hud.prog_btn.is_visible_in_tree(),
+		"mineurs : rafale repartie de zéro (%s) ; cibles ≥ 96 px — onglets, barre de palier, POURQUOI ?, BÂTIMENTS (trop petites : %s)" % [burst_ok, str(small)])
+	# cérémonie : sous les fenêtres, ce qui s'ouvre (icônes), VOIR qui cadre ; bulles masquées sous la fenêtre
+	hud._on_tier(3)
+	await _wait(2)
+	var cer := hud._ceremony
+	var under := cer != null and cer.z_index == 0 and cer.get_index() < hud.popup_layer.get_index()
+	hud._finish_ceremony()
+	await _wait(3)
+	var opens: Array = s.db.tier_def(3).get("opens", [])
+	var no_bubbles := not hud.overlay.visible and _npop(hud) >= 1
+	var view := Hud.tier_view(s, 3)
+	var voir := hud.tier_voir
+	var has_voir := voir != null and is_instance_valid(voir)
+	if has_voir:
+		voir.pressed.emit()
+	await _wait(2)
+	var framed := not view.is_empty() and rg.goal.distance_to(Vector3(view.p.x, 0, view.p.z)) < 0.5 and _npop(hud) == 0
+	check(under and opens.size() >= 2 and has_voir and no_bubbles and framed,
+		"cérémonie : couche sous les fenêtres (%s), %d choses qui s'ouvrent au T3, bulles masquées sous la fenêtre (%s), VOIR cadre la zone (%s)" % [under, opens.size(), no_bubbles, framed])
+	for p in hud.popup_layer.get_children():
+		p.queue_free()
+	await _wait(2)
+	# pièces d'encaissement : vraies pièces de 64 px, nées au-dessus du montant et après 0,6 s
+	var paid_at := Vector3(Layout.berth_center(0), 8.0, Layout.QUAY_Z)
+	rg.focus(paid_at)
+	rg.target = rg.goal
+	rg._apply()
+	await _wait(1)
+	var from := dio.to_screen(paid_at)
+	if dio.has_signal("ship_paid"):
+		dio.emit_signal("ship_paid", paid_at, 5000.0)
+	await _wait(1)
+	var coins_n := 0
+	var coins_ok := true
+	for c in hud.popup_layer.get_children():
+		if c is TextureRect and (c as Node).has_meta("coin"):
+			coins_n += 1
+			var tr := c as TextureRect
+			coins_ok = coins_ok and tr.size.x >= 63.0 and tr.get_global_rect().end.y < from.y - 60.0 and tr.modulate.a < 0.01
+	check(coins_n > 0 and coins_ok and Hud.COIN_DELAY >= 0.6, "encaissement : %d pièces de 64 px, au-dessus du « +X $ », parties après %s s" % [coins_n, Fmt.num(Hud.COIN_DELAY)])
+	# volume : appliqué à chaque cran, enregistré au relâchement seulement (jamais dans le fichier du joueur pendant le test)
+	var sfx: Node = get_tree().root.get_node("Sfx")
+	hud.open_sheet(SettingsSheet.new())
+	await _wait(3)
+	var ss := hud.current_sheet() as SettingsSheet
+	var v0: float = sfx.call("get_volume", "Sons")
+	var n0: int = sfx.get("saves")
+	var sl := ss.sliders["Sons"] as HSlider
+	sl.value = 40.0
+	sl.value = 45.0
+	sl.value = 50.0
+	var during: int = int(sfx.get("saves")) - n0
+	sl.drag_ended.emit(true)
+	var after_rel: int = int(sfx.get("saves")) - n0
+	sl.value = v0 * 100.0
+	ss.close()
+	await _wait(2)
+	check(during == 0 and after_rel == 1 and not bool(sfx.get("persist")), "mineurs : volume enregistré au relâchement de la réglette (%d enregistrement pendant le glissé, %d au relâchement), rien d'écrit pendant le test" % [during, after_rel])
+	# barre de palier → onglet Port : la Réputation n'est pas citée avant sa révélation
+	var had_stars := s.features.has("stars")
+	var st_t: Variant = s.features.get("stars", null)
+	s.features.erase("stars")
+	hud.open_sheet(ManageSheet.new(3))
+	await _wait(3)
+	var cited_before := false
+	var sat_line := false
+	for l in hud.current_sheet().find_children("*", "Label", true, false):
+		cited_before = cited_before or (l as Label).text.contains("Réputation")
+		sat_line = sat_line or (l as Label).text.begins_with("Navires satisfaits")
+	hud.current_sheet().close()
+	await _wait(2)
+	if had_stars:
+		s.features["stars"] = st_t
+	check(not cited_before and sat_line, "mineurs : palier suivant — pas de « Réputation » avant sa révélation (« Navires satisfaits » : %s)" % sat_line)
+	# la partie du test reprend son cours
+	s.from_dict(saved)
+	gs.emit_signal("sim_replaced", s)
+	await _wait(3)
+	hud._finish_ceremony()
+	for p in hud.popup_layer.get_children():
+		p.queue_free()
+	await _wait(2)
+
+# ---------------------------------------------------------------------------
+# Lot E-Flux (docs/ORDRE_E_FLUX.md) : camions, gare, capitainerie, mineurs du monde (les contrôles sans scène sont dans
+# run_all, `test_e_flux`)
+# ---------------------------------------------------------------------------
+
+func _e_flux_checks(hud: Hud) -> void:
+	var gs: Node = get_tree().root.get_node("GameState")
+	var s: PortSim = gs.get("sim")
+	var dio := hud.diorama
+	DebugArgs.apply({"tier": "3", "build-all": "", "levels": "83", "hire-all": ""}, s, s.db, true)
+	await _wait(4)
+	dio.skip_opening()
+	# E7 : un camion qui se range devant son bloc, attend son conteneur et repart : il ne tourne presque pas à l'arrêt
+	var tv := TrafficView.new()
+	add_child(tv)
+	tv._tier = 3
+	var tn := Node3D.new()
+	tv.add_child(tn)
+	var r_in := Layout.truck_route_in(Layout.road_in_x(false), -12.0)
+	tn.position = r_in[0]
+	tn.rotation.y = deg_to_rad(TrafficView.HEAD_NORTH)
+	tv.trucks = [{"node": tn, "route": r_in.slice(1), "phase": "in", "stop_x": -12.0, "t": 0.0, "container": null, "loader": -1}]
+	var pivot := 0.0
+	var phases := {}
+	var prev_p := tn.position
+	var prev_y := tn.rotation.y
+	for i in 260:
+		if tv.trucks.is_empty():
+			break
+		phases[String(tv.trucks[0].phase)] = true
+		tv._sync_trucks(s, 0.05)
+		if not is_instance_valid(tn):
+			break
+		if tn.position.distance_to(prev_p) < 0.02:
+			pivot += absf(angle_difference(prev_y, tn.rotation.y))
+		prev_p = tn.position
+		prev_y = tn.rotation.y
+	check(phases.has("wait") and phases.has("loading") and phases.has("out") and rad_to_deg(pivot) < 30.0,
+		"E-Flux E7 : camion au chargement — %.1f° de rotation à l'arrêt (arrivée, attente face à l'ouest, départ), phases %s" % [rad_to_deg(pivot), str(phases.keys())])
+	tv.queue_free()
+	# E8 : passages de demi-tour dessinés sur la voie des camions au T3
+	check(dio.crossovers_shown == Layout.crossover_xs(s.tier).size() and dio.crossovers_shown == 2,
+		"E-Flux E8 : %d passages de demi-tour dessinés au T%d (x %s)" % [dio.crossovers_shown, s.tier, str(Layout.crossover_xs(s.tier))])
+	# E11 : au T2 et au-delà, la maison bleue et la tour ouvrent la Capitainerie ; retour d'achat sur les deux ; pavillons de
+	# campagne sur la tour (bâtiment actif)
+	var p_off := dio.pick_tap(Layout.HARBOR_OFFICE)
+	var p_tow := dio.pick_tap(Layout.CONTROL_TOWER)
+	dio.feedback_purchase("harbor")
+	var fb := dio.feedback_points.size()
+	var camp0 := dio.campaign_on
+	dio.set_campaign(true)
+	var at := dio.campaign_at
+	dio.set_campaign(camp0)
+	check(String(p_off.get("kind", "")) == "dept" and String(p_off.get("id", "")) == "harbor" and String(p_tow.get("kind", "")) == "dept"
+		and String(p_tow.get("id", "")) == "harbor" and fb == 2 and Vector2(at.x, at.z).distance_to(Vector2(Layout.CONTROL_TOWER.x, Layout.CONTROL_TOWER.z)) < 0.1,
+		"E-Flux E11 : capitainerie au T%d — maison bleue %s, tour %s ; retour d'achat sur %d bâtiments ; pavillons sur la tour (%s)" % [
+		s.tier, str(p_off.get("id", "")), str(p_tow.get("id", "")), fb, str(at)])
+	# E12 : gare vivante — le train entre par le tunnel, s'arrête au quai (visible, gare à l'écran ou non) ; la navette du
+	# tracteur attend au passage à niveau tant qu'un camion en approche, puis porte un conteneur du parc à la gare
+	var tv2 := TrafficView.new()
+	add_child(tv2)
+	tv2.on_screen = func(_p: Vector3) -> bool: return true
+	var block := Node3D.new()
+	tv2.add_child(block)
+	block.position = Vector3(float(Layout.RAIL_SHUTTLE.x) + 2.0, 0, Layout.LOAD_STOP_Z)
+	tv2.trucks = [{"node": block, "route": [], "phase": "wait", "stop_x": block.position.x, "t": 0.0, "container": null, "loader": -1}]
+	var seen_quay := false
+	var in_band_blocked := 0
+	var crossed := false
+	var max_x := -INF
+	for i in 420:
+		if i == 170:
+			tv2.trucks.clear()          # le camion repart : le passage se libère
+			block.queue_free()
+		tv2._sync_train(s, 0.1)
+		tv2._sync_shuttle(s, 0.1)
+		if tv2.train_at_quay() and tv2.train.visible and absf(tv2.train.position.x - TrafficView.train_x_stop()) < 0.01:
+			seen_quay = true
+		if tv2.train != null and tv2.train.visible:
+			max_x = maxf(max_x, tv2.train.position.x)
+		if tv2.tractor != null:
+			var tp := tv2.tractor.position
+			var in_band := tp.z > float(Layout.LANE_BAND[0]) - 2.5 and tp.z < float(Layout.LANE_BAND[1]) + 2.5
+			if in_band and not tv2.trucks.is_empty():
+				in_band_blocked += 1
+			if in_band and tv2.trucks.is_empty():
+				crossed = true
+	var clip_ok := tv2._clip_mat != null and is_equal_approx(float(tv2._clip_mat.get_shader_parameter("clip_x")), Layout.RAIL_TUNNEL_X)
+	check(seen_quay and tv2.trains_run >= 1 and clip_ok and max_x <= TrafficView.train_x_hidden() and tv2.shuttle_waits >= 1
+		and in_band_blocked == 0 and crossed and tv2.shuttles_done >= 1,
+		"E-Flux E12 : train à quai et visible (%s), coupé à la bouche du tunnel (x %s) ; navette : %d attente(s) au passage à niveau, jamais sur la voie avec un camion (%d), %d conteneur(s) déposé(s) à la gare" % [
+		seen_quay, Fmt.num(Layout.RAIL_TUNNEL_X), tv2.shuttle_waits, in_band_blocked, tv2.shuttles_done])
+	tv2.queue_free()
+	# mineurs : cargaison relevée oubliée au départ d'un navire (même furieux) ; douaniers jamais tronqués par CROWD_MAX ; bulle
+	# de rade sur une place occupée ; gyrophares bleus ; toit du bureau de pilotage
+	var sh := _fake_ship(s, 99777, Ship.State.LEAVING, 0, -1, 0.0)
+	dio._ship_cargo0[sh.id] = sh.left.duplicate()
+	dio._on_ship_removed(sh)
+	var lv := [s.levels.berths, s.levels.cranes]
+	s.levels.berths = 400
+	s.levels.cranes = 400
+	var plan := dio.crowd_plan()
+	s.levels.berths = lv[0]
+	s.levels.cranes = lv[1]
+	var customs := plan.filter(func(c: Dictionary) -> bool: return String(c.kind) == "customs").size()
+	var dockers := plan.size() - customs
+	var ra := dio.rade_anchor()
+	var ra_ok := true
+	var any_anch := false
+	for shp in s.ships:
+		if shp.state == Ship.State.ANCHORED and shp.anchor_slot >= 0:
+			any_anch = true
+	if any_anch:
+		ra_ok = false
+		for shp in s.ships:
+			if shp.state == Ship.State.ANCHORED and shp.anchor_slot >= 0 and Vector2(ra.x, ra.z).distance_to(Vector2(Layout.anchor_pos(shp.anchor_slot).x, Layout.anchor_pos(shp.anchor_slot).z)) < 0.01:
+				ra_ok = true
+	var bc: Color = (Diorama.beacon_parts()[1] as StandardMaterial3D).albedo_color
+	var roofs := 0
+	for c in dio.static_root.get_children():
+		for g in (c as Node).get_children():
+			if (g as Node).has_meta("roof"):
+				roofs += 1
+	check(not dio._ship_cargo0.has(99777) and customs == clampi(s.agents("customs"), 1, Diorama.CROWD_CUSTOMS) and dockers <= Diorama.CROWD_MAX
+		and ra_ok and bc.b > bc.r and roofs >= 1,
+		"E-Flux mineurs : cargaison oubliée au départ (%s), %d douaniers réservés (%d dockers, plafond %d), bulle de rade sur une place (%s), gyrophares bleus, %d toit(s)" % [
+		not dio._ship_cargo0.has(99777), customs, dockers, Diorama.CROWD_MAX, ra_ok, roofs])

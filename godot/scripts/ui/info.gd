@@ -12,14 +12,61 @@ const CARGO_COLOR := {"std": Color("#E25B4B"), "reefer": Color("#3D8BEB"), "imo"
 ## Noms courts des services pour les boutons (« AMÉLIORER PARC · 12K $ »).
 const DEPT_SHORT := {"harbor": "CAPITAINERIE", "berths": "QUAIS", "customs": "DOUANE", "cranes": "PORTIQUES", "yard_ops": "PARC", "gate": "GATE"}
 ## Noms courts des bâtiments pour les boutons (« QUAI N°2 · 150K $ ») : le même achat porte le même nom partout (lot D-UI).
+## Lot E : chaque nom court est tiré du nom du bâtiment (`buildings.json`, celui de la pancarte, de Gestion et des zones) —
+## ses mots, dans l'ordre, sans glyphe exposant (« ᵉ ») ni ancien nom (« RACK FRIGO », « QUAI ALLONGÉ ») ; contrôlé par run_all.
 const BUILDING_SHORT := {
-	"quay_ext": "QUAI ALLONGÉ", "gravel2": "FRICHE", "customs1": "DOUANE", "supply": "PONTON", "crane2": "2ᵉ GRUE",
-	"dredge1": "DRAGAGE", "gravel3": "PARC GRAVIER", "berth2": "QUAI N°2", "repair": "ATELIER NAVAL", "asphalt": "PARC BITUMÉ",
-	"gate2": "2ᵉ VOIE DE GATE", "parking1": "AIRE D'ATTENTE", "sts1": "PORTIQUE STS", "tug2": "REMORQUEUR", "reefer": "RACK FRIGO",
-	"quickmoor": "BOLLARDS", "parking2": "AIRE AGRANDIE", "ewindow": "GUICHET UNIQUE", "scanner1": "SCANNER", "berth3": "QUAI N°3",
-	"lng": "GNL", "imo": "ZONE IMO", "rail": "TERMINAL RAIL", "rtg": "RTG", "berth4": "QUAI N°4", "oog": "HORS-GABARIT",
-	"scanner2": "SCANNER PORTIQUE", "rpilot": "PILOTAGE DISTANT", "vacmoor": "AMARRAGE AUTO", "ecustoms": "E-DOUANE", "tos": "TOS",
+	"quay_ext": "ALLONGEMENT DU QUAI", "gravel2": "FRICHE", "customs1": "BUREAU DE DOUANE", "supply": "PONTON",
+	"crane2": "DEUXIÈME GRUE", "dredge1": "DRAGAGE DU CHENAL", "gravel3": "EXTENSION DU PARC", "berth2": "QUAI N°2",
+	"repair": "ATELIER DE RÉPARATION", "asphalt": "PARC BITUMÉ", "gate2": "DEUXIÈME VOIE", "parking1": "AIRE D'ATTENTE",
+	"sts1": "PORTIQUE STS", "tug2": "DEUXIÈME REMORQUEUR", "reefer": "PÔLE FROID", "quickmoor": "BOLLARDS",
+	"parking2": "EXTENSION DE L'AIRE", "ewindow": "GUICHET UNIQUE", "scanner1": "SCANNER MOBILE", "berth3": "QUAI PROFOND N°3",
+	"lng": "SOUTAGE GNL", "imo": "ZONE IMO", "rail": "TERMINAL RAIL", "rtg": "PORTIQUES DE COUR", "berth4": "QUAI PROFOND N°4",
+	"oog": "AIRE HORS-GABARIT", "scanner2": "SCANNER À PORTIQUE", "rpilot": "PILOTAGE À DISTANCE", "vacmoor": "AMARRAGE AUTOMATIQUE",
+	"ecustoms": "DOUANE DÉMATÉRIALISÉE", "tos": "TOS",
 }
+## Libellés des recettes de Gestion › Stats (source de `PortSim._earn`). Lot E : « fees » (services facturés à chaque niveau
+## de service) et « services » (part des droits de chaque escale : atelier de réparation, soutage GNL) sont deux recettes
+## distinctes — « services » n'apparaissait pas du tout.
+const SOURCE_NAMES := {"handling": "Manutention", "dues": "Droits de port", "services": "Services aux escales (atelier, GNL)",
+	"gate": "Gate", "inspection": "Inspections", "reefer": "Prises frigo", "fees": "Services facturés (niveaux)",
+	"contract": "Contrats", "auction": "Enchères", "salaries": "Salaires"}
+## Statistique principale de chaque service (aléas : « Suspendu (brouillard) », jamais « meilleur achat » sous un aléa).
+const STAT_DEPT := {"pilot_speed": "harbor", "moor_speed": "berths", "inspect_rate": "customs", "crane_rate": "cranes",
+	"transfer_rate": "yard_ops", "gate_rate": "gate"}
+
+
+## L'aléa en cours freine-t-il ce service (vent : Portiques ; brouillard : Capitainerie ; panne : le service visé…) ?
+static func event_hits(sim: PortSim, dept: String) -> bool:
+	for st in Hazards.hit_stats(sim):
+		if String(STAT_DEPT.get(st, "")) == dept:
+			return true
+	return false
+
+
+## Nom de l'aléa en cours, en minuscules (« brouillard », « vent fort »), "" sans aléa.
+static func event_name(sim: PortSim) -> String:
+	return String(sim.active_event.get("name", "")).to_lower() if not sim.active_event.is_empty() else ""
+
+
+## Le nom court reprend-il les mots du nom du bâtiment (dans l'ordre, sans accents ni casse) ? (contrôle run_all)
+static func short_matches_name(short: String, name: String) -> bool:
+	var norm := func(t: String) -> String:
+		var s := t.to_lower()
+		for pair in [["é", "e"], ["è", "e"], ["ê", "e"], ["à", "a"], ["ô", "o"], ["î", "i"], ["û", "u"], ["ç", "c"], ["'", " "], ["(", " "], [")", " "], ["-", " "]]:
+			s = s.replace(pair[0], pair[1])
+		return s
+	var words := (norm.call(name) as String).split(" ", false)
+	var pos := 0
+	for w in (norm.call(short) as String).split(" ", false):
+		var found := false
+		while pos < words.size():
+			pos += 1
+			if words[pos - 1] == w:
+				found = true
+				break
+		if not found:
+			return false
+	return true
 ## Icônes propres à certains bâtiments (la Capitainerie garde l'ancre ; ponton, dragage, remorqueur, GNL et pilotage à distance
 ## en avaient une copie : revue D-UI, « icônes distinctes »).
 const BUILDING_ICON := {"supply": "fuel", "dredge1": "dredge", "tug2": "tug", "lng": "lng", "rpilot": "radar"}
@@ -85,7 +132,9 @@ static func dept_effect(sim: PortSim, dept: String, extra: int = 0) -> String:
 	var s := ""
 	match dept:
 		"harbor":
-			s = "%s s" % ("%.1f" % sim.pilot_duration()).replace(".", ",")
+			# brouillard : pilotage suspendu (la durée vaut l'infini : plus jamais « Inf s → Inf s », lot E)
+			var pd := sim.pilot_duration()
+			s = "%s s" % ("%.1f" % pd).replace(".", ",") if pd < INF else "Suspendu"
 		"berths":
 			s = "%s s" % ("%.1f" % sim.moor_duration()).replace(".", ",")
 		"customs":

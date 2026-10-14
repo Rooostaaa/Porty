@@ -12,6 +12,7 @@ var money_l: Label
 var amber_l: Label
 var stars_l: Label
 var prog_bar: RoundBar
+var prog_btn: Control             # cible de toucher de la barre de palier (bloc argent + barre, ≥ 96 px)
 var upgrade_badge: PanelContainer
 var tutorial: Tutorial
 var tut_targets: Dictionary = {}      # nom -> contrôle que le tutoriel peut désigner
@@ -78,6 +79,7 @@ var gain_pill: PanelContainer
 var gain_l: Label
 var _gain_tw: Tween
 var _est_prev := -1.0          # revenu estimé (par seconde) avant le dernier achat
+var _fee_prev := 0.0           # dont services facturés (lot E : un achat qui ne bouge que les services n'est pas « le goulot »)
 var _est_t := 0.0
 var _purchase_seen := false
 var _lifts: Array = []         # [temps de jeu de l'achat, gain par seconde]
@@ -106,6 +108,7 @@ func _ready() -> void:
 	sheet_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	sheet_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(sheet_layer)
+	_build_event_pill()
 	tutorial = Tutorial.new()
 	tutorial.hud = self
 	add_child(tutorial)
@@ -278,13 +281,23 @@ func _build_top() -> void:
 	prog_bar.color = UI.AMBER
 	prog_bar.bg = Color("#FFE3A3")
 	prog_bar.dark_text = true
-	prog_bar.mouse_filter = Control.MOUSE_FILTER_STOP
-	prog_bar.gui_input.connect(func(e: InputEvent) -> void:
-		var mb := e as InputEventMouseButton
-		if mb != null and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
-			open_sheet(ManageSheet.new(3)))
+	# lot E : la cible de toucher est le bloc argent + barre (≥ 96 px de haut), plus la seule barre de 36 px
+	prog_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mv.add_child(prog_bar)
-	row.add_child(mv)
+	# (un conteneur, pas un bouton : il n'apparaît pas parmi les boutons du HUD, et ne réagit qu'une fois la barre révélée)
+	var pb := MarginContainer.new()
+	pb.mouse_filter = Control.MOUSE_FILTER_STOP
+	pb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	pb.custom_minimum_size = Vector2(0, 96)
+	pb.tooltip_text = "Palier suivant"
+	pb.gui_input.connect(func(e: InputEvent) -> void:
+		var mb := e as InputEventMouseButton
+		if mb != null and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT and prog_bar.is_visible_in_tree():
+			open_sheet(ManageSheet.new(3)))
+	mv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pb.add_child(mv)
+	prog_btn = pb
+	row.add_child(pb)
 	row.add_child(UI.spacer(0, 0, true))
 	# Ambre : la pastille et son « + » ne font qu'une cible de 96 px, qui explique comment en gagner
 	var amb := Button.new()
@@ -436,6 +449,49 @@ func _build_top() -> void:
 	toast_box.z_index = 4
 	add_child(toast_box)
 	feature_ctl["stats"] = []            # les statistiques sont dans Gestion (onglet Stats)
+
+
+var ev_pill: PanelContainer        # aléa en cours, en pastille compacte au-dessus d'une feuille mi-hauteur (lot E)
+var ev_pill_l: Label
+var ev_pill_icon: TextureRect
+
+
+## Pastille d'aléa : pendant une feuille mi-hauteur le HUD du haut est replié ; l'aléa en cours reste visible en haut à
+## gauche du port (icône, nom, secondes). Elle laisse passer le toucher : toucher le port referme la feuille, et la carte
+## complète de l'aléa (avec « Sécuriser ») réapparaît.
+func _build_event_pill() -> void:
+	ev_pill = PanelContainer.new()
+	ev_pill.add_theme_stylebox_override("panel", UI.card_style(Color("#FFF1DE"), 30, 14))
+	ev_pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ev_pill.position = Vector2(24, 24)
+	ev_pill.visible = false
+	var h := UI.hbox(10)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ev_pill.add_child(h)
+	var d := PanelContainer.new()
+	d.add_theme_stylebox_override("panel", UI.flat(UI.ORANGE, 26))
+	d.custom_minimum_size = Vector2(52, 52)
+	d.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ev_pill_icon = UI.icon("wind", 34)
+	ev_pill_icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	ev_pill_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	d.add_child(ev_pill_icon)
+	h.add_child(d)
+	ev_pill_l = UI.label("", 28, UI.ORANGE.darkened(0.25))
+	ev_pill_l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	h.add_child(ev_pill_l)
+	add_child(ev_pill)
+
+
+func _refresh_event_pill(s: PortSim) -> void:
+	var ev := s.active_event
+	var on := not ev.is_empty() and half_sheet_open() and hud_fade > 0.02
+	ev_pill.visible = on
+	if on:
+		ev_pill_l.text = "%s · %d s" % [String(ev.name), maxi(0, ceili(float(ev.until) - s.time))]
+		var ic := String(ev.get("icon", ""))
+		ev_pill_icon.texture = UI.icon_tex(ic) if UI.icon_tex(ic) != null else UI.icon_tex("info")
+		ev_pill.reset_size()
 
 
 ## Toucher la carte Goulot (hors de son bouton) : le détail du conseil se déroule ou se replie.
@@ -734,7 +790,8 @@ func _process(delta: float) -> void:
 	diorama.fx_paused = full or _npopups() > 0 or ceremony_active() or (half and not diorama.opening_queue.is_empty())
 	_sync_opening(delta)
 	# la surcouche monde est « top_level » : elle passerait sur les écrans plein cadre ; pendant une ouverture de zone, rien
-	overlay.visible = not full and not diorama.opening_active() and not ceremony_active()
+	# lot E : ni sous une fenêtre (la bulle « en rade » passait au-dessus de la fenêtre du palier)
+	overlay.visible = not full and not diorama.opening_active() and not ceremony_active() and _npopups() == 0
 	_sync_toasts()
 	# argent : le compteur monte en douceur, et chute d'un coup quand on dépense
 	if _money_disp < 0.0 or s.money < _money_disp or absf(s.money - _money_disp) < 0.5:
@@ -771,7 +828,9 @@ func _place_boost() -> void:
 
 func _refresh(s: PortSim) -> void:
 	# revenu net par seconde ; tant que rien n'a été déchargé, on n'affiche pas les salaires seuls
-	var ips := s.income_per_min() / 60.0 + _income_lift(s)
+	# (lot E : revenu réel sur la fenêtre écoulée depuis le chargement — juste après un chargement, `income_per_min`
+	# affichait « +41K $/s » pour un port qui en gagne 1,3M : les seaux d'une minute ne sont pas sauvegardés)
+	var ips := s.real_income_rate() + _income_lift(s)
 	if s.counter("evp") <= 0.0 and s.prestiges == 0:
 		ips = 0.0
 	income_l.text = ("+" if ips >= 0 else "") + Fmt.num(ips) + " $/s"
@@ -833,6 +892,7 @@ func _refresh(s: PortSim) -> void:
 	# aléa
 	var ev := s.active_event
 	event_card.visible = not ev.is_empty()
+	_refresh_event_pill(s)
 	if not ev.is_empty():
 		ev_title.text = String(ev.name)
 		ev_text.text = String(ev.text)
@@ -924,34 +984,44 @@ func _track_estimate(s: PortSim, delta: float) -> void:
 	_est_t += delta
 	if _purchase_seen:
 		_purchase_seen = false
-		var est := s.income_estimate_with("harbor", 0)
+		var parts := s.income_parts_with("harbor", 0)
+		var est := float(parts.total)
 		var g := est - _est_prev if _est_prev >= 0.0 else 0.0
+		var gf := float(parts.fees) - _fee_prev if _est_prev >= 0.0 else 0.0
 		if g > 0.0:
-			_add_gain(s, g)
+			# la pastille verte « +X $/s » seulement si le débit bouge ; sinon `_flush_buy_fx` dit « pas le goulot »
+			_add_gain(s, g, UpgradesSheet.moves_flow({"total": g, "flow": g - gf}) or _buy_fx.is_empty())
 		if not _buy_fx.is_empty():
 			_buy_fx.gain = float(_buy_fx.get("gain", 0.0)) + maxf(0.0, g)
+			_buy_fx.fees = float(_buy_fx.get("fees", 0.0)) + maxf(0.0, gf)
 			_buy_fx.seen = true
 		_est_prev = est
+		_fee_prev = float(parts.fees)
 		_est_t = 0.0
 	elif _est_t >= 1.0 or _est_prev < 0.0:
 		_est_t = 0.0
-		_est_prev = s.income_estimate_with("harbor", 0)
+		var p0 := s.income_parts_with("harbor", 0)
+		_est_prev = float(p0.total)
+		_fee_prev = float(p0.fees)
 	if gain_pill.visible:
 		if half_sheet_open():
 			# feuille mi-hauteur : la pastille passe en haut du port visible (le revenu du HUD est sous la feuille)
-			gain_pill.global_position = Vector2((get_viewport_rect().size.x - gain_pill.size.x) * 0.5, 36.0)
+			var gy := 36.0 if ev_pill == null or not ev_pill.visible else ev_pill.get_global_rect().end.y + 12.0
+			gain_pill.global_position = Vector2((get_viewport_rect().size.x - gain_pill.size.x) * 0.5, gy)
 		else:
 			var r := income_l.get_global_rect()
 			gain_pill.global_position = Vector2(r.position.x, r.end.y + 22)
 
 
 ## Gain d'un achat : pastille « +X $/s » (cumulée pendant une rafale d'achats) qui s'efface en 3 s.
-func _add_gain(s: PortSim, g: float) -> void:
+func _add_gain(s: PortSim, g: float, pill: bool = true) -> void:
+	_lifts.append([s.time, g])
+	if not pill:
+		return
 	if s.time - _gain_time > 3.0:
 		_gain_sum = 0.0
 	_gain_sum += g
 	_gain_time = s.time
-	_lifts.append([s.time, g])
 	_show_pill("+%s $/s" % Fmt.num(_gain_sum), UI.MONEY)
 
 
@@ -1005,15 +1075,19 @@ func _flush_buy_fx(s: PortSim, force: bool = false) -> void:
 	var stat_now := _buy_stat(s, kind, id)
 	var pct := stat_now / float(fx.stat0) - 1.0 if float(fx.stat0) > 0.0 else 0.0
 	var g := float(fx.gain)
+	var gf := float(fx.get("fees", 0.0))
 	var pos := dept_anchor(id) + Vector3(0, 9, 0) if kind == "dept" else Layout.YARD_CENTER + Vector3(0, 8, 0)
 	var name := String(s.db.dept_by_id[id].name) if kind == "dept" and s.db.dept_by_id.has(id) else "Licence"
-	if g > 0.0:
+	if UpgradesSheet.moves_flow({"total": g, "flow": g - gf}):
 		overlay.add_popup(pos, "+%s/s" % Fmt.money(g), UI.MONEY, true)
 	else:
-		# hors goulot : l'achat n'est pas muet (revue D-UI) — l'effet du service, et pourquoi le revenu ne bouge pas
+		# hors goulot : l'achat n'est pas muet (revue D-UI) — l'effet du service, et pourquoi le débit ne bouge pas ; lot E :
+		# les services facturés montent quand même (« Portiques +6 % · pas le goulot (+15 $/s de services) »), en bleu, jamais
+		# comme un gain du port
 		var ptxt := "+%d %%" % maxi(1, roundi(pct * 100.0)) if pct > 0.0005 else "Niv. +%d" % int(fx.n)
 		overlay.add_popup(pos, ptxt, UI.INFO, true)
-		_show_pill("%s %s — pas le goulot" % [name, ptxt], UI.INFO)
+		var fee_txt := " (+%s/s de services)" % Fmt.money(gf) if gf * 60.0 >= 0.05 else ""
+		_show_pill("%s %s · pas le goulot%s" % [name, ptxt, fee_txt], UI.INFO)
 
 
 static func _buy_stat(s: PortSim, kind: String, id: String) -> float:
@@ -1061,32 +1135,16 @@ func _income_lift(s: PortSim) -> float:
 	return lift
 
 
-## Pastille d'Améliorer : achats abordables qui **rapportent** (gain de revenu > 0), ou qui font avancer le chapitre en
-## cours (le service dont le niveau ouvre le chapitre suivant). Les estimations rejouent l'analyse : une fois par seconde.
+## Pastille d'Améliorer : achats abordables **qui valent le coup** — le débit bouge et l'achat se rentabilise en moins de
+## 10 minutes (lot E : avec les services facturés, tout achat rapportait un peu et la pastille comptait 9 au T3) —, ou qui
+## font avancer le chapitre en cours (le service dont le niveau ouvre le chapitre suivant). Jamais un service sous un aléa.
+## Les estimations rejouent l'analyse : une fois par seconde.
 func _affordable_count(s: PortSim) -> int:
 	if s.time - _aff_t < 1.0 and s.time >= _aff_t:
 		return _aff_n
 	_aff_t = s.time
-	var n := 0
-	var base := -1.0
-	var goal := String(s.chapter_goal().get("dept", ""))
-	for d in PortSim.DEPTS:
-		if s.feature("dept_" + d) and s.dept_cost(d, 1) <= s.money:
-			if d == goal:
-				n += 1
-				continue
-			if base < 0.0:
-				base = s.income_estimate_with("harbor", 0)
-			if s.upgrade_gain(d, 1, -1, base) > 0.0:
-				n += 1
-	for ci in PortSim.NCARGO:
-		if s.unlocked[ci] == 1 and s.feature("licences") and s.licence_room(ci) > 0 and s.licence_cost(ci, 1) <= s.money:
-			if base < 0.0:
-				base = s.income_estimate_with("harbor", 0)
-			if s.upgrade_gain("", 1, ci, base) > 0.0:
-				n += 1
-	_aff_n = n
-	return n
+	_aff_n = worthwhile_count(s)
+	return _aff_n
 
 
 func _refresh_progress(s: PortSim) -> void:
@@ -1136,11 +1194,14 @@ func _on_ship_paid(world_pos: Vector3, amount: float) -> void:
 	if not target.is_visible_in_tree():
 		return
 	Sfx.play("coin", 0.15)
+	# lot E : le montant reste lisible 0,6 s, puis les pièces partent d'au-dessus de lui (jamais dessus)
 	Fx.coins(from, Fx.center_of(target), 7, func() -> void:
-		flash_money(target))
+		flash_money(target), COIN_DELAY, COIN_LIFT)
 
 
 var ships_paid_shown := 0      # encaissements affichés (tests)
+const COIN_DELAY := 0.6        # le « +X $ » d'un navire payé se lit seul pendant 0,6 s
+const COIN_LIFT := 150.0       # les pièces naissent 150 px au-dessus du point payé (au-dessus du texte)
 
 
 ## Bas des cartes du haut (ligne Goulot, bandeau des missions, aléa, notifications), en coordonnées écran : la surcouche
@@ -1180,6 +1241,8 @@ func useful_rect() -> Rect2:
 		# feuille mi-hauteur : tout le port visible au-dessus d'elle (le HUD du haut est replié), sous la carte du tutoriel
 		var hb := vs.y * Sheet.HALF_TOP - 8.0
 		var ht := 8.0
+		if ev_pill != null and ev_pill.visible:
+			ht = minf(hb - 60.0, ev_pill.get_global_rect().end.y + 8.0)      # sous la pastille d'aléa
 		if tutorial != null and tutorial._card != null and tutorial._card.is_visible_in_tree() and tutorial._card_top:
 			ht = minf(hb - 60.0, maxf(ht, tutorial._card.get_global_rect().end.y + 8.0))
 		return Rect2(8.0, ht, maxf(1.0, vs.x - 16.0), maxf(1.0, hb - ht))
@@ -1217,7 +1280,7 @@ func world_shake() -> void:
 
 ## Goulots qui se règlent par un bâtiment (le bouton du conseil ouvre Gestion → Bâtiments, ou la fiche du bâtiment tant que
 ## Gestion n'est pas révélée).
-const BUILD_KEYS := ["yard_space", "berth_count", "min_time", "attract"]
+const BUILD_KEYS := Advice.BUILD_KEYS
 
 
 ## Le conseil de goulot propose-t-il une action possible tout de suite (bâtiment, niveau, palier, campagne abordable) ?
@@ -1225,74 +1288,48 @@ static func hint_actionable(s: PortSim) -> bool:
 	return bool(hint_action(s).can)
 
 
-## Action proposée par la carte Goulot : quoi, combien, et possible tout de suite ou non (revue D-UI, phase 1).
-## {kind : "build" | "dept" | "tier" | "campaign" | "commerce" | "", id, cost, can, label}. Pour un goulot qui se règle
-## par un bâtiment, une amélioration abordable du service qui le soulage compte aussi (« parc trop petit » : l'empilage).
+## Action proposée par la carte Goulot (lot E : logique dans `Advice`, sans dépendance aux autoloads, testée par run_all).
 static func hint_action(s: PortSim) -> Dictionary:
-	var key: String = s.shown_analysis().get("key", "")
-	if key in BUILD_KEYS:
-		var bd := {}
-		var bid := Zones.next_building(s)
-		if bid != "":
-			var bc := float(s.db.building_by_id[bid].cost)
-			bd = {"kind": "build", "id": bid, "cost": bc, "can": bc <= s.money, "label": "%s · %s" % [Info.building_short(s, bid), Fmt.money(bc)]}
-		var dd := {}
-		if key == "yard_space" and s.feature("dept_yard_ops"):
-			dd = _dept_action(s, "yard_ops")
-		for a in [bd, dd]:
-			if not a.is_empty() and bool(a.can):
-				return a
-		for a in [bd, dd]:
-			if not a.is_empty():
-				return a
-		return {"kind": "", "id": "", "cost": 0.0, "can": false, "label": "CONSTRUIRE"}
-	if key == "tier":
-		return {"kind": "tier", "id": "", "cost": 0.0, "can": s.can_tier_up(), "label": "PALIER T%d" % (s.tier + 1)}
-	if key == "harbor" and s.feature("commerce"):
-		var best := {}
-		for c in Commerce.campaigns(s):
-			if Commerce.campaign_available(s, c) and Commerce.campaign_ready(s, c.id):
-				var cc := Commerce.campaign_cost(s, c.id)
-				var lab := "%s · %s" % [String(c.name).split(" ")[0].to_upper(), Fmt.money(cc)]
-				if cc <= s.money:
-					return {"kind": "campaign", "id": String(c.id), "cost": cc, "can": true, "label": lab}
-				if best.is_empty():
-					best = {"kind": "campaign", "id": String(c.id), "cost": cc, "can": false, "label": lab}
-		return best if not best.is_empty() else {"kind": "commerce", "id": "", "cost": 0.0, "can": false, "label": "COMMERCE"}
-	var d: String = s.shown_analysis().get("dept", "")
-	if d != "" and s.feature("dept_" + d):
-		return _dept_action(s, d)
-	return {"kind": "", "id": "", "cost": 0.0, "can": false, "label": "AMÉLIORER"}
+	return Advice.hint_action(s)
 
 
-static func _dept_action(s: PortSim, d: String) -> Dictionary:
-	var c := s.dept_cost(d, 1)
-	return {"kind": "dept", "id": d, "cost": c, "can": c <= s.money, "label": "AMÉLIORER %s · %s" % [String(Info.DEPT_SHORT.get(d, d.to_upper())), Fmt.money(c)]}
+static func fix_building(s: PortSim, key: String) -> String:
+	return Advice.fix_building(s, key)
+
+
+static func _fixes(key: String, e: Dictionary, s: PortSim) -> bool:
+	return Advice.fixes(key, e, s)
+
+
+## Nombre d'achats d'un niveau abordables qui valent le coup (pastille d'Améliorer, voir `Advice.worthwhile_count`).
+static func worthwhile_count(s: PortSim) -> int:
+	return Advice.worthwhile_count(s)
 
 
 func _on_hint_pressed() -> void:
 	var key: String = GameState.sim.shown_analysis().get("key", "")
 	GameState.sim.add_counter("hint_used")     # le tutoriel attend ce geste (« corrige le goulot »)
 	var act := hint_action(GameState.sim)
-	if String(act.kind) == "dept":
+	var kind := String(act.kind)
+	if kind == "dept":
 		open_upgrades(String(act.id))
 		return
-	if key in BUILD_KEYS:
+	if kind == "build" or (kind == "manage" and key in BUILD_KEYS):
 		# Gestion n'apparaît qu'au chapitre 3 : avant, le bouton ouvre la fiche du bâtiment, sur son emplacement doré
 		# (revue C7 B6 : pas de renvoi à un écran que le joueur ne voit pas encore)
-		var bid := Zones.next_building(GameState.sim)
-		if bid == "":
-			bid = Zones.first_unbuilt(GameState.sim)
+		var bid := String(act.id) if kind == "build" else Zones.first_unbuilt(GameState.sim)
 		if not GameState.sim.feature("manage") and bid != "" and Layout.LOTS.has(bid):
 			var lp: Vector3 = Layout.LOTS[bid].p
 			diorama.rig.focus(Vector3(lp.x - 4.0, 0.0, lp.z + 6.0))
 			open_building(bid)
 		else:
 			open_sheet(ManageSheet.new(0))
-	elif key == "harbor" and GameState.sim.feature("commerce"):
+	elif kind == "campaign" or kind == "commerce":
 		open_sheet(CommerceSheet.new(CommerceSheet.TAB_TRAFFIC))
-	elif key == "tier":
+	elif kind == "tier":
 		open_sheet(ManageSheet.new(3))
+	elif key == "fog":
+		Sfx.play("click")
 	else:
 		open_upgrades(GameState.sim.shown_analysis().get("dept", ""))
 
@@ -1379,7 +1416,11 @@ func open_sheet(s: Sheet) -> void:
 	for c in sheet_layer.get_children():
 		c.queue_free()
 	if s.half and not had_half:
-		_cam_back = diorama.rig.goal         # le cadrage du joueur, rendu à la fermeture de la feuille
+		# le cadrage **du joueur**, rendu à la fermeture de la feuille (lot E, E6) : pendant le regard de 2 s d'un chapitre,
+		# sa vue d'avant (`view_home`) ; sinon ce qu'il voit (`target`) — un toucher sur un poste du monde vient de viser le
+		# poste (`goal`), mais la caméra n'a pas encore bougé
+		_cam_back = diorama.view_home if diorama.view_home != Vector3.INF else diorama.rig.target
+		_cam_back.y = 0.0
 		_cam_set = Vector3.INF
 	elif not s.half and had_half:
 		_restore_camera()
@@ -1574,8 +1615,16 @@ func _sync_opening(delta: float) -> void:
 		_narration.visible = not covered
 	# bandeau : caché sous un écran ou une fenêtre ; le suivant (et le recentrage de la caméra) attend leur fermeture (C7 B4)
 	if _banner != null and is_instance_valid(_banner):
-		_banner.visible = not covered
-	if not op and not covered and _banner == null and not _banner_queue.is_empty():
+		var hidden := covered or ceremony_active()
+		_banner.visible = not hidden
+		# minuterie du bandeau suspendue tant qu'il est masqué (lot E, E6 : il expirait sous la feuille)
+		var btw: Variant = _banner.get_meta("tween", null)
+		if btw is Tween and (btw as Tween).is_valid():
+			if hidden and (btw as Tween).is_running():
+				(btw as Tween).pause()
+			elif not hidden and not (btw as Tween).is_running():
+				(btw as Tween).play()
+	if not op and not covered and not ceremony_active() and _banner == null and not _banner_queue.is_empty():
 		_next_banner()
 
 
@@ -1679,7 +1728,7 @@ const CHAPTER_LOOK := 2.0       # secondes sur le poste d'un service dont le cha
 
 func _queue_banner(title: String, text: String, icon_name: String, col: Color, focus: Vector3 = Vector3.INF, back: bool = false, feature_id: String = "") -> void:
 	_banner_queue.append({"title": title, "text": text, "icon": icon_name, "col": col, "focus": focus, "back": back, "feature": feature_id})
-	if _banner == null and not diorama.opening_active() and not _covered():
+	if _banner == null and not _banner_blocked():
 		_next_banner()
 
 
@@ -1732,8 +1781,10 @@ func _next_banner() -> void:
 		go.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		go.pressed.connect(func() -> void:
 			Sfx.play("click")
-			_close_banner(card)
-			act.call())
+			# lot E (E6) : l'écran s'ouvre **avant** que le bandeau se ferme — le suivant attend donc sa fermeture (avant, il
+			# paraissait et déplaçait la caméra juste avant l'ouverture de l'écran)
+			act.call()
+			_close_banner(card))
 		h.add_child(go)
 		banner_voir = go
 	add_child(card)
@@ -1750,6 +1801,7 @@ func _next_banner() -> void:
 	tw.tween_interval(6.5)
 	tw.tween_property(card, "modulate:a", 0.0, 0.4)
 	tw.tween_callback(_close_banner.bind(card))
+	card.set_meta("tween", tw)       # suspendu tant que le bandeau est masqué (sous un écran, une fenêtre, une cérémonie)
 	card.gui_input.connect(func(e: InputEvent) -> void:
 		var mb := e as InputEventMouseButton
 		if mb != null and mb.pressed:
@@ -1761,7 +1813,15 @@ func _close_banner(card: Control) -> void:
 		return
 	card.queue_free()
 	_banner = null
-	_next_banner()
+	# lot E (E6) : le suivant n'enchaîne pas sous un écran ou une fenêtre (ni pendant une ouverture de zone ou une
+	# cérémonie) ; `_sync_opening` le présentera au retour au port
+	if not _banner_blocked():
+		_next_banner()
+
+
+## Un bandeau ne peut pas paraître maintenant : écran, fenêtre, ouverture de zone ou cérémonie à l'écran.
+func _banner_blocked() -> bool:
+	return _covered() or (diorama != null and diorama.opening_active()) or ceremony_active()
 
 
 func _on_event(ev: Dictionary) -> void:
@@ -1776,10 +1836,69 @@ func _on_tier(t: int) -> void:
 	if t >= 4:
 		ceremony("Concession nationale !", "Le terminal de Port Horizon est à toi", UI.AMBER, "finale", Vector3.INF, _end_screen)
 		return
-	var body: Array = [UI.label(String(td.name), 44, UI.VIOLET), UI.wrap_label(String(td.story), 30, UI.TEXT),
-		UI.wrap_label("Nouveaux bâtiments et responsables, de nouveaux armateurs à démarcher et plus de lignes régulières (Commerce). +%d Ambre." % int(td.get("amber", 0)), 28)]
-	ceremony("Palier T%d atteint !" % t, String(td.name), UI.AMBER, "tier%d" % t if t <= 3 else "tier", tier_focus(t), func() -> void:
-		show_popup("Palier T%d atteint !" % t, body, "trophy"))
+	var tv := tier_view(GameState.sim, t)
+	ceremony("Palier T%d atteint !" % t, String(td.name), UI.AMBER, "tier%d" % t if t <= 3 else "tier", tv.get("p", Vector3.INF), func() -> void:
+		tier_popup(t))
+
+
+var tier_voir: Button          # bouton VOIR de la fenêtre du palier affichée (tests)
+
+
+## Fenêtre du palier (lot E, cérémonie qui montre) : le texte propre au palier, 2–3 icônes « ce qui s'ouvre »
+## (`tiers.json` → `opens`) et VOIR, qui cadre les zones qui s'ouvrent.
+func tier_popup(t: int) -> Control:
+	var td := GameState.sim.db.tier_def(t)
+	var body: Array = [UI.label(String(td.name), 44, UI.VIOLET), UI.wrap_label(String(td.story), 30, UI.TEXT)]
+	for o in td.get("opens", []):
+		var h := UI.hbox(14)
+		h.add_child(UI.icon_disc(String(o.get("icon", "info")), UI.AMBER, 76))
+		var l := UI.wrap_label(String(o.get("text", "")), 28, UI.TEXT)
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		h.add_child(l)
+		body.append(h)
+	if int(td.get("amber", 0)) > 0:
+		body.append(UI.wrap_label("+%d Ambre." % int(td.amber), 28, UI.AMBER.darkened(0.25)))
+	var buttons: Array = []
+	tier_voir = null
+	if not tier_view(GameState.sim, t).is_empty():
+		var go := UI.button("VOIR", UI.AMBER, 34, 100)
+		go.add_theme_color_override("font_color", UI.TEXT)
+		go.pressed.connect(func() -> void:
+			Sfx.play("click")
+			frame_tier(t))
+		buttons.append(go)
+		tier_voir = go
+	return show_popup("Palier T%d atteint !" % t, body, "trophy", buttons)
+
+
+## Ce que le palier `t` ouvre, à cadrer : la zone du prochain bâtiment s'il est de ce palier (Quai n°2 au T2, terre-plein et
+## quai profond n°3 au T3), sinon les zones ouvertes par le palier lui-même. {"p", "zoom"}, {} s'il n'y a rien à montrer.
+static func tier_view(s: PortSim, t: int) -> Dictionary:
+	var bid := Zones.first_unbuilt(s) if s != null else ""
+	if bid != "" and int(s.db.building_by_id[bid].tier) == t:
+		var z := Zones.zone_of(bid)
+		if not z.is_empty():
+			return Zones.focus(z)
+	var foc := tier_focus(t)
+	if foc == Vector3.INF:
+		return {}
+	var zoom := 70.0
+	for z in Layout.ZONES:
+		if String(z.get("open", "")) == "t%d" % t:
+			zoom = maxf(zoom, float(Zones.focus(z).get("zoom", 70.0)))
+	return {"p": foc, "zoom": zoom}
+
+
+## VOIR de la fenêtre du palier : la caméra cadre ce qui s'ouvre (centre et recul qui le font tenir à l'écran).
+func frame_tier(t: int) -> void:
+	if diorama == null or diorama.rig == null:
+		return
+	var v := tier_view(GameState.sim, t)
+	if v.is_empty():
+		return
+	diorama.rig.focus(v.p)
+	diorama.rig.zoom_goal = clampf(float(v.zoom), diorama.rig.zoom_min, diorama.rig.zoom_max)
 
 
 ## Centre des zones qui s'ouvrent avec le palier `t` (Vector3.INF s'il n'y en a pas).
@@ -1813,7 +1932,8 @@ func ceremony(title: String, sub: String, col: Color, jingle: String, focus: Vec
 	var layer := Control.new()
 	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	layer.mouse_filter = Control.MOUSE_FILTER_STOP
-	layer.z_index = 7
+	# lot E : plus de z_index (il passait au-dessus des fenêtres et en interceptait les touchers) — la couche est rangée juste
+	# sous `popup_layer` (voir plus bas), au-dessus du HUD, des écrans et du tutoriel
 	var veil := ColorRect.new()          # voile léger (pas une fenêtre : `_npopups` ne le compte pas)
 	veil.color = Color(0.1, 0.06, 0.3, 0.0)
 	veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

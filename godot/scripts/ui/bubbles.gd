@@ -16,7 +16,9 @@ static func anchor_point(model: String, base: Vector3) -> Vector3:
 ## (à droite ou à gauche, même hauteur), sinon au-dessus (jamais au-dessous : elle couvrirait ce qu'elle désigne) ; à défaut, décalages successifs (au plus 8).
 ## Lot D-UI : avec deux voisines, l'ancien décalage pouvait osciller entre elles et finir par-dessus l'une (« Touche ! » sous
 ## « Tablier plein », « +2,9 $ » sur « File : 0 »).
-static func settle(r: Rect2, placed: Array) -> Rect2:
+## Lot E : `inside` (le rectangle utile) — une place hors de lui n'est pas une place (au bord de l'écran, la bulle décalée
+## dehors était ramenée par `bound`… sur sa voisine).
+static func settle(r: Rect2, placed: Array, inside: Rect2 = Rect2()) -> Rect2:
 	if not _hits(r, placed):
 		return r
 	var best := Rect2()
@@ -26,7 +28,7 @@ static func settle(r: Rect2, placed: Array) -> Rect2:
 		for x in [qr.end.x + GAP, qr.position.x - r.size.x - GAP]:
 			var c := Rect2(Vector2(x, r.position.y), r.size)
 			var d := absf(x - r.position.x)
-			if d < best_d and not _hits(c, placed):
+			if d < best_d and _inside(c, inside) and not _hits(c, placed):
 				best = c
 				best_d = d
 	if best_d < INF:
@@ -39,12 +41,16 @@ static func settle(r: Rect2, placed: Array) -> Rect2:
 				continue
 			var c2 := Rect2(Vector2(r.position.x, y), r.size)
 			var d2 := absf(y - r.position.y) * 1.5
-			if d2 < best_d and not _hits(c2, placed):
+			if d2 < best_d and _inside(c2, inside) and not _hits(c2, placed):
 				best = c2
 				best_d = d2
 	if best_d < INF:
 		return best
 	return _settle_steps(r, placed)
+
+
+static func _inside(c: Rect2, inside: Rect2) -> bool:
+	return not inside.has_area() or inside.grow(0.5).encloses(c)
 
 
 static func _hits(r: Rect2, placed: Array) -> bool:
