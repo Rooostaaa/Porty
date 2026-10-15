@@ -32,4 +32,4 @@ Première version livrable.
 - **Lot F** : modèles de la crique, des chantiers et de la forêt ; navires et défilement (F1) ; le golfe et le départ de rien
   avec chantiers (F2) ; acte 0 de pêche (F3).
 - **Lot G** : modèles de la Crique complète, de la marina, des nuages et du terre-plein ; chapitre 1 « La Crique » (G1 :
-  places, services, Marcel, Concession à 500 $, nuages dissous à la bascule) .
+  places, services, Marcel, Concession à 500 $, nuages dissous à la bascule).
