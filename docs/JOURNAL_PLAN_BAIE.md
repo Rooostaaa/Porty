@@ -1898,3 +1898,17 @@ loin du terre-plein). Léon 5 min 07–5 min 18 (cible 6–8 : ≈ 50 s tôt ; P
 (16–18 min) ; le T2 a été préféré. Aucun camion perdu par le bot (délai humain 1–3 s), 24–29 tampons, 41–42 camions laissés
 passer avant Tonio. Le port complet des tests (`PortSim.new`) atteint désormais le T2 vers 9 min 15 (exigences du T2 baissées) :
 ce n'est plus le chemin du joueur.
+
+### G2 — Captures (`docs/captures/g2_*`, 540 × 960, toutes regardées)
+Parties chargées (`--fresh --load-sim`, états fabriqués par un script de session qui joue la sim depuis la Concession), rendu
+OpenGL sous Xvfb (pas de Vulkan ici). `g2_friche.png` (la friche nue, estacade, case dorée « Terrassement · 240 $ », carte
+« Prochaine étape : Terrassement ») ; `g2_ameliorer_friche.png` (une seule carte, aide « pièce par pièce ») ;
+`g2_chantier_terrassement.png` et `g2_chantier_quai.png` (palissade et engin ; grue de chantier sur le quai) ;
+`g2_grue_de_bord.png` (le caboteur à quai, grue de bord orange, conteneurs orange sur la plateforme, un second caboteur en rade) ;
+`g2_conteneurs_orange_verts.png` (tamponnés : blancs à étiquette verte ; restent orange ceux qui attendent) ;
+`g2_camion_barriere.png` (quatre camions sur la piste jusqu'à la barrière, bulles « Camion : touche la barrière » et
+« À tamponner : 2 ») ; `g2_plateforme_pleine.png` (piles pleines, bulle et carte Goulot rouges « Il faut une sortie ! ») ;
+`g2_leon_se_presente.png` (carte de la narratrice, bulle « Léon se présente » sur le quai) ; `g2_leon.png` (après l'embauche :
+plus de bulle d'accostage) ; `g2_ameliorer_leon.png` (Grue mobile en tête, puis Accostage) ; `g2_ameliorer_plus_tard.png`
+(Allongement du quai en tête, puis les services). Corrigé après lecture : conteneurs **noirs** (rendu OpenGL, voir G2-b), carte
+Goulot sans titre, bulle « en rade » à la friche, aide « Le département… » à la friche.
