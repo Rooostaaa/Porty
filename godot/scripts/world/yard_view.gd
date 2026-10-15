@@ -52,6 +52,7 @@ func rebuild(sim: PortSim) -> void:
 		arr.sort_custom(func(a: Vector3, c: Vector3) -> bool: return a.y < c.y if not is_equal_approx(a.y, c.y) else (a.x + a.z * 0.37) < (c.x + c.z * 0.37))
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true          # (lot G2 : sans couleur d'instance, le rendu de compatibilité OpenGL multiplie la couleur de sommet par 0)
 		mm.use_custom_data = true
 		var mname := "flatrack" if z == 3 else ("reefer40" if z == 1 else "container40")
 		if z == 0 and platform_mode and Assets.exists("container_ok"):
@@ -61,6 +62,7 @@ func rebuild(sim: PortSim) -> void:
 		mm.visible_instance_count = 0
 		for i in arr.size():
 			mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, arr[i]))
+			mm.set_instance_color(i, Color.WHITE)
 			mm.set_instance_custom_data(i, _slot_color(sim, z, i, 0.0))
 		zone_mm[z].multimesh = mm
 	_shown = PackedInt32Array([-1, -1, -1, -1])
@@ -76,12 +78,14 @@ func rebuild(sim: PortSim) -> void:
 				apron_slots.append(Vector3(float(b.x0) + 3.0 + i * 4.3, k * TIER, 0.9))
 	var am := MultiMesh.new()
 	am.transform_format = MultiMesh.TRANSFORM_3D
+	am.use_colors = true
 	am.use_custom_data = true
 	am.mesh = Assets.mesh("container40")
 	am.instance_count = apron_slots.size()
 	am.visible_instance_count = 0
 	for i in apron_slots.size():
 		am.set_instance_transform(i, Transform3D(Basis.IDENTITY, apron_slots[i]))
+		am.set_instance_color(i, Color.WHITE)
 		am.set_instance_custom_data(i, ShipView.cargo_color(sim, 0, i * 13 + 5))
 	apron_mm.multimesh = am
 

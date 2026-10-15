@@ -5,6 +5,7 @@ extends Control
 ## Lot B : chaque bulle de bâtiment est ancrée à `anchor_y` (assets_meta.json, sinon sommet de la boîte englobante + 0,4)
 ## et posée *au-dessus* de ce point ; deux bulles qui se chevauchent sont décalées latéralement (`Bubbles.settle`).
 
+const OFFER_NAMES := {"berths": "Léon", "customs": "Paul", "gate": "Tonio"}      # lot G2 : bulle du responsable qui se présente
 const MOOD_COL := [Color("#38B76A"), Color("#FFB020"), Color("#EB4D4B")]
 const PILL_H := 58.0        # texte des bulles et pancartes : 30 px sur 1080 (≈ 15 px sur un écran de 540, revue du 13/10)
 const GAP := 6.0            # écart entre le point d'ancrage et le bas de la bulle, et entre deux bulles décalées
@@ -113,20 +114,27 @@ func _draw() -> void:
 			if s.state == Ship.State.ANCHORED and not s.priority:
 				var v: ShipView = diorama.ship_views.get(s.id)
 				if v != null and _sp(v.bubble_point()).y - 62.0 > top_y:
-					_pill(_sp(v.bubble_point()) + Vector2(0, -62), "Touche pour accoster", UI.AMBER, "", UI.TEXT)
+					_pill(_sp(v.bubble_point()) + Vector2(0, -62), "Touche pour accoster", UI.AMBER, "", UI.TEXT, true, "berth_gesture")
 				break
 	# lot G2 — tamponner (la cabane), laisser passer et encaisser (la barrière : rouge avant que le camion reparte), et la
 	# plateforme pleine (« il faut une sortie »)
 	if sim.stamp_ready() and diorama.ready_bid("hut"):
 		var hp := _sp(anchor_point("customs_hut", Layout.CUSTOMS_HUT))
 		if hp.y > top_y + 30.0:
-			_pill_above(hp, "Tamponne : %d conteneurs" % roundi(sim.pending_total()), UI.AMBER, "customs", UI.TEXT, "stamp_gesture")
+			_pill_above(hp, "À tamponner : %d" % roundi(sim.pending_total()), UI.AMBER, "customs", UI.TEXT, "stamp_gesture")
 	if sim.pass_ready() and diorama.ready_bid("track"):
 		var bp2 := _sp(Layout.GATE + Vector3(-1.0, 3.0, 2.0))
 		var left := sim.truck_wait_left()
 		var late := left < float(sim.db.cfg("manual").get("truck_warn", 6.0))
 		if bp2.y > top_y + 30.0:
 			_pill_above(bp2, ("Camion : touche la barrière · %d s" % ceili(left)) if late else "Camion : touche la barrière", UI.BAD if late else UI.AMBER, "gate", Color.WHITE if late else UI.TEXT, "gate_gesture")
+	# lot G2 — un responsable des gestes s'est présenté (après 5 gestes) : une bulle à son poste tant qu'il n'est pas embauché
+	if sim.g2:
+		for d in PortSim.OFFER_ORDER:
+			if sim.mgr_offered.has(d) and not sim.managers[d]:
+				var op := _sp(Layout.manager_pos(d, sim.tier) + Vector3(0, 3.5, 0))
+				if op.y > top_y + 30.0:
+					_pill_above(op, "%s se présente" % String(OFFER_NAMES.get(d, "")), UI.MONEY, "people", Color.WHITE, "offer_" + d)
 	if sim.g2 and String(sim.shown_analysis().get("alert", "")) == "exit":
 		var ep := _sp(Layout.YARD_CENTER + Vector3(0, 6, 0))
 		if ep.y > top_y + 30.0:
@@ -141,7 +149,9 @@ func _draw() -> void:
 	var vw := get_viewport_rect().size.x
 	if useful.has_area():
 		rp = rp.clamp(useful.position + Vector2(110, 30), useful.end - Vector2(110, 30))
-	_pill(rp, "%d/%d en rade" % [waiting, sim.rade_places()], col, "ship", Color.WHITE, true, "rade")
+	# (lot G2 : la file en rade est le métier des Arrivées, qui n'apparaissent qu'avec le quai n°2)
+	if not sim.g2 or sim.feature("dept_harbor"):
+		_pill(rp, "%d/%d en rade" % [waiting, sim.rade_places()], col, "ship", Color.WHITE, true, "rade")
 	# douane : au-dessus du toit du bureau (anchor_y), jamais sur la table d'inspection
 	var pend := sim.pending_total()
 	if sim.feature("dept_customs") and (pend >= 1.0 or sim.shown_analysis().get("dept", "") == "customs"):

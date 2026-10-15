@@ -54,7 +54,7 @@
   "moor_time_min": 1.5,
   "formal_time_min": 1.5,
   "auto_berth_delay": 12,
-  "manual": {"express_pilot": 0.6, "board_crane_rate": 0.3, "truck_wait": 20, "truck_warn": 6, "gesture_offers": 5, "offer_gap": 45},
+  "manual": {"express_pilot": 0.6, "board_crane_rate": 0.125, "truck_wait": 20, "truck_warn": 6, "gesture_offers": 5, "offer_gap": 45},
   "manager_reveal_level": 10,
   "reveal_gap": 60,
   "reveal_gap_min": 45,

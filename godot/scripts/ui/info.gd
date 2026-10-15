@@ -125,7 +125,7 @@ static func mission_icon(m: Dictionary) -> String:
 
 
 static func per_min(v: float) -> String:
-	return Fmt.num(v * 60.0) + " EVP/min"
+	return Fmt.num(v * 60.0) + " conteneurs/min"
 
 
 ## Effet principal d'un département au niveau courant (ou avec `extra` niveaux de plus).
@@ -160,7 +160,7 @@ static func dept_detail(sim: PortSim, dept: String) -> String:
 		"harbor":
 			return "Pilotes : %d · Places en rade : %d · plancher %s s" % [sim.pilots(), sim.rade_places(), ("%.1f" % sim.min_time("pilot")).replace(".", ",")]
 		"berths":
-			return "Tablier : %s EVP · %d poste(s)" % [Fmt.num(sim.apron_capacity()), sim.berths.size()]
+			return "Tablier : %s conteneurs · %d poste(s)" % [Fmt.num(sim.apron_capacity()), sim.berths.size()]
 		"customs":
 			return "Formalités : %s s · %s" % [("%.1f" % sim.formal_duration()).replace(".", ","), String(sim.db.cfg("policies")[sim.policy].name)]
 		"cranes":
@@ -169,7 +169,7 @@ static func dept_detail(sim: PortSim, dept: String) -> String:
 				n += (b.cranes as Array).size()
 			return "%d grue(s) au total" % n
 		"yard_ops":
-			return "Empilage ×%s · Parc %s EVP" % [("%.2f" % sim.stack_factor()).replace(".", ","), Fmt.num(sim.yard_capacity())]
+			return "Empilage ×%s · Parc %s conteneurs" % [("%.2f" % sim.stack_factor()).replace(".", ","), Fmt.num(sim.yard_capacity())]
 		"gate":
 			return "%d voie(s) · attente camion %s s" % [sim.gate_lanes, ("%.0f" % sim.truck_wait_estimate())]
 	return ""

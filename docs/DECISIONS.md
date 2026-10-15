@@ -781,3 +781,33 @@ leur instant ne l'est pas : une fonction chargée compte comme révélée « dep
   dissoute avec les bancs. Plus rien ne se voit entre les nuages, à tous les zooms.
 - **Sonde depuis la Concession** (4 graines) : T2 **−2,5 %** en moyenne (g4 −14,6 %, g2 +9 %), T3 −1,7 %, fin −0,3 % (g3 +16 %) :
   dans la tolérance sans autre changement de l'économie du port — l'avance du T2 du lot G1 venait bien des Heures sup jouées au T1.
+
+## Chapitre 2 « Le Terre-plein » (lot G2) — 15/10 (ordre `docs/ORDRE_G2_TERREPLEIN.md`, cadrage `docs/CADRAGE_DEBUT.md` § 4, 6, 7, 11, 12, journal § « Lot G2 »)
+- **Deux régimes** : `PortSim.new` = port complet (tests, parties d'avant G2 : les six pièces du départ bâties d'office, règles
+  `legacy` de `unlocks.json`) ; partie jouée (Crique puis Concession, nouvelle concession) = `g2` : la friche nue, le processus
+  à la main. Sauvegarde **v8** (clé `g2`).
+- **Plus de séquence de chantiers** à la Concession : six bâtiments, un seul achat proposé à la fois en tête d'AMÉLIORER —
+  Terrassement **240 $**, Quai n°1 **310 $**, Cabane de douane **190 $**, Piste et barrière **250 $**, Grue mobile **60 $**,
+  Parc de stockage **80 $** —, puis les bâtiments du T1 d'avant (le Bureau de douane remplace la cabane). La bascule : nuages,
+  narratrice, cérémonie, **puis** le port ouvre (jamais pendant la dissolution).
+- **Gestes** (un responsable **remplace** le geste) : accoster (toucher le navire ; aucun accostage automatique sans Léon ni
+  Mathilde), décharger avec la **grue de bord** du caboteur (0,125 conteneur/s) tant qu'il n'y a pas de grue mobile, tamponner
+  (toucher la cabane dédouane tout le lot), laisser passer **et encaisser** (toucher la barrière : un camion de 2 conteneurs
+  charge, paie sa part et part ; non servi, il repart à vide après 20 s, bulle rouge 6 s avant). Coup de main grue, engin et
+  barrière express retirés.
+- **Responsables** Léon (50 $), Paul (60 $, passé du T2 au T1), Tonio (80 $) : après 5 gestes, un à la fois, à ≥ 45 s de toute
+  nouveauté, et **avant** les révélations ordinaires. Bulle à leur poste + carte de la narratrice. Embauche = carte du service.
+  Le premier révèle Heures sup (≈ 1 min après, file des révélations). Avant le premier responsable du port, le port se fige
+  hors-ligne (seule la pêche de Marcel rapporte).
+- **Cartes de service** : Accostage, Douane, Sortie camions à l'embauche ; Déchargement avec la grue mobile, Stockage avec le
+  parc, Arrivées avec le quai n°2 (sans carte « à venir »). Ordre : Arrivées · Accostage · Déchargement · Douane · Stockage ·
+  Sortie camions. Noms de métier ; « EVP » et « gate » chassés des textes du T1. La barre de palier paraît avec la première
+  carte de service (sans bandeau).
+- **Économie du T1 recalée** pour tenir le T2 malgré ≈ 4 min de processus à la main : `value_mult`/`dues_mult` du T1 1,8 → 2,2 ;
+  palier T2 : 4 500 conteneurs (8 500) et 11 000 $ (14 000). Mesure (4 graines, depuis la Concession) : premier camion 4 min 08–
+  4 min 18, T2 12:49 en moyenne (+3,4 %), T3 +1,0 %, fin +2,6 % (graine 2 +19 %). Grue mobile et parc à ≈ 4 min 25 (cible
+  8–12 non tenue : plus chers, ils repoussent le T2 de 1 à 2 min).
+- **Rendu** : MultiMesh teintés avec `use_colors` (blanc) en plus de `custom_data` — en OpenGL (repli sans Vulkan) ils étaient
+  noirs.
+- Tutoriel **version 9** (bienvenue, terrassement, quai, accoster, cabane, tamponner, piste, laisser passer, grue mobile, parc,
+  puis la suite). Contrôle « bandeaux autour du T2 » mesuré sur la partie jouée, plafond 8 (le dégraissage G3 doit le ramener à 4).

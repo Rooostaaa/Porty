@@ -1020,7 +1020,13 @@ static func hint_title_for(s: PortSim) -> String:
 	var key: String = s.shown_analysis().get("key", "")
 	var dept: String = s.shown_analysis().get("dept", "")
 	var dname: String = s.db.dept_by_id[dept].name if s.db.dept_by_id.has(dept) else ""
+	# lot G2 : la plateforme pleine (pas encore de sortie, ou on tarde) ; le terre-plein qui se bâtit, pièce par pièce
+	if String(s.shown_analysis().get("alert", "")) == "exit":
+		return "Il faut une sortie !"
 	match key:
+		"starter":
+			var sb := String(s.shown_analysis().get("building", ""))
+			return "Prochaine étape : " + (String(s.db.building_by_id[sb].name) if s.db.building_by_id.has(sb) else "bâtir")
 		"yard_space":
 			# capacité théorique (place × rotation), pas le remplissage : « saturé » contredisait une jauge verte (revue D-UI)
 			return "Goulot : parc trop petit"
@@ -2178,7 +2184,7 @@ func show_breakdown(title: String, stat: String, cargo_i: int = 0) -> void:
 	sep.color = UI.GREY
 	sep.custom_minimum_size.y = 3
 	body.append(sep)
-	var unit := "/EVP" if stat == "value" else ("" if stat.ends_with("speed") else " EVP/s")
+	var unit := "/conteneur" if stat == "value" else ("" if stat.ends_with("speed") else " conteneurs/s")
 	var tot := UI.label("Total : %s%s" % [Fmt.num(total), unit], 36, UI.VIOLET, true)
 	body.append(tot)
 	show_popup("Pourquoi ? — " + title, body, "info")
@@ -2192,7 +2198,7 @@ func _on_ship_tapped(id: int) -> void:
 	var od: Dictionary = s.db.owner_by_id[sh.owner]
 	var body: Array = []
 	body.append(UI.label("%s de %s (%s)" % [s.db.ship_by_id[sh.cls].name, od.name, od.home], 32, UI.TEXT))
-	body.append(UI.label("%s EVP · %s" % [Fmt.num(sh.evp_total), Ship.STATE_NAMES[sh.state]], 30, UI.MUTED))
+	body.append(UI.label("%s conteneurs · %s" % [Fmt.num(sh.evp_total), Ship.STATE_NAMES[sh.state]], 30, UI.MUTED))
 	var mix := ""
 	for c in PortSim.NCARGO:
 		if sh.left[c] > 0.5:
@@ -2240,7 +2246,7 @@ func _welcome_back(r: Dictionary) -> void:
 	body.append(h)
 	var roll := func(x: float) -> void: ml.text = "+" + Fmt.money(x)
 	ml.create_tween().tween_method(roll, 0.0, amount, 1.4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT).set_delay(0.25)
-	body.append(UI.label("%s EVP traités pendant ton absence" % Fmt.num(float(r.evp)), 30, UI.MUTED))
+	body.append(UI.label("%s conteneurs traités pendant ton absence" % Fmt.num(float(r.evp)), 30, UI.MUTED))
 	body.append(UI.wrap_label("Rendement hors-ligne : %s (%d responsable(s) sur %d). Chaque responsable augmente ce rendement." % [Fmt.pct(float(r.yield)), int(r.managers), PortSim.DEPTS.size()], 28))
 	var go := UI.button("ENCAISSER", UI.MONEY, 36, 110)
 	go.pressed.connect(func() -> void:
@@ -2256,7 +2262,7 @@ func _intro() -> void:
 	var body: Array = []
 	body.append(UI.wrap_label("La pêche de l'anse tourne toute seule ; derrière le cap, le vieux quai est rebâti… et tout un terminal reste à construire.", 32, UI.TEXT))
 	for line in [
-		["ship", "Les navires accostent, la grue décharge, les conteneurs gagnent le parc puis sortent par la gate."],
+		["ship", "Les navires accostent, la grue décharge, les conteneurs gagnent le parc puis sortent par la barrière, en camion."],
 		["upgrade", "Le maillon le plus lent est le goulot : la carte rouge en haut te dit quoi améliorer."],
 		["people", "Embauche des responsables : ils font tourner le port pour toi, même quand tu es parti."],
 	]:
@@ -2284,6 +2290,7 @@ var intro_shown := 0                  # (tests) cartes montrées
 var start_flow := false               # départ en cours (acte 0, bascule)
 var bascule_on := false               # la bascule vers le T1 se joue
 var bascule_t := -1.0                 # (tests) instant (horloge du diorama) du début de la bascule
+var bascule_over := false             # lot G2 : la cérémonie de la bascule est finie (le port n'ouvre pas avant)
 var fish_popups := 0                  # (tests) « +X $ » de débarques montrés
 var story_layer: Control              # carte de la narratrice pendant la bascule (null sinon)
 var _story_then: Callable
@@ -2374,7 +2381,9 @@ func _sync_start() -> void:
 	if not bascule_on and s.act0_ready():
 		_begin_bascule()
 	# le premier navire glisse vers le quai (chantiers finis) : le port ouvre (lot G1 : pas avant que les nuages soient partis)
-	if bascule_on and not diorama.start_flow_active() and not story_active() and not ceremony_active():
+	# (lot G2 : plus de séquence de chantiers qui retienne le départ — le port ouvre à la fin de la cérémonie, jamais pendant la
+	# dissolution des nuages ni sous la carte de la narratrice)
+	if bascule_on and bascule_over and not diorama.start_flow_active() and not story_active() and not ceremony_active():
 		s.open_port()
 		bascule_on = false
 		start_flow = false
@@ -2392,6 +2401,7 @@ func _intro_done() -> void:
 ## la cérémonie « Palier 1 — Le Vieux Quai » (la caméra passe le cap) et les chantiers.
 func _begin_bascule() -> void:
 	bascule_on = true
+	bascule_over = false
 	bascule_t = diorama._t
 	if GameState.sim.fishing.replay:
 		diorama.dissolve_clouds()
@@ -2430,7 +2440,7 @@ func _bascule_ceremony() -> void:
 	var td := GameState.db.tier_def(1)
 	ceremony("Palier 1 — %s" % String(td.get("name", "")), "De l'autre côté du cap", UI.AMBER, "tier1", Vector3(-70.0, 0, -6.0),
 		func() -> void:
-			diorama.start_t1_works()
+			bascule_over = true
 			_frame(G2_FRICHE_LOOK, G2_FRICHE_ZOOM))      # lot G2 : la friche nue, de l'autre côté du cap
 
 
@@ -2521,7 +2531,7 @@ func _end_screen() -> void:
 	var body: Array = []
 	body.append(UI.wrap_label("L'État te confie le terminal de Port Horizon pour 30 ans. Le vieux quai de pêche est devenu un terminal national.", 32, UI.TEXT))
 	body.append(UI.label("Temps de jeu : %s" % Fmt.duration(s.time), 30, UI.MUTED))
-	body.append(UI.label("EVP traités : %s" % Fmt.num(s.counter("evp")), 30, UI.MUTED))
+	body.append(UI.label("Conteneurs traités : %s" % Fmt.num(s.counter("evp")), 30, UI.MUTED))
 	body.append(UI.label("Escales : %s · Camions : %s" % [Fmt.num(s.counter("ships")), Fmt.num(s.counter("trucks"))], 30, UI.MUTED))
 	body.append(UI.wrap_label("Le port tourne toujours. Tu peux aussi ouvrir une nouvelle concession : tout repart de zéro, mais ton Renom ✦ " \
 		+ "accélère et enrichit chaque nouveau port.", 28))

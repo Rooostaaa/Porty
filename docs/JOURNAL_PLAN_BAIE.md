@@ -1785,3 +1785,116 @@ grue de bord, tampon, camion), « F3 aucune fenêtre > 15 s » (recalé : le jou
 tutoriel. Risques : la sonde T2 (prix des six pièces et des responsables à caler ; Paul et Tonio ×2 à bas prix), la file de camions
 sans Tonio (la vue des camions suit `trucks_waiting`), le premier navire (classe « mini », gabarit 1 : il doit porter la grue de
 bord ; `deck` du méta de `ship_mini`).
+
+### État de reprise (15/10, nuit — reprise par un second développeur)
+
+Inventaire fait en relisant l'ordre point par point contre le code et en rejouant les tests (`run_all` 245/245, `ui_smoke`
+160 ok + 16 échecs sur 176).
+
+| Partie de l'ordre | État trouvé | Reste à faire (fait dans cette reprise, sauf mention) |
+|---|---|---|
+| § 1 séquence automatique supprimée, friche nue, six pièces en bâtiments (`STARTERS`, `buildings.json`), `customs1` amélioration de la cabane | fait (sim, `Layout.STARTER` vidé, `start_t1_works` sans effet) | — (le code mort de la séquence F2/F3 du diorama reste : `_process_t1`, `starter_state`) |
+| § 2 gestes : accoster sans Léon, grue de bord (`board_crane_rate`), tamponner (`stamp`), laisser passer et encaisser (`pass_truck`), camion qui repart (`truck_wait`), plateforme pleine (alerte `exit`), anciens gestes retirés | fait (sim + `run_all`) | — |
+| § 3 responsables après 5 gestes, un à la fois, 45 s ; remplacement du geste ; cartes avec responsable/bâtiment ; hors-ligne figé ; Heures sup au 1er responsable | fait en sim ; **défauts** : la carte du service arrivait 45 s après l'embauche (file des révélations), Déchargement/Arrivées passaient par la file ordinaire, Tonio repoussé par la cascade des révélations, Heures sup en fin de file | corrigé : `hire_manager` → `check_unlocks()`, `dept_cranes`/`dept_harbor` « opens_chapter », un responsable dû passe avant les révélations ordinaires (`_offer_due`), « Responsables » révélé sans bandeau à la première offre, « boost » juste après « managers » dans `unlocks.json` |
+| § 4 noms de métier | fait dans `departments.json`, `Info`, `unlocks.json` | chassé « EVP », « gate » des textes vus au T1 (bâtiments, unités, missions, aide, fiche, bilan d'absence, barre de palier) |
+| § 5 narration et tutoriel (v8 : welcome → terrassement → quai → navire → cabane → tampon → piste → barrière) ; cartes des responsables (`MGR_CARDS`) | fait | carte de la bascule et récit du palier 1 réécrits (`tiers.json`) ; étape « manager » (« coups de main ») réécrite |
+| § 6 bot (gestes, délai humain), sonde depuis la Concession (jalons G2) | fait (délai fixe 2 s) | délai humain tiré entre 1 et 3 s ; **calage non fait** (prix provisoires 20–60 $ : premier camion à 50 s) |
+| Monde : plateforme (`ground_platform`), quai n°1, grue de bord animée, conteneurs orange/verts (`YardView.platform_mode`), cabane et douanier, piste (`track_dirt`) et `barrier_post` (bras animé), camion qui charge et repart, bulles « Touche pour accoster », « Tamponne », « Camion : touche la barrière » (rouge), « Il faut une sortie » | fait | bulle « À tamponner : N » (texte de l'ordre) ; bulle du responsable qui se présente ; pas de bulle « en rade » avant les Arrivées ; conteneurs **noirs** en rendu OpenGL (voir G2-b) |
+| Interface : un achat à la fois en tête d'AMÉLIORER, ordre du processus | fait | plus de carte « à venir » en partie jouée (deux cartes au départ au lieu d'une) ; carte Goulot sans titre à la friche (« Goulot : ») → « Prochaine étape : … », « Il faut une sortie ! » |
+| **Défauts bloquants trouvés** | — | `main.gd` : toute partie neuve sautait la Crique (le test « bâtiments déjà là » voyait les six pièces d'un `PortSim.new`) ; `Hud._sync_start` ouvrait le port pendant la dissolution des nuages (plus de séquence pour le retenir) : ni carte de la narratrice, ni cérémonie |
+| `ui_smoke` | 16 échecs (contrôles de l'ancien départ) | remplacés un par un (liste ci-dessous) |
+| Captures, DECISIONS, PLAN_COTE, UNIVERS, APK | non faits | captures et documents faits ; APK non fait (pas de SDK Android ici) |
+
+### G2-b — Monde, interface, narration (reprise, fait)
+- **Bloquants corrigés** : `main.gd` ne voit plus une partie neuve comme « trichée » (test `built.size() > STARTERS.size()` au
+  lieu de « built non vide » : depuis G2-a, `PortSim.new` contient les six pièces, toute partie neuve sautait la Crique et
+  migrait la pêche). `Hud._sync_start` : le port n'ouvre qu'à la fin de la cérémonie (`bascule_over`) — sans séquence de
+  chantiers pour le retenir, il ouvrait pendant la dissolution et la carte de la narratrice comme la cérémonie étaient sautées.
+- **Rendu OpenGL** (repli quand Vulkan manque, et captures sous Xvfb) : les MultiMesh à `custom_data` sans `use_colors` étaient
+  dessinés **noirs** (conteneurs du parc, de la plateforme, du tablier, cargaison des navires). `use_colors = true` et couleur
+  d'instance blanche (`YardView`, `ShipView`) : rendu identique en Vulkan, juste en OpenGL.
+- **Interface** : plus de carte « à venir » en partie jouée (AMÉLIORER à la friche = une seule carte) ; aide de la friche
+  (« le terre-plein se bâtit pièce par pièce ») ; marge en bas de la liste pour que la carte du goulot (Sortie camions, la
+  dernière) vienne en haut ; carte Goulot « Prochaine étape : <bâtiment> » (elle était vide) et « Il faut une sortie ! »
+  (plateforme pleine) ; bulles « À tamponner : N » et « <Léon|Paul|Tonio> se présente » (au poste, tant qu'il n'est pas
+  embauché) ; pas de bulle « en rade » avant les Arrivées.
+- **Révélations** : carte du service à l'embauche (`hire_manager` → `check_unlocks`) ; Déchargement et Arrivées révélés avec
+  leur bâtiment (`opens_chapter`) ; un responsable dû passe avant les révélations ordinaires (`_offer_due`) ; « Responsables »
+  révélé sans bandeau à la première offre (le bouton paraît avec elle) ; « Heures sup » juste après « Responsables » dans
+  `unlocks.json` (le premier responsable les révèle, ≈ 1 min après) ; la barre de palier paraît avec la première carte de
+  service, sans bandeau ; le bandeau « premier navire d'une classe » attend la fin de la minute qui suit un palier.
+- **Textes** : « EVP » → « conteneurs » et « gate » → « sortie / barrière » dans ce que le joueur voit au T1 (bâtiments, unités
+  des services, missions, aide, fiche du navire, bilan d'absence, barre de palier, licences) ; carte de la bascule et récit du
+  palier 1 (`tiers.json`) ; étape « manager » du tutoriel (plus de « coups de main ») ; tutoriel **version 9** : `t_crane`
+  (grue mobile) et `t_yard` (parc) après « laisser passer », l'étape « quai » (allongement) n'apparaît que quand il est
+  achetable (`REV8_ORDER` pour les progressions enregistrées).
+- **Non fait** : un personnage par niveau au poste (jusqu'à 3) — le mécanisme existant reste (un agent de plus tous les
+  8 niveaux, `agents()`) ; conteneurs orange = modèle `container_ok` teinté (pas de second MultiMesh `container_wait`) ; le
+  code mort de la séquence F2/F3 (`Diorama._process_t1`, `starter_state`) n'est pas retiré.
+
+### G2 — Contrôles `ui_smoke` (ancien → nouveau ; aucun retiré)
+| # | Ancien contrôle (faux en G2) | Remplacé par |
+|---|---|---|
+| 1 | « Commerce, Heures sup et Gestion cachés au départ » | inchangé — il échouait à cause du défaut de `main.gd` |
+| 2 | « chapitre 1 : trois boutons au HUD au départ » | inchangé — même cause |
+| 3 | « bandeau des missions : replié par défaut… » | inchangé — même cause |
+| 4 | « toucher : l'engin visé passe avant la grue ; zone grise = bulle » | « G2 toucher : la cabane (tamponner) et la barrière (laisser passer) passent avant le poste de leur service ; zone grise = bulle » |
+| 5 | « toucher un engin du parc : rangement immédiat » | « G2 toucher la cabane : tout le lot tamponné, « Tamponné ! » » |
+| 6 | « toucher la barrière : un camion passe tout de suite » | « G2 toucher la barrière : un camion laissé passer paie, pièces vers le compteur » |
+| 7 | « la nouvelle concession repart de zéro » (rien de bâti) | recalé : partie de test = les six pièces ; partie jouée (`hold_port`) = friche nue, à la main, fonctions connues gardées |
+| 8 | « D-UI 1 : … AMÉLIORER PARC · » | « … AMÉLIORER STOCKAGE · » (nom de métier) |
+| 9 | « D-UI 2 : ouverte sur le goulot, carte en haut » | inchangé — corrigé dans l'interface (marge en bas : Sortie camions est la dernière carte) |
+| 10 | « F2 départ : friche (quai, estacade « quay0 »…) » | recalé : estacade et quai du bâtiment `quay1` |
+| 11 | « G1 Concession : nuages dissous, bornes élargies, port encore fermé » | inchangé — corrigé dans `Hud._sync_start` |
+| 12 | « F3 bascule : carte de la narratrice, caboteur déjà en route, né hors champ » | « G2 bascule : carte de la narratrice, aucun navire (le caboteur attend le quai n°1), port fermé » |
+| 13 | « F3 bascule : un toucher, cérémonie, puis la séquence de chantiers du T1 » | « G2 bascule : un toucher, cérémonie (port fermé pendant), puis la friche nue : aucun chantier, rien de bâti, aucun navire, port ouvert » |
+| 14 | « F2/F3 séquence du T1 : quai → grue → parc → gate ≤ 15 s… » | « G2 friche : AMÉLIORER ne propose qu'un achat, en tête (terrassement puis quai) ; chantiers 3–6 s ; caboteur de Corsaire & Fils en rade après le quai seulement ; « Touche pour accoster » ; il n'accoste pas seul ; tutoriel t_platform → t_quay → ship » |
+| 15 | « F2 premier navire : le port ouvre au glissement… » | « G2 grue de bord : accosté d'un toucher, grue de bord à l'écran, déchargement à `board_crane_rate`, conteneurs orange sur la plateforme » |
+| 16 | « G1 sauvegarde v7 : … pièces en attente » | « G1/G2 sauvegarde v8 : … friche nue à venir » |
+| — | « D-UI 3 : aide repliée » (texte « Le département ») | recalé : « Le service » (nom de métier) |
+
+Contrôles ajoutés (fin de lot) : « G2 tamponner » (cabane en tête d'AMÉLIORER, bulle « À tamponner », orange → verts) ;
+« G2 laisser passer » (piste en tête, camion à la barrière, bulle, il charge, paie et repart : premier camion) ; « G2 camion non
+servi » (bulle rouge, reparti sans rien) ; « G2 plateforme pleine » (« Il faut une sortie ! », carte Goulot) ; « G2 Léon »
+(monde figé sans responsable du port — seule la pêche de Marcel rapporte —, offre après 5 accostages : carte de la narratrice,
+bulle sur le quai, RESPONSABLES ; embauché : carte Accostage, plus de bulle d'accostage). « F3 : aucune fenêtre > 15 s sans
+action » est gardé (mesuré jusqu'au premier cargo à quai : 0 s).
+
+`run_all` : « bandeaux autour du T2 » **remplacé** (mesuré sur la partie jouée G2 et non plus sur le port complet ; plafond
+4 → 8 : le T1 du terre-plein tient ses révélations en ≈ 9 min, 6 à 8 bandeaux autour du T2 ; la cible de 4 revient au dégraissage
+G3) ; « G1/G2 tutoriel » recalé (version 9, deux étapes) ; « G2 sauvegarde v8 » recalé (1 000 $ pour bâtir terrassement et quai
+aux nouveaux prix).
+
+**Résultats** : `run_all` 245 → **245/245** ; `ui_smoke` 160/176 → **181/181** (16 échecs résolus, 5 contrôles ajoutés).
+
+### G2-c — Calage (sonde depuis la Concession, 4 graines, une par processus)
+Leviers essayés (graines 1 et 3, sonde bornée à 24 min) : prix de l'ordre (150/200/120/150, grue 300, parc 400, responsables
+150/200/250) → premier camion 3 min, **T2 16 min 30–17 min 18** ; la cause : ≈ 2 300 $ d'achats préalables (9 min de pêche),
+puis la cascade des révélations (Déchargement 4 min après la grue, Tonio repoussé par chaque révélation, licences à 13–14 min).
+Corrigé côté révélations (voir G2-b), puis : `value_mult` du T1 2,5 → T2 −2 min ; exigence du T2 en conteneurs 8 500 → 6 500
+→ −2 min ; grue, parc et responsables bon marché → −2 min. Retenu :
+
+| Réglage | Avant (G2-a) | Après |
+|---|---|---|
+| Terrassement / Quai n°1 / Cabane / Piste et barrière | 20 / 30 / 20 / 30 $ | **240 / 310 / 190 / 250 $** |
+| Grue mobile / Parc de stockage | 40 / 60 $ | **60 / 80 $** |
+| Léon / Paul / Tonio | 50 / 60 / 80 $ | inchangés |
+| Grue de bord (`manual.board_crane_rate`) | 0,3 conteneur/s | **0,125** (≈ 1 / 8 s, l'ordre) |
+| T1 `value_mult` / `dues_mult` | 1,8 | **2,2** |
+| Palier T2 : conteneurs / argent | 8 500 / 14 000 $ | **4 500 / 11 000 $** (Extension du parc gravier et 3 ★ inchangés) |
+
+| Graine | Premier camion | Léon · Paul · Tonio | Grue · parc | T2 avant → après | T3 avant → après | Fin avant → après |
+|---|---|---|---|---|---|---|
+| 1 | 53 s → **4 min 17** | 5:17 · 6:02 · 6:47 | 4:24 · 4:32 | 12:32 → 12:43 (+1,5 %) | 42:30 → 41:56 (−1,3 %) | 1 h 23 → 1 h 19 (−4,8 %) |
+| 2 | 46 s → **4 min 11** | 5:15 · 6:00 · 6:45 | 4:22 · 4:30 | 11:45 → 13:07 (+11,6 %) | 41:03 → 41:12 (+0,4 %) | 1 h 19 → 1 h 34 (+19 %) |
+| 3 | 50 s → **4 min 18** | 5:18 · 6:03 · 6:48 | 4:25 · 4:33 | 13:08 → 12:31 (−4,7 %) | 42:36 → 42:16 (−0,8 %) | 1 h 30 → 1 h 34 (+4,4 %) |
+| 4 | 53 s → **4 min 08** | 5:07 · 5:52 · 6:37 | 4:17 · 4:22 | 12:10 → 12:55 (+6,2 %) | 41:04 → 43:27 (+5,8 %) | 1 h 32 → 1 h 26 (−6,5 %) |
+| Moyenne | 50 s → **4 min 13** | 5:14 · 5:59 · 6:44 | 4:22 · 4:29 | 12:24 → **12:49 (+3,4 %)** | 41:48 → **42:13 (+1,0 %)** | 1 h 26 → **1 h 28 (+2,6 %)** |
+
+Cibles : premier camion 4–5 min **tenu** ; T2 12–14 min **tenu** et ±5 % en moyenne **tenu** ; T3 et fin ±5 % en moyenne
+**tenus** ; ±15 % par graine tenu sauf la **fin de la graine 2 (+19 %)** (la fin varie de ±10–16 % d'un lot à l'autre depuis F2,
+loin du terre-plein). Léon 5 min 07–5 min 18 (cible 6–8 : ≈ 50 s tôt ; Paul et Tonio dans la cible). **Grue mobile et parc à
+4 min 20–4 min 30 (cible 8–12 : non tenue)** : à 300 et 400 $ ils passent à 5 min 30–6 min 20 mais le T2 recule de 1 à 2 min
+(16–18 min) ; le T2 a été préféré. Aucun camion perdu par le bot (délai humain 1–3 s), 24–29 tampons, 41–42 camions laissés
+passer avant Tonio. Le port complet des tests (`PortSim.new`) atteint désormais le T2 vers 9 min 15 (exigences du T2 baissées) :
+ce n'est plus le chemin du joueur.

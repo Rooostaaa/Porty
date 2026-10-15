@@ -4,7 +4,7 @@ extends Node
 signal changed()
 
 const PATH := "user://settings.cfg"
-const TUTO_REV := 8                # liste d'étapes du tutoriel (data/tutorial.json) : 5 = le parc avant Yasmine (revue C7 B5)
+const TUTO_REV := 9                # liste d'étapes du tutoriel (data/tutorial.json) : 5 = le parc avant Yasmine (revue C7 B5)
                                    # 6 = lot F3, trois étapes de l'acte 0 en tête (ponton, barque, criée)
                                    # 7 = lot G1, sept étapes de la Crique (ponton, loyer, places, criée, Marcel, mission, Concession)
                                    # 8 = lot G2, le premier navire à la main (terrassement, quai, accoster, cabane, tamponner, piste,

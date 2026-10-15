@@ -46,6 +46,7 @@ var mgr_offered: Dictionary = {}       # responsable des gestes -> instant où i
 var has_hut := false
 var has_gate := false
 var truck_wait_t := 0.0                # s d'attente du camion en tête (régime manuel, sans Tonio)
+var _class_first_wait: Array[Ship] = []   # premiers navires d'une classe arrivés pendant la minute qui suit un palier (non sauvegardé)
 var _fish_earn_cb: Callable
 var _fish_land_cb: Callable
 
@@ -200,6 +201,7 @@ func reset() -> void:
 	_rade_full_t = 0.0
 	_bn_time.clear()
 	_bn_last = 0.0
+	_class_first_wait.clear()
 	owners_on.clear()
 	lines.clear()
 	line_offers.clear()
@@ -921,7 +923,11 @@ func _arrivals(dt: float) -> void:
 	pending_arrival = {}
 	ship_spawned.emit(s)
 	if counter("arrived_" + s.cls) == 0.0 and s.cls != String(db.ships[0].id):
-		ship_class_first.emit(s)
+		# (reprise G2 : pas de bandeau pendant la minute qui suit un palier — il attend la fin de `reveal_tier_hold`)
+		if time - last_tier_t < float(db.cfg("reveal_tier_hold", 0.0)):
+			_class_first_wait.append(s)
+		else:
+			ship_class_first.emit(s)
 	add_counter("arrived_" + s.cls)
 
 
@@ -1251,9 +1257,23 @@ func _check_offers() -> void:
 		if int(gestures.get(GESTURE_OF[d], 0)) >= int(m.get("gesture_offers", 5)) and not managers[d]:
 			mgr_offered[d] = time
 			last_reveal_t = time
+			# (le bouton RESPONSABLES paraît avec le premier qui se présente : la révélation « Responsables » est faite, sans bandeau)
+			if not features.has("managers"):
+				features["managers"] = time
 			manager_offered.emit(d)
 			notify.emit("%s se présente : embauche-le (Responsables), il le fera pour toi." % String(db.dept_by_id[d].manager.name), "info")
 		return
+
+
+## Lot G2 : un responsable des gestes a mérité de se présenter (5 gestes) mais attend son tour (`offer_gap`).
+func _offer_due() -> bool:
+	if not g2:
+		return false
+	var m: Dictionary = db.cfg("manual")
+	for d in OFFER_ORDER:
+		if not mgr_offered.has(d) and not managers[d] and int(gestures.get(GESTURE_OF[d], 0)) >= int(m.get("gesture_offers", 5)):
+			return true
+	return false
 
 
 func missions_claimable() -> int:
@@ -1374,7 +1394,7 @@ func unlock_text(id: String) -> String:
 	if w.has("ships"):
 		return "après %d escales (%d/%d)" % [int(w.ships), mini(int(counter("ships")), int(w.ships)), int(w.ships)]
 	if w.has("evp"):
-		return "après %s EVP déchargés" % Fmt.num(float(w.evp))
+		return "après %s conteneurs déchargés" % Fmt.num(float(w.evp))
 	if w.has("tier"):
 		return "au palier T%d" % int(w.tier)
 	if w.has("amber"):
@@ -1394,6 +1414,11 @@ func unlock_text(id: String) -> String:
 func check_unlocks() -> void:
 	if time - last_tier_t < float(db.cfg("reveal_tier_hold", 0.0)):
 		return
+	if not _class_first_wait.is_empty():
+		for w in _class_first_wait:
+			if ships.has(w):
+				ship_class_first.emit(w)
+		_class_first_wait.clear()
 	var pick := ""
 	for pass_i in 2:
 		for u in db.unlocks:
@@ -1402,6 +1427,8 @@ func check_unlocks() -> void:
 				continue
 			if pass_i == 1 and not _reveal_gap_over():
 				return
+			if pass_i == 1 and _offer_due():
+				return          # lot G2 : un responsable des gestes attend de se présenter — il passe avant les révélations ordinaires
 			if unlock_ok(unlock_when(u)):
 				pick = id
 				break
@@ -1412,6 +1439,9 @@ func check_unlocks() -> void:
 	last_reveal_t = time
 	last_reveal_id = pick
 	features[pick] = time
+	# lot G2 : la barre de palier paraît avec la première carte de service du port (cadrage § 8.1), sans bandeau à elle
+	if g2 and pick.begins_with("dept_") and not features.has("progress"):
+		features["progress"] = time
 	if pick == "events":
 		next_event_at = maxf(next_event_at, time + 60.0)   # le premier aléa laisse une minute de répit
 	elif pick == "contracts":
@@ -2210,6 +2240,7 @@ func hire_manager(dept: String, with_amber: bool = false) -> bool:
 	add_counter("managers")
 	purchased.emit("manager", dept)
 	notify.emit("%s rejoint le port !" % m.name, "good")
+	check_unlocks()          # lot G2 : la carte de son service apparaît à l'embauche (Accostage, Douane, Sortie camions)
 	_refresh_analysis()
 	return true
 
@@ -2266,7 +2297,7 @@ func tier_check() -> Array[Dictionary]:
 	var req := tier_requirements(tier + 1)
 	if req.is_empty():
 		return out
-	out.append({"label": "EVP traités", "have": counter("evp"), "need": float(req.evp), "ok": counter("evp") >= float(req.evp)})
+	out.append({"label": "Conteneurs traités", "have": counter("evp"), "need": float(req.evp), "ok": counter("evp") >= float(req.evp)})
 	out.append({"label": "Réputation", "have": stars(), "need": float(req.stars), "ok": stars() >= float(req.stars)})
 	for bid in req.get("buildings", []):
 		out.append({"label": String(db.building_by_id[bid].name), "have": 1.0 if built.has(bid) else 0.0, "need": 1.0, "ok": built.has(bid), "building": true})

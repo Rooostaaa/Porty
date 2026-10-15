@@ -137,26 +137,28 @@ func _run() -> void:
 			outside.append(String(k))
 	check(not ov.last_rects.has("gate") and not ov.last_rects.has("yard") and outside.is_empty() and ov.last_rects.has("rade"),
 		"bulles : ni parc ni gate avant leur chapitre, toutes dans le rectangle utile (%s ; hors cadre : %s)" % [str(ov.last_rects.keys()), str(outside)])
-	# priorité des touchers : l'engin touché passe avant la grue (plus petit rapport distance / rayon) ; zone grise = bulle
+	# priorité des touchers (lot G2, remplace « l'engin touché passe avant la grue » : le coup de main à la grue et l'engin du
+	# parc n'existent plus) — la cabane qui attend son tampon et la barrière où un camion attend passent avant le poste de leur
+	# service, touchés au même endroit ; une zone grise reste une bulle
 	var dio0 := hud.diorama
-	s.features["dept_yard_ops"] = s.time
-	s.apron[0] = maxf(s.apron[0], 10.0)
-	var cv0: CraneView = dio0.crane_views[0]
-	var veh0: Node3D = dio0.traffic.vehicles[0].node if not dio0.traffic.vehicles.is_empty() else null
-	var pick_k := ""
-	if veh0 != null and not s.ships.is_empty():
-		# un navire en déchargement au poste 1 (la grue peut recevoir un coup de main), le temps du contrôle
-		var sh0: Ship = s.ships[0]
-		var st0 := sh0.state
-		var bs0 := int(s.berths[0].ship)
-		sh0.state = Ship.State.UNLOADING
-		s.berths[0].ship = sh0.id
-		veh0.position = cv0.position + Vector3(4.0, 0, 5.0)        # à 6,4 u de la grue (rayon 8), à 0,5 u du point touché
-		var tap := veh0.position + Vector3(0.3, 0, 0.4)
-		pick_k = "%s (grue %s, engin %s)" % [String(dio0.pick_tap(tap).get("kind", "")), s.assist_ready(cv0.berth), s.yard_boost_ready()]
-		sh0.state = st0
-		s.berths[0].ship = bs0
-	s.features.erase("dept_yard_ops")
+	var g2_0 := s.g2
+	var had_f := {"dept_customs": s.features.has("dept_customs"), "dept_gate": s.features.has("dept_gate")}
+	var st_save := [s.yard_pending[0], s.yard_cleared[0], s.truck_queue]
+	s.g2 = true
+	s.features["dept_customs"] = s.time
+	s.features["dept_gate"] = s.time
+	s.yard_pending[0] = maxf(s.yard_pending[0], 6.0)
+	s.yard_cleared[0] = maxf(s.yard_cleared[0], 6.0)
+	s.truck_queue = maxf(s.truck_queue, 4.0)
+	var pick_k := "%s / %s (tampon %s, camion %s)" % [String(dio0.pick_tap(Layout.CUSTOMS_HUT + Vector3(0.6, 0, 0.4)).get("kind", "")),
+		String(dio0.pick_tap(Layout.GATE + Vector3(0.6, 0, 0.4)).get("kind", "")), s.stamp_ready(), s.pass_ready()]
+	s.g2 = g2_0
+	for fk in had_f:
+		if not bool(had_f[fk]):
+			s.features.erase(fk)
+	s.yard_pending[0] = float(st_save[0])
+	s.yard_cleared[0] = float(st_save[1])
+	s.truck_queue = float(st_save[2])
 	# revue N10 : un navire qui en rattrape un autre allant dans le même sens attend derrière lui (pas l'inverse, ni en croisant)
 	var up2 := Vector2(0, 1)
 	var f_follow := Diorama.follows(Vector2(-33, -80), up2, 22.0, Vector2(-33, -62), up2, 22.0)
@@ -168,8 +170,8 @@ func _run() -> void:
 	var pops_z := _npop(hud)
 	dio0._on_tapped(Vector3(-33, 0, 34), Vector2.ZERO)        # enceinte de la douane, grise au départ (lot D : recalé, ex-« La Porte » en (-30, 50))
 	await _wait(2)
-	check(pick_k.begins_with("vehicle (grue true") and _npop(hud) == pops_z and int(ov.zone_info.get("id", 0)) == 3,
-		"toucher : l'engin visé passe avant la grue (%s) ; une zone grise montre une bulle de 2 s, pas une fenêtre" % pick_k)
+	check(pick_k.begins_with("hut / barrier (tampon true, camion true") and _npop(hud) == pops_z and int(ov.zone_info.get("id", 0)) == 3,
+		"G2 toucher : la cabane (tamponner) et la barrière (laisser passer) passent avant le poste de leur service (%s) ; une zone grise montre une bulle de 2 s, pas une fenêtre" % pick_k)
 	ov.zone_info = {}
 	# plan de la baie : cadrage de départ — capitainerie, grue, quai n°1 et la première place du mouillage sous le HUD
 	var rg := hud.diorama.rig
@@ -468,20 +470,29 @@ func _run() -> void:
 			all_up = false
 	check(dio.openings_done == od0 + 2 and not dio.opening_active() and all_up, "ouverture de La Porte terminée seule, bâtiments en place")
 	await _b1_b3_b4_checks(hud, s)
-	# gestes optionnels : toucher un engin du parc (il range tout de suite), toucher la barrière (un camion passe)
-	s.apron[0] = maxf(s.apron[0], 20.0)
-	await _wait(3)
-	var veh: Node3D = dio.traffic.vehicles[0].node if not dio.traffic.vehicles.is_empty() else null
-	var yb0 := s.counter("yard_boosts")
-	if veh != null:
-		veh.position = Vector3(-20.3, 0, 17.2)
-		dio._on_tapped(veh.position, Vector2.ZERO)
-	check(veh != null and s.counter("yard_boosts") == yb0 + 1.0, "toucher un engin du parc : rangement immédiat")
+	# gestes du terre-plein (lot G2, remplacent « toucher un engin du parc : rangement immédiat » et « toucher la barrière : un
+	# camion passe tout de suite », gestes retirés) — régime manuel le temps du contrôle : toucher la cabane tamponne tout le lot
+	# (« Tamponné ! »), toucher la barrière laisse passer un camion qui paie (pièces vers le compteur)
+	var g2_1 := s.g2
+	s.g2 = true
+	s.yard_pending[0] = maxf(s.yard_pending[0], 8.0)
+	var st_n0 := s.counter("stamps")
+	var sh_n0 := dio.stamps_shown
+	var pend0 := s.pending_total()
+	dio._on_tapped(Layout.CUSTOMS_HUT + Vector3(0.4, 0, 0.3), Vector2.ZERO)
+	await _wait(2)
+	check(s.counter("stamps") == st_n0 + 1.0 and dio.stamps_shown == sh_n0 + 1 and s.pending_total() < 0.5 and pend0 >= 8.0,
+		"G2 toucher la cabane : tout le lot tamponné (%s conteneurs), « Tamponné ! »" % Fmt.num(pend0))
 	s.yard_cleared[0] = maxf(s.yard_cleared[0], 30.0)
-	s.truck_queue = maxf(s.truck_queue, 10.0)
-	var gr0 := s.counter("gate_rushes")
-	dio._on_tapped(Vector3(-23.0, 0, 45.0), Vector2.ZERO)
-	check(s.counter("gate_rushes") == gr0 + 1.0, "toucher la barrière : un camion passe tout de suite")
+	s.truck_queue = maxf(s.truck_queue, 4.0)
+	var ps_n0 := s.counter("passes")
+	var pv0 := dio.passes_shown
+	var m_p0 := s.money
+	dio._on_tapped(Layout.GATE + Vector3(0.4, 0, 0.3), Vector2.ZERO)
+	await _wait(2)
+	check(s.counter("passes") == ps_n0 + 1.0 and dio.passes_shown == pv0 + 1 and s.money > m_p0,
+		"G2 toucher la barrière : un camion laissé passer paie (+%s), pièces vers le compteur" % Fmt.money(s.money - m_p0))
+	s.g2 = g2_1
 
 	# commerce : campagne de démarchage, puis armateur démarché et ligne régulière en T2
 	hud.open_sheet(CommerceSheet.new(CommerceSheet.TAB_TRAFFIC))
@@ -560,7 +571,13 @@ func _run() -> void:
 	await _wait(3)
 	var ns: PortSim = gs.get("sim")
 	check(ns != s and ns.renown == 5 and ns.prestiges == 1, "nouvelle concession ouverte (Renom %d)" % ns.renown)
-	check(ns.tier == 1 and ns.built.is_empty(), "la nouvelle concession repart de zéro")
+	# (lot G2, recalé : sans départ joué — partie de test — la nouvelle concession a ses six pièces du départ ; jouée, elle
+	# repart de la friche nue, régime manuel, en gardant les fonctions déjà connues)
+	var hp := PortSim.new(ns.db, 77)
+	hp.carry_over(s)
+	hp.hold_port()
+	check(ns.tier == 1 and ns.built == PortSim.STARTERS and hp.built.is_empty() and hp.g2 and hp.ships.is_empty() and hp.features.size() == s.features.size(),
+		"la nouvelle concession repart de zéro (test : %s ; jouée : friche nue, à la main, fonctions connues gardées)" % str(ns.built))
 	check(hud.diorama.sim == ns, "le diorama suit la nouvelle partie")
 	check(hud.diorama.rig.input_enabled, "la caméra reste utilisable")
 	# lot B : la bulle de la douane est dessinée au-dessus de son point d'ancrage (anchor_y), jamais sur le bâtiment
@@ -1068,7 +1085,7 @@ func _dui_phase1(hud: Hud, s: PortSim) -> void:
 	hud._refresh(s)
 	var title1 := hud.hint_title.text
 	var btn1 := hud.hint_btn.text
-	check(not bool(a0.can) and bool(a1.can) and String(a1.kind) == "dept" and btn1.begins_with("AMÉLIORER PARC · ") and btn1.ends_with("$")
+	check(not bool(a0.can) and bool(a1.can) and String(a1.kind) == "dept" and btn1.begins_with("AMÉLIORER STOCKAGE · ") and btn1.ends_with("$")
 		and title1.contains("trop petit") and not title1.contains("saturé") and Hud.hint_actionable(s),
 		"D-UI 1 : goulot « %s » — sans argent bouton gris, avec de quoi améliorer le parc : « %s » vert" % [title1, btn1])
 	s.analysis_shown = saved
@@ -1242,7 +1259,8 @@ func _dui_phase3(hud: Hud, s: PortSim) -> void:
 	# aide d'en-tête : lue une fois, ensuite repliée dans le « ? »
 	var help_now := false
 	for l in up.content.get_children():
-		if l is Label and (l as Label).text.begins_with("Le département"):
+		# (lot G2, recalé : « service », nom de métier, au lieu de « département »)
+		if l is Label and (l as Label).text.begins_with("Le service"):
 			help_now = true
 	var help_btn_ok := up.help_btn.visible
 	up.close()
@@ -1314,7 +1332,8 @@ func _dui_phase3(hud: Hud, s: PortSim) -> void:
 	var up2: UpgradesSheet = hud.sheet_layer.get_child(0)
 	var help_again := false
 	for l in up2.content.get_children():
-		if l is Label and (l as Label).text.begins_with("Le département"):
+		# (lot G2, recalé : « service », nom de métier, au lieu de « département »)
+		if l is Label and (l as Label).text.begins_with("Le service"):
 			help_again = true
 	up2.close()
 	await _wait(3)
@@ -2458,9 +2477,9 @@ func _f2_checks(hud: Hud) -> void:
 	for c in dio.static_root.get_children():
 		if c.is_queued_for_deletion():
 			continue
-		if String(c.get_meta("site", "")) == "quay0":
+		if String(c.get_meta("site", "")) == "quay1":      # (lot G2, recalé : le quai n°1 est un bâtiment, plus la pièce « quay0 »)
 			quay_nodes += 1
-		if String(c.get_meta("before", "")) == "quay0":
+		if String(c.get_meta("before", "")) == "quay1":
 			ruin += 1
 	var cars_ok := dio.traffic.cars.size() >= 3 and dio.traffic.cars.size() <= 5
 	for cr in dio.traffic.cars:
@@ -2493,13 +2512,11 @@ func _f2_checks(hud: Hud) -> void:
 		hud.intro_shown, s.fishing.act0, hud.top_box.visible, anse_ruin])
 	# lot F3 — l'acte 0 « La Crique » (tutoriel, cartes, bateaux, coup de main, achats, camionnette)
 	await _f3_act0(hud, s)
-	# 3. la bascule (lot G1) : la Concession signée — d'abord les nuages se dissolvent (3,5 s, caméra encore bornée), puis les
-	# bornes s'élargissent et le caboteur de Corsaire & Fils (l'escale initiale) naît au large, hors champ, la narratrice parle ;
-	# un toucher, la cérémonie « Palier 1 — Le Vieux Quai », puis la séquence de chantiers
+	# 3. la bascule (lot G1 ; lot G2 recalé) : la Concession signée — d'abord les nuages se dissolvent (3,5 s, caméra encore
+	# bornée), puis les bornes s'élargissent, la narratrice parle ; un toucher, la cérémonie « Palier 1 — Le Vieux Quai », puis la
+	# friche nue : plus de séquence de chantiers automatique (le caboteur attend le quai n°1)
 	s.money += float(s.fishing.concession_def().cost)
 	s.buy_fish_building("concession")
-	var spawn_seen := -1
-	var fid := -1
 	for k in 6:
 		await get_tree().process_frame
 		_f3_track(hud)
@@ -2514,110 +2531,267 @@ func _f2_checks(hud: Hud) -> void:
 	for k in 6:
 		await get_tree().process_frame
 		_f3_track(hud)
-		if dio.first_view != null and spawn_seen < 0:
-			var vr0 := Rect2(Vector2.ZERO, hud.get_viewport_rect().size)
-			var fp0 := dio.first_view.position
-			var fw0 := Vector3(cos(dio.first_view.yaw()), 0, -sin(dio.first_view.yaw())) * dio.first_view.length * 0.5
-			spawn_seen = 1 if (vr0.has_point(dio.to_screen(fp0)) or vr0.has_point(dio.to_screen(fp0 + fw0)) or vr0.has_point(dio.to_screen(fp0 - fw0))) else 0
-			fid = dio.first_view.sid
-	var fsh := s.ship_by_id(fid)
-	var corsaire := fsh != null and fsh.owner == "corsaire"
-	check(hud.bascule_on and hud.story_active() and corsaire and spawn_seen == 0 and s.fishing.act0 and s.time == 0.0 and not dio.t1_works_active(),
-		"F3 bascule : carte de la narratrice (%s), le caboteur de Corsaire & Fils déjà en route, né hors champ (%d), port encore fermé" % [hud.story_active(), spawn_seen])
+	# (lot G2, remplace « F3 bascule : carte de la narratrice, le caboteur de Corsaire & Fils déjà en route, né hors champ »)
+	check(hud.bascule_on and hud.story_active() and s.ships.is_empty() and dio.fleet.is_empty() and dio.first_view == null and s.fishing.act0 and s.time == 0.0,
+		"G2 bascule : carte de la narratrice (%s), aucun navire — le caboteur attend le quai n°1 (%d), port encore fermé" % [hud.story_active(), s.ships.size() + dio.fleet.size()])
 	if hud.story_active():
 		(hud.story_layer as Button).pressed.emit()
 	await _wait(2)
-	var cer := hud.ceremony_active() and hud.ceremonies >= 1
+	var cer := hud.ceremony_active() and hud.ceremonies >= 1 and s.fishing.act0
 	for k in 4:
 		await get_tree().process_frame
 		_f3_track(hud)
 	hud._finish_ceremony()
-	await _wait(2)
-	check(cer and dio.t1_works_active() and not hud.story_active(), "F3 bascule : un toucher passe la carte, cérémonie « Palier 1 — Le Vieux Quai », puis la séquence de chantiers du T1")
-	# la séquence (temps ×6) : quai → grue → parc → gate, chacun 3 à 6 s, qui se chevauchent (lot F3 : ≤ 15 s en tout) ; HUD
-	# visible et pêche qui rapporte ; le caboteur attend à l'entrée du chenal tant que le quai n'est pas debout (lot F3, recalé :
-	# avant, « aucun navire avant la fin du chantier du quai ») ; ni camion avant la gate, ni engin avant le parc ; l'horloge du
-	# port ne tourne pas
-	var hist0 := dio.sites.history.size()
-	Engine.time_scale = 6.0
+	await _wait(3)
+	# (lot G2, remplace « F3 bascule : … puis la séquence de chantiers du T1 »)
+	check(cer and not hud.story_active() and not s.fishing.act0 and not hud.start_flow and s.g2 and s.built.is_empty() and s.ships.is_empty()
+		and dio.sites.sites.is_empty() and not dio.t1_works_active() and dio.crane_views.is_empty(),
+		"G2 bascule : un toucher passe la carte, cérémonie « Palier 1 — Le Vieux Quai » (port fermé pendant : %s), puis la friche nue — aucun chantier lancé (%d), rien de bâti, aucun navire, le port ouvert" % [cer, dio.sites.sites.size()])
+	# 4. lot G2 — le premier navire à la main (remplace « F2/F3 séquence du T1 » et « F2 premier navire ») : AMÉLIORER propose un
+	# seul achat, en tête ; chaque achat a son chantier (temps ×6) ; le caboteur de Corsaire & Fils se présente en rade après le
+	# quai n°1 ; on le touche, il accoste et décharge avec sa grue de bord ; les conteneurs posés sur la plateforme attendent le
+	# tampon (orange) ; la cabane les tamponne (verts) ; la barrière laisse passer le camion, qui paie
 	var order: Array[String] = []
-	var ship_early := 0
-	var paused_ok := true
-	var truck_early := 0
-	var veh_early := 0
-	var hud_hidden := 0
-	var fish0 := s.fishing.earned
-	var fish_works := 0.0
-	var guard := Time.get_ticks_msec()
-	for k in dio.starter_state:
-		if String(dio.starter_state[k]) == "building" and not order.has(String(k)):
-			order.append(String(k))
-	while dio.start_flow_active() and Time.get_ticks_msec() - guard < 40000:
-		await get_tree().process_frame
-		_f3_track(hud)
-		for k in dio.starter_state:
-			if String(dio.starter_state[k]) == "building" and not order.has(String(k)):
-				order.append(String(k))
-		if dio.t1_works_active():
-			fish_works = s.fishing.earned - fish0
-			if not hud.top_box.visible:
-				hud_hidden += 1
-		var fv1 := dio.first_view
-		if not dio.ready_bid("quay0") and fv1 != null and is_instance_valid(fv1) and (fv1.position.z > -108.0 or fv1.phase >= ShipView.Phase.CRAB_IN):
-			ship_early += 1
-		if not dio.ready_bid("quay0") and dio.fleet.size() > (1 if dio.first_view != null else 0):
-			ship_early += 1
-		if s.time > 0.0:
-			paused_ok = false
-		if not dio.ready_bid("gate0") and (not dio.traffic.trucks.is_empty() or not dio.traffic.queue.is_empty()):
-			truck_early += 1
-		if not dio.ready_bid("yard0") and not dio.traffic.vehicles.is_empty():
-			veh_early += 1
-	var fv := dio.first_view
-	var released_crab := fv != null and is_instance_valid(fv) and fv.phase >= ShipView.Phase.CRAB_IN
+	var heads: Array[String] = []
 	var durs: Array[String] = []
-	var dur_ok := dio.sites.history.size() - hist0 == 4
-	var t0s := INF
-	var t1s := 0.0
+	var dur_ok := true
+	var lone_ok := true
+	var ship_early := 0
+	var hist0 := dio.sites.history.size()
+	var tu := hud.tutorial
+	tu.active = true
+	var tuto_seen: Array[String] = []
+	for bid in ["platform", "quay1"]:
+		tu._refresh_card(true)
+		if tu.idx < tu.steps.size() and String(tu.steps[tu.idx].id) == "welcome":
+			tu._on_button()          # « C'EST PARTI »
+			tu._refresh_card(true)
+		if tu.idx < tu.steps.size():
+			tuto_seen.append(String(tu.steps[tu.idx].id))
+		s.money = maxf(s.money, float(s.db.building_by_id[bid].cost))
+		hud.open_upgrades("")
+		await _wait(4)
+		_f3_track(hud)
+		var upb: UpgradesSheet = hud.sheet_layer.get_child(0)
+		var bcards := upb.cards.filter(func(c: Dictionary) -> bool: return c.has("build"))
+		var dcards := upb.cards.filter(func(c: Dictionary) -> bool: return c.has("dept"))
+		heads.append(String(upb.cards[0].get("build", "?")) if not upb.cards.is_empty() else "?")
+		if bcards.size() != 1 or not dcards.is_empty():
+			lone_ok = false
+		if not bcards.is_empty():
+			(bcards[0].buy as Button).pressed.emit()
+		await _wait(2)
+		upb.close()
+		await _wait(2)
+		if s.built.has(bid):
+			order.append(bid)
+		Engine.time_scale = 6.0
+		await _f2_wait_site(dio, bid, func() -> bool: return not s.ships.is_empty())
+		Engine.time_scale = 1.0
+		_f3_track(hud)
+		if bid == "platform" and not s.ships.is_empty():
+			ship_early += 1
 	for h in dio.sites.history.slice(hist0):
 		var real := float(h.t1) - float(h.t0)
 		durs.append("%s %s s" % [h.key, Fmt.num(real)])
-		t0s = minf(t0s, float(h.t0))
-		t1s = maxf(t1s, float(h.t1))
 		if absf(real - float(h.dur)) > 0.3 or float(h.dur) < 3.0 or float(h.dur) > 6.0:
 			dur_ok = false
-	var span := t1s - t0s
-	check(order == ["quay0", "crane0", "yard0", "gate0"] and dur_ok and span <= 15.0 and ship_early == 0 and paused_ok and truck_early == 0 and veh_early == 0 \
-		and hud_hidden == 0 and fish_works > 0.0,
-		"F2/F3 séquence du T1 : %s, chantiers %s, %s s en tout (≤ 15) ; HUD visible (%d images masqué), pêche %s pendant les chantiers ; caboteur au-delà de l'entrée du chenal avant le quai %d, horloge du port arrêtée (%s), camions avant la gate %d, engins avant le parc %d" % [
-		str(order), str(durs), Fmt.num(span), hud_hidden, Fmt.money(fish_works), ship_early, paused_ok, truck_early, veh_early])
-	# 4. le port ouvre quand le premier navire glisse vers le quai ; son escale (arrivée à quai dans la simulation) et son arrivée
-	# à quai à l'écran à moins de 15 s (le joueur le touche dès qu'il peut, comme le demande le tutoriel)
-	await _wait(3)
-	var t_sim := -1.0
-	var t_view := -1.0
-	var tapped := false
-	guard = Time.get_ticks_msec()
+	# le caboteur se présente (temps ×4) : en rade, bulle « Touche pour accoster »
+	var fsh: Ship = s.ships[0] if not s.ships.is_empty() else null
+	var corsaire := fsh != null and fsh.owner == "corsaire"
+	var guard := Time.get_ticks_msec()
 	Engine.time_scale = 4.0
-	while (t_sim < 0.0 or t_view < 0.0) and Time.get_ticks_msec() - guard < 30000:
+	var berth_pill := false
+	while fsh != null and (fsh.state != Ship.State.ANCHORED or not dio.ship_views.has(fsh.id) or not berth_pill) and Time.get_ticks_msec() - guard < 30000:
 		await get_tree().process_frame
 		_f3_track(hud)
-		var sh := s.ship_by_id(fid)
-		if sh != null and sh.state == Ship.State.ANCHORED and not tapped:
-			tapped = s.prioritize_ship(fid)
-		if sh != null and t_sim < 0.0 and sh.state >= Ship.State.MOORING and sh.state <= Ship.State.DEPARTING:
-			t_sim = dio._t
-		if t_sim < 0.0 and sh == null:
-			t_sim = dio._t
-		if fv != null and is_instance_valid(fv) and t_view < 0.0 and fv.phase >= ShipView.Phase.MOORED:
-			t_view = dio._t
-	_f3_gap.on = false
+		var fv0: ShipView = dio.ship_views.get(fsh.id)
+		if fv0 != null:
+			hud.diorama.rig.focus(fv0.position)
+		berth_pill = hud.overlay.frame_rects.has("berth_gesture")
 	Engine.time_scale = 1.0
-	check(released_crab and not bool(sim_r.get("paused")) and not hud.start_flow and not s.fishing.act0 and t_sim >= 0.0 and t_view >= 0.0 and absf(t_sim - t_view) < 15.0 and hud.top_box.visible,
-		"F2 premier navire : le port ouvre au glissement (%s), escale à quai et arrivée à l'écran à %s s d'écart (< 15), HUD visible" % [
-		released_crab, Fmt.num(absf(t_sim - t_view))])
+	tu._refresh_card(true)
+	if tu.idx < tu.steps.size():
+		tuto_seen.append(String(tu.steps[tu.idx].id))
+	var anchored := fsh != null and fsh.state == Ship.State.ANCHORED
+	# sans geste, il reste en rade (monde figé sans Léon : il attend qu'on le touche, il n'accoste jamais seul)
+	var still := true
+	for k in 20:
+		await get_tree().process_frame
+		_f3_track(hud)
+		if fsh != null and fsh.state != Ship.State.ANCHORED:
+			still = false
+	check(order == ["platform", "quay1"] and heads == ["platform", "quay1"] and lone_ok and dur_ok and ship_early == 0 and corsaire and anchored and berth_pill and still
+		and tuto_seen == ["t_platform", "t_quay", "ship"],
+		"G2 friche : AMÉLIORER ne propose qu'un achat, en tête (%s, seul : %s), chantiers %s (3 à 6 s) ; le caboteur de Corsaire & Fils en rade après le quai seulement (%s, avant %d), bulle « Touche pour accoster » (%s), il n'accoste pas seul (%s) ; tutoriel %s" % [
+		str(heads), lone_ok, str(durs), corsaire, ship_early, berth_pill, still, str(tuto_seen)])
+	# accoster d'un toucher ; grue de bord ; conteneurs orange sur la plateforme
+	var bc_seen := 0
+	var orange := 0
+	if fsh != null and dio.ship_views.has(fsh.id):
+		dio._on_tapped((dio.ship_views[fsh.id] as ShipView).position, Vector2.ZERO)
+	var gb0 := int(s.gestures.berth)
+	guard = Time.get_ticks_msec()
+	Engine.time_scale = 4.0
+	while (bc_seen == 0 or orange == 0) and Time.get_ticks_msec() - guard < 30000:
+		await get_tree().process_frame
+		_f3_track(hud)
+		bc_seen = maxi(bc_seen, dio.board_cranes)
+		orange = maxi(orange, dio.yard._pending_n)
+	Engine.time_scale = 1.0
+	check(fsh != null and int(s.gestures.berth) >= 1 and s.board_crane(0) and bc_seen >= 1 and orange >= 1 and dio.yard.platform_mode
+		and is_equal_approx(s.berth_unload_rate(0), float(s.db.cfg("manual").board_crane_rate)),
+		"G2 grue de bord : accosté d'un toucher (%d geste), le caboteur décharge avec sa grue de bord (%d à l'écran, %s conteneur/s), conteneurs orange posés sur la plateforme (%d)" % [
+		int(s.gestures.berth) - gb0 + 1, bc_seen, Fmt.num(s.berth_unload_rate(0)), orange])
+	_f3_gap.on = false
 	check(float(_f3_gap.max) <= 15.0,
 		"F3 : aucune fenêtre de plus de 15 s sans action possible de la fin de l'intro au premier cargo à quai (plus longue : %s s %s)" % [Fmt.num(float(_f3_gap.max)), String(_f3_gap.worst_at)])
+	# la cabane : un achat ; toucher la cabane tamponne le lot (orange → verts)
+	for bid in ["hut"]:
+		s.money = maxf(s.money, float(s.db.building_by_id[bid].cost))
+		hud.open_upgrades("")
+		await _wait(4)
+		var upc: UpgradesSheet = hud.sheet_layer.get_child(0)
+		heads.append(String(upc.cards[0].get("build", "?")) if not upc.cards.is_empty() else "?")
+		if not upc.cards.is_empty() and upc.cards[0].has("build"):
+			(upc.cards[0].buy as Button).pressed.emit()
+		await _wait(2)
+		upc.close()
+		Engine.time_scale = 6.0
+		await _f2_wait_site(dio, bid)
+		Engine.time_scale = 1.0
+	guard = Time.get_ticks_msec()
+	var stamp_pill := false
+	hud.diorama.rig.focus(Layout.CUSTOMS_HUT)
+	while not stamp_pill and Time.get_ticks_msec() - guard < 8000:
+		await get_tree().process_frame
+		stamp_pill = hud.overlay.frame_rects.has("stamp_gesture") and s.stamp_ready()
+	var pend_s := s.pending_total()
+	var st0 := dio.stamps_shown
+	dio._on_tapped(Layout.CUSTOMS_HUT, Vector2.ZERO)
+	await _wait(3)
+	var green := dio.yard._shown[0] - dio.yard._pending_n
+	check(heads[-1] == "hut" and s.built.has("hut") and stamp_pill and pend_s >= 1.0 and dio.stamps_shown == st0 + 1 and s.pending_total() < pend_s and green >= 1,
+		"G2 tamponner : la cabane en tête d'AMÉLIORER (%s), bulle « À tamponner » (%s, %s conteneurs), toucher la cabane : tamponnés, %d verts sur la plateforme" % [
+		heads[-1], stamp_pill, Fmt.num(pend_s), green])
+	# la piste et la barrière : un camion se présente ; toucher la barrière, il charge, paie et part
+	s.money = maxf(s.money, float(s.db.building_by_id.track.cost))
+	hud.open_upgrades("")
+	await _wait(4)
+	var upt: UpgradesSheet = hud.sheet_layer.get_child(0)
+	heads.append(String(upt.cards[0].get("build", "?")) if not upt.cards.is_empty() else "?")
+	if not upt.cards.is_empty() and upt.cards[0].has("build"):
+		(upt.cards[0].buy as Button).pressed.emit()
+	await _wait(2)
+	upt.close()
+	Engine.time_scale = 6.0
+	await _f2_wait_site(dio, "track")
+	var gate_pill := false
+	var trucks_before_pass := 0
+	guard = Time.get_ticks_msec()
+	hud.diorama.rig.focus(Layout.GATE)
+	while not (gate_pill and s.pass_ready()) and Time.get_ticks_msec() - guard < 30000:
+		await get_tree().process_frame
+		if s.stamp_ready():
+			s.stamp()
+		gate_pill = hud.overlay.frame_rects.has("gate_gesture")
+		trucks_before_pass = maxi(trucks_before_pass, dio.traffic.queue.size())
+	Engine.time_scale = 1.0
+	var m_pass := s.money
+	var pv := dio.passes_shown
+	var leaving0 := dio.traffic.trucks.size()
+	dio._on_tapped(Layout.GATE, Vector2.ZERO)
+	await _wait(3)
+	var paid := s.money - m_pass
+	check(heads[-1] == "track" and gate_pill and trucks_before_pass >= 1 and dio.passes_shown == pv + 1 and s.counter("passes") >= 1.0 and paid > 0.0
+		and dio.traffic.trucks.size() > leaving0,
+		"G2 laisser passer : la piste en tête (%s), un camion à la barrière (%d), bulle « Camion : touche la barrière » (%s) ; toucher la barrière : il charge, paie (+%s) et repart (%d) — premier camion" % [
+		heads[-1], trucks_before_pass, gate_pill, Fmt.money(paid), dio.traffic.trucks.size() - leaving0])
+	# un camion qu'on ne sert pas : bulle rouge (compte à rebours), puis il repart sans rien
+	var lost0 := s.counter("trucks_lost")
+	var red_t := false
+	guard = Time.get_ticks_msec()
+	Engine.time_scale = 6.0
+	s.yard_cleared[0] = maxf(s.yard_cleared[0], 4.0)
+	while s.counter("trucks_lost") == lost0 and Time.get_ticks_msec() - guard < 25000:
+		await get_tree().process_frame
+		if s.pass_ready() and s.truck_wait_left() < float(s.db.cfg("manual").truck_warn) and hud.overlay.frame_rects.has("gate_gesture"):
+			red_t = true
+	Engine.time_scale = 1.0
+	check(s.counter("trucks_lost") > lost0 and red_t, "G2 camion non servi : bulle rouge avant (%s), il repart sans rien (%d perdu)" % [red_t, int(s.counter("trucks_lost") - lost0)])
+	# la plateforme pleine : « Il faut une sortie ! » (la première apparition du goulot)
+	s.yard_cleared[0] = s.yard_capacity()
+	for shp in s.ships:
+		shp.patience = shp.patience_max
+	s._alert_left = 0.0
+	s._refresh_analysis()
+	guard = Time.get_ticks_msec()
+	var exit_pill := false
+	hud.diorama.rig.focus(Layout.YARD_CENTER)
+	while not exit_pill and Time.get_ticks_msec() - guard < 6000:
+		await get_tree().process_frame
+		exit_pill = hud.overlay.frame_rects.has("exit")
+	hud._refresh(s)
+	check(exit_pill and String(s.shown_analysis().get("alert", "")) == "exit" and hud.hint_title.text == "Il faut une sortie !",
+		"G2 plateforme pleine : bulle « Il faut une sortie ! » (%s), carte Goulot (%s)" % [exit_pill, hud.hint_title.text])
+	s.yard_cleared[0] = 4.0
+	# monde figé sans responsable du port : une absence ne fait rien avancer au port (ni conteneur, ni navire, ni argent du port) ;
+	# seul Marcel encaisse les loyers de la Crique
+	var m_off := s.money
+	var evp_off := s.counter("evp")
+	var states_off := s.ships.map(func(x: Ship) -> int: return x.state)
+	var fish_off := s.fishing.offline_rate() * minf(1800.0, float(s.db.cfg("offline_max_hours")) * 3600.0)
+	gs.call("credit_offline", 1800.0)
+	var frozen := is_equal_approx(s.money - m_off, fish_off) and s.counter("evp") == evp_off and s.ships.map(func(x: Ship) -> int: return x.state) == states_off
+	var frozen_txt := "%s, +%s pour %s de pêche" % [frozen, Fmt.money(s.money - m_off), Fmt.money(fish_off)]
+	await _wait(2)
+	for p in hud.popup_layer.get_children():
+		p.queue_free()
+	await _wait(2)
+	# Léon après 5 accostages : bulle + carte de la narratrice, RESPONSABLES ; embauché, il remplace le geste et la carte
+	# Accostage apparaît dans AMÉLIORER
+	var cards0 := hud.mgr_cards_shown
+	s.gestures.berth = int(s.db.cfg("manual").gesture_offers)
+	s.last_reveal_t = -1.0e9
+	guard = Time.get_ticks_msec()
+	while not s.mgr_offered.has("berths") and Time.get_ticks_msec() - guard < 5000:
+		await get_tree().process_frame
+	await _wait(3)
+	var offer_card := hud.mgr_cards_shown == cards0 + 1 and hud.story_active()
+	if hud.story_active():
+		(hud.story_layer as Button).pressed.emit()
+	await _wait(2)
+	hud.diorama.rig.focus(Layout.manager_pos("berths", s.tier))
+	hud.diorama.rig.target = hud.diorama.rig.goal
+	await _wait(4)
+	var offer_pill := hud.overlay.frame_rects.has("offer_berths")
+	hud._refresh(s)
+	var mbtn := hud.manage_btn.visible and hud.mgr_pill.visible
+	hud._on_manage_btn()
+	await _wait(4)
+	var msh: ManageSheet = hud.sheet_layer.get_child(0)
+	var leon_row := msh.rows.any(func(r: Dictionary) -> bool: return String(r.get("dept", "")) == "berths")
+	s.money += s.manager_cost("berths")
+	msh._hire("berths", false)
+	await _wait(3)
+	msh.close()
+	await _wait(2)
+	hud.open_upgrades("")
+	await _wait(4)
+	var upl: UpgradesSheet = hud.sheet_layer.get_child(0)
+	var acc_card := not upl._card_for("dept", "berths").is_empty()
+	var dept_ids := upl.cards.filter(func(c: Dictionary) -> bool: return c.has("dept")).map(func(c: Dictionary) -> String: return String(c.dept))
+	upl.close()
+	await _wait(3)
+	# plus de geste : un navire en rade n'a plus de bulle ; le toucher n'accoste plus « à la main »
+	var pill_after := false
+	for k in 30:
+		await get_tree().process_frame
+		if hud.overlay.frame_rects.has("berth_gesture"):
+			pill_after = true
+	check(frozen and offer_card and offer_pill and mbtn and leon_row and s.managers.berths and acc_card and not pill_after,
+		"G2 Léon : monde figé sans responsable du port (%s) ; après 5 accostages il se présente (carte %s, bulle sur le quai %s, RESPONSABLES %s, fiche %s) ; embauché : carte Accostage dans AMÉLIORER (%s), plus de bulle d'accostage, Heures sup révélées (%s)" % [
+		frozen_txt, offer_card, offer_pill, mbtn, leon_row, str(dept_ids), s.feature("boost")])
 	# l'anse après l'acte 0 : la pêche est passive (revenu fixe), plus de carte ni de pastille, les bateaux vivent toujours
 	hud.open_upgrades("")
 	await _wait(4)
@@ -2631,6 +2805,15 @@ func _f2_checks(hud: Hud) -> void:
 			vis_boats += 1
 	check(fish_after >= 2 and s.fishing.rate_estimate() > 0.0 and dio.fishing_view.collectable().is_empty() and vis_boats >= 3 and Hud.worthwhile_count(s) >= 0 and not Hud.fishing_cards(s) 		and dio.clouds == null and not dio.rig.crique,
 		"G1 après la Concession : la pêche continue (%s/s, Marcel encaisse), les cartes de la Crique restantes en bas d'AMÉLIORER (%d), %d bateaux vivent dans l'anse, plus de nuages" % [Fmt.num(s.fishing.rate_estimate()), fish_after, vis_boats])
+	# (lot G2 : le reste des pièces du départ — grue mobile et parc de stockage — avant les contrôles des chantiers et du trafic,
+	# écrits pour un port qui les a)
+	s.money = 1.0e7
+	_f2_build(s, "crane_mobile")
+	_f2_build(s, "yard")
+	Engine.time_scale = 6.0
+	await _f2_wait_site(dio, "crane_mobile")
+	await _f2_wait_site(dio, "yard")
+	Engine.time_scale = 1.0
 	# 5. chantier d'un achat : palissade et engin, bâtiment caché puis monté, état d'avant effacé ; deux chantiers en même temps
 	s.money = 1.0e7
 	var par0 := dio.sites.max_parallel
@@ -2742,14 +2925,14 @@ func _f2_checks(hud: Hud) -> void:
 	gs.call("load_from", d0)
 	await _wait(4)
 	var ls: PortSim = gs.get("sim")
-	var resumed := hud.start_flow and not hud.intro_active() and hud.intro_shown == intro0 and ls.fishing.act0 and ls.fishing.places == 2 		and not dio.t1_works_active() and dio.sites.sites.is_empty() and dio._any_pending() and dio.fishing_view.boats.size() == 3 		and dio.clouds_on() and dio.rig.crique
+	var resumed := hud.start_flow and not hud.intro_active() and hud.intro_shown == intro0 and ls.fishing.act0 and ls.fishing.places == 2 		and not dio.t1_works_active() and dio.sites.sites.is_empty() and ls.g2 and ls.built.is_empty() and dio.fishing_view.boats.size() == 3 		and dio.clouds_on() and dio.rig.crique
 	var t1d := PortSim.new(s.db, 12).to_dict()
 	t1d.erase("act0")
 	gs.call("load_from", t1d)
 	await _wait(4)
 	var l2: PortSim = gs.get("sim")
 	check(resumed and not hud.start_flow and not l2.fishing.act0 and l2.fishing.maxed() and dio.sites.sites.is_empty() and not dio.start_flow_active() 		and dio.fishing_view.boats.size() == 12 and dio.clouds == null and not dio.rig.crique,
-		"G1 sauvegarde v7 : partie de la Crique rechargée dans l'anse (%s : sans intro ni chantier rejoué, port fermé, nuages posés) ; partie d'avant F3 chargée Crique finie (%d bateaux, 20 voiliers), sans nuages ni départ" % [
+		"G1/G2 sauvegarde v8 : partie de la Crique rechargée dans l'anse (%s : sans intro ni chantier rejoué, port fermé, friche nue à venir, nuages posés) ; partie d'avant F3 chargée Crique finie (%d bateaux, 20 voiliers), sans nuages ni départ" % [
 		resumed, dio.fishing_view.boats.size()])
 	gs.set("auto_start", false)
 	Engine.time_scale = 1.0
