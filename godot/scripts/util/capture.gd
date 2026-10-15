@@ -23,7 +23,9 @@ static func schedule(node: Node) -> void:
 	var img := node.get_viewport().get_texture().get_image()
 	var path := String(a.capture)
 	img.save_png(path)
-	print("CAPTURE ", path, " ", img.get_size(), " fps=", Engine.get_frames_per_second())
+	print("CAPTURE ", path, " ", img.get_size(), " fps=", Engine.get_frames_per_second(),
+		" primitives=", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME),
+		" draws=", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))
 	var cams := node.get_tree().root.find_children("*", "CameraRig", true, false)
 	if not cams.is_empty():
 		print("CAMERA target=", cams[0].target, " zoom=", cams[0].zoom)

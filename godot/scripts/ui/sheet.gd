@@ -187,8 +187,146 @@ func _select_tab(i: int) -> void:
 	for k in tab_buttons.size():
 		UI.style_button(tab_buttons[k], UI.VIOLET if k == i else UI.INDIGO_DARK)
 	rebuild()
+	_keep_scroll = -1          # nouvel onglet : en haut de la liste
+	_fling = 0.0
 	scroll.scroll_vertical = 0
 	Sfx.play("click")
+
+
+# --- défilement (lot F1) -----------------------------------------------------------------------------------------------
+## Défilement au doigt et à la souris, géré par la feuille (lot F1, bug « défilement parfois impossible ») : Godot ne fait
+## défiler une ScrollContainer au glissé que sur un écran tactile et seulement si l'appui tombe sur elle (pas sur un bouton,
+## qui garde l'appui) ; et `refresh()` reconstruisait la liste en plein glissé. Ici, un glissé vertical de plus de
+## DRAG_START px fait défiler la liste d'où qu'il parte (texte, carte, bouton d'achat) ; le bouton sous le doigt est relâché
+## sans effet (NOTIFICATION_SCROLL_BEGIN : BaseButton oublie l'appui, HoldRepeat arrête sa rafale) ; un appui bref garde son
+## effet ; au relâchement, la liste garde son élan. Une reconstruction demandée pendant qu'un doigt est posé attend le
+## relâchement (`request_rebuild`) ; le défilement est gardé à travers une reconstruction.
+const DRAG_START := 14.0        # px (coordonnées de la vue, 1080 de large)
+const FLING_MIN := 250.0        # px/s : en dessous, pas d'élan
+const FLING_DAMP := 4.0         # 1/s
+const NO_PTR := -99
+var _ptr := NO_PTR              # doigt (index) ou souris (−2) posé dans la liste
+var _ptr_from := Vector2.ZERO
+var _scroll0 := 0
+var _dragging := false
+var _drag_last := Vector2.ZERO
+var _drag_t := 0
+var _drag_v := 0.0              # vitesse du glissé (px/s, vers le bas > 0)
+var _fling := 0.0               # élan (px/s de défilement)
+var _rebuild_pending := false
+var _keep_scroll := -1          # défilement à rétablir après une reconstruction (deux images, le temps de la mise en page)
+var _keep_frames := 0
+var drags_done := 0             # glissés qui ont fait défiler la liste (tests)
+var rebuilds_deferred := 0      # reconstructions différées au relâchement (tests)
+
+
+## Un doigt (ou le bouton de la souris) est-il posé dans la liste ?
+func touching() -> bool:
+	return _ptr != NO_PTR
+
+
+func is_dragging() -> bool:
+	return _dragging
+
+
+## Reconstruction demandée par `refresh()` (la liste a changé) : différée tant qu'un doigt est posé dans la liste.
+func request_rebuild() -> void:
+	if touching():
+		if not _rebuild_pending:
+			rebuilds_deferred += 1
+		_rebuild_pending = true
+		return
+	rebuild()
+
+
+func _input(event: InputEvent) -> void:
+	if scroll == null or _closing or not is_visible_in_tree():
+		return
+	var pos := Vector2.ZERO
+	var id := NO_PTR
+	var pressed := false
+	var move := false
+	if event is InputEventScreenTouch:
+		id = (event as InputEventScreenTouch).index
+		pos = (event as InputEventScreenTouch).position
+		pressed = (event as InputEventScreenTouch).pressed
+	elif event is InputEventScreenDrag:
+		id = (event as InputEventScreenDrag).index
+		pos = (event as InputEventScreenDrag).position
+		move = true
+	elif event is InputEventMouseButton and event.device != InputEvent.DEVICE_ID_EMULATION:
+		# (souris réelle seulement : sur le téléphone, la souris émulée double le toucher)
+		var mb := event as InputEventMouseButton
+		if mb.button_index != MOUSE_BUTTON_LEFT:
+			return
+		id = -2
+		pos = mb.position
+		pressed = mb.pressed
+	elif event is InputEventMouseMotion and event.device != InputEvent.DEVICE_ID_EMULATION:
+		var mm := event as InputEventMouseMotion
+		if (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) == 0:
+			return
+		id = -2
+		pos = mm.position
+		move = true
+	else:
+		return
+	if move:
+		if id != _ptr:
+			return
+		var dy := pos.y - _ptr_from.y
+		if not _dragging and absf(dy) > DRAG_START and absf(dy) > absf(pos.x - _ptr_from.x):
+			_dragging = true
+			_ptr_from.y += signf(dy) * DRAG_START      # pas de saut au début du glissé
+			scroll.propagate_notification(Control.NOTIFICATION_SCROLL_BEGIN)
+		if _dragging:
+			var now := Time.get_ticks_usec()
+			var dt := maxf(0.004, float(now - _drag_t) / 1e6)
+			_drag_v = lerpf(_drag_v, (pos.y - _drag_last.y) / dt, 0.5)
+			_drag_last = pos
+			_drag_t = now
+			scroll.scroll_vertical = roundi(float(_scroll0) - (pos.y - _ptr_from.y))
+			get_viewport().set_input_as_handled()
+		return
+	if pressed:
+		if _ptr != NO_PTR or not scroll.get_global_rect().has_point(pos):
+			return
+		# (seulement la feuille du dessus, et jamais sous une fenêtre)
+		if Hud.main != null and (Hud.main.current_sheet() != self or Hud.main._npopups() > 0):
+			return
+		_ptr = id
+		_ptr_from = pos
+		_scroll0 = scroll.scroll_vertical
+		_dragging = false
+		_fling = 0.0
+		_drag_last = pos
+		_drag_t = Time.get_ticks_usec()
+		_drag_v = 0.0
+	elif id == _ptr:
+		if _dragging:
+			drags_done += 1
+			if absf(_drag_v) > FLING_MIN and Time.get_ticks_usec() - _drag_t < 120000:
+				_fling = -_drag_v
+		_ptr = NO_PTR
+		_dragging = false
+		if _rebuild_pending:
+			_rebuild_pending = false
+			rebuild.call_deferred()
+
+
+func _scroll_step(delta: float) -> void:
+	if scroll == null:
+		return
+	if _keep_frames > 0:
+		_keep_frames -= 1
+		if _keep_scroll >= 0 and not _dragging:
+			scroll.scroll_vertical = _keep_scroll
+	if _fling != 0.0 and not _dragging:
+		var before := scroll.scroll_vertical
+		scroll.scroll_vertical = roundi(float(before) + _fling * delta)
+		_fling *= exp(-FLING_DAMP * delta)
+		if absf(_fling) < 30.0 or scroll.scroll_vertical == before:
+			_fling = 0.0
 
 
 ## À surcharger : remplit `content`.
@@ -204,12 +342,18 @@ func refresh() -> void:
 func rebuild() -> void:
 	if content == null:
 		return
+	# (lot F1) le défilement est gardé : rétabli tout de suite et pendant deux images (mise en page de la nouvelle liste)
+	var keep := scroll.scroll_vertical if scroll != null else 0
 	for c in content.get_children():
 		c.queue_free()
 	_help_lines.clear()
 	build()
 	help_btn.visible = not _help_lines.is_empty()
 	refresh()
+	if scroll != null:
+		scroll.scroll_vertical = keep
+		_keep_scroll = keep
+		_keep_frames = 2
 
 
 ## Texte d'aide d'en-tête : déroulé la première fois (et tant que cet écran reste ouvert), ensuite replié dans le « ? ».
@@ -242,6 +386,7 @@ func _process(delta: float) -> void:
 	if _refresh_t >= 0.2:
 		_refresh_t = 0.0
 		refresh()
+	_scroll_step(delta)
 
 
 func close() -> void:

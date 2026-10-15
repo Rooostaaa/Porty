@@ -233,6 +233,11 @@ func _focus_camera(st: Dictionary) -> void:
 	if t == "ship":
 		for s in sim.ships:
 			if s.state == Ship.State.ANCHORED or s.state == Ship.State.ARRIVING:
+				# lot F2 : le premier navire du T1 n'a pas de mouillage — il est déjà en route vers le quai : on le suit
+				var fv: ShipView = d.ship_views.get(s.id)
+				if fv != null and is_instance_valid(fv) and fv.phase >= ShipView.Phase.INBOUND:
+					d.rig.focus(Vector3(fv.position.x - 4.0, 0.0, fv.position.z + 12.0))
+					return
 				# on vise le mouillage (un navire en approche y arrive), pas sa position du moment
 				var a := Layout.anchor_pos(maxi(0, s.anchor_slot))
 				d.rig.focus(Vector3(a.x + 14.0, 0.0, a.z + 18.0))
@@ -360,6 +365,11 @@ func _target(st: Dictionary) -> Dictionary:
 		var w := _longest_waiting(sim)
 		if w != null and d.ship_views.has(w.id):
 			return {"pos": d.to_screen((d.ship_views[w.id] as Node3D).position + Vector3(0, 4, 0))}
+	# lot F3 : une barque (ou un bateau) qui rentre et qu'on peut aider à débarquer
+	if t == "boat" and d != null and d.fishing_view != null:
+		var hb := d.fishing_view.helpable()
+		if not hb.is_empty():
+			return {"pos": d.to_screen(d.fishing_view.boat_pos(hb[0]) + Vector3(0, 1.5, 0))}
 	if t == "vehicle" and d != null and not d.traffic.vehicles.is_empty():
 		return {"pos": d.to_screen((d.traffic.vehicles[0].node as Node3D).position + Vector3(0, 2, 0))}
 	if t == "barrier" and d != null:
@@ -437,10 +447,12 @@ const OLD_ORDER := ["welcome", "ship", "crane", "quay", "quay", "quay", "manager
 const REV2_ORDER := ["welcome", "ship", "crane", "quay", "quay", "goulot", "goulot_fix", "manager", "building", "mission", "commerce", "contracts"]
 const REV3_ORDER := ["welcome", "ship", "crane", "quay", "quay", "goulot", "goulot_fix", "manager", "parc", "building", "gate", "mission", "commerce", "contracts"]
 const REV4_ORDER := ["welcome", "ship", "crane", "quay", "buy", "goulot", "goulot_fix", "parc", "parc", "building", "gate", "mission", "commerce", "contracts"]
+## Version 5 (avant le lot F3) : pas encore les trois étapes de l'acte 0 en tête ; même suite ensuite.
+const REV5_ORDER := ["welcome", "ship", "crane", "quay", "buy", "goulot", "goulot_fix", "parc", "manager", "building", "gate", "mission", "commerce", "contracts"]
 
 
 func _from_old_index(old: int, rev: int = 1) -> int:
-	var order: Array = REV4_ORDER if rev == 4 else (REV3_ORDER if rev == 3 else (REV2_ORDER if rev == 2 else OLD_ORDER))
+	var order: Array = REV5_ORDER if rev == 5 else (REV4_ORDER if rev == 4 else (REV3_ORDER if rev == 3 else (REV2_ORDER if rev == 2 else OLD_ORDER)))
 	if old >= order.size():
 		return steps.size()
 	for i in steps.size():

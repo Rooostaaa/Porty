@@ -75,24 +75,37 @@ func _draw() -> void:
 		useful = Rect2()
 	draw_set_transform(-position)       # coordonnées écran (le contrôle est posé sur le rectangle utile)
 	var top_y := useful.position.y if useful.has_area() else 0.0
-	# navires
+	# lot F3 : pendant l'acte 0 (bascule comprise), le port à conteneurs est fermé : seules la bulle de la pêche (« Touche ! »
+	# sur un bateau qui rentre) et les gains s'affichent
+	if sim.fishing.act0:
+		_draw_fishing(top_y)
+		_draw_popups()
+		return
+	# navires (lot F1) : en rade, la bulle d'humeur de l'escale liée ; à quai, le déchargement du navire à l'écran ; furieux
 	for s in sim.ships:
+		if s.state != Ship.State.ANCHORED and s.state != Ship.State.ARRIVING:
+			continue
 		var v: ShipView = diorama.ship_views.get(s.id)
-		if v == null:
+		if v == null or not is_instance_valid(v):
 			continue
 		var sp := _sp(v.bubble_point())
 		if sp.y < top_y or (useful.has_area() and not useful.grow(10.0).has_point(sp)):
 			continue
-		if s.state == Ship.State.ANCHORED or s.state == Ship.State.ARRIVING:
-			_mood_bubble(sp, s.patience_ratio(), s.mood(), s.priority)
-		elif s.state == Ship.State.UNLOADING or s.state == Ship.State.FORMALITIES:
-			var prog := s.progress()
-			_ring(sp, 30.0, prog, UI.INFO, Color.WHITE)
-			_text_c(sp + Vector2(0, 11), "%d%%" % roundi(prog * 100.0) if s.state == Ship.State.UNLOADING else "…", 26, UI.TEXT)
-			if s.state == Ship.State.FORMALITIES:
-				_pill(sp + Vector2(0, -60), "Formalités", Color("#4B3FB5"), "customs")
-		elif s.state == Ship.State.LEAVING:
-			_pill(sp + Vector2(0, -10), "Furieux !", UI.BAD, "")
+		_mood_bubble(sp, s.patience_ratio(), s.mood(), s.priority)
+	for mv in diorama.moored_views():
+		var sp2 := _sp(mv.bubble_point())
+		if sp2.y < top_y or (useful.has_area() and not useful.grow(10.0).has_point(sp2)):
+			continue
+		var prog := mv.progress()
+		_ring(sp2, 30.0, prog, UI.INFO, Color.WHITE)
+		_text_c(sp2 + Vector2(0, 11), "…" if mv.in_formalities() else "%d%%" % roundi(prog * 100.0), 26, UI.TEXT)
+		if mv.in_formalities():
+			_pill(sp2 + Vector2(0, -60), "Formalités", Color("#4B3FB5"), "customs")
+	for pv in diorama.parting:
+		if is_instance_valid(pv) and pv.angry:
+			var sp3 := _sp(pv.bubble_point())
+			if sp3.y >= top_y and (not useful.has_area() or useful.grow(10.0).has_point(sp3)):
+				_pill(sp3 + Vector2(0, -10), "Furieux !", UI.BAD, "")
 	# gestes manuels disponibles : « Touche ! » sur le prochain navire à accoster, « Coup de main » sur les grues
 	if not sim.managers.harbor:
 		for s in sim.ships:
@@ -189,7 +202,22 @@ func _draw() -> void:
 			if bp.y > top_y + 20.0:
 				draw_circle(bp, 15.0, Color(1, 1, 1, 0.9))
 				_text_c(bp + Vector2(0, 9), str(k + 1), 24, UI.TEXT)
-	# gains qui s'envolent : décalés s'ils chevauchent une bulle (« +2,9 $ » ne recouvre plus « File : 0 », revue D-UI)
+	_draw_popups()
+
+
+## Lot F3 : « Touche ! » sur le bateau de pêche qui rentre (le premier qu'on peut aider).
+func _draw_fishing(top_y: float) -> void:
+	var fv: FishingView = diorama.fishing_view
+	var hb := fv.helpable()
+	if hb.is_empty():
+		return
+	var sp := _sp(fv.boat_pos(hb[0]) + Vector3(0, 2.5, 0))
+	if sp.y > top_y + 30.0 and (not useful.has_area() or useful.grow(10.0).has_point(sp)):
+		_pill_above(sp, "Touche !", UI.AMBER, "boost", UI.TEXT, "fish_gesture")
+
+
+## Gains qui s'envolent : décalés s'ils chevauchent une bulle (« +2,9 $ » ne recouvre plus « File : 0 », revue D-UI).
+func _draw_popups() -> void:
 	for pi in popups.size():
 		var p: Dictionary = popups[pi]
 		var big := bool(p.get("big", false))

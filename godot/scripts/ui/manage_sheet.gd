@@ -599,7 +599,7 @@ func _refresh_port() -> void:
 func refresh() -> void:
 	var s := sim()
 	if _signature() != _sig:
-		rebuild()
+		request_rebuild()
 		return
 	match tab:
 		0:

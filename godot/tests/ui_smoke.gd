@@ -15,6 +15,15 @@ func check(cond: bool, label: String) -> void:
 
 
 ## Nombre de fenêtres ouvertes (voiles ColorRect) : la couche contient aussi des effets transitoires (gerbes, textes) qui se détruisent seuls.
+## Indice d'une étape du tutoriel par son identifiant (data/tutorial.json).
+func _tuto_index(id: String) -> int:
+	var steps: Variant = DataDB.load_json("res://data/tutorial.json")
+	for i in (steps as Array).size():
+		if String(steps[i].id) == id:
+			return i
+	return -1
+
+
 func _npop(hud: Hud) -> int:
 	var n := 0
 	for c in hud.popup_layer.get_children():
@@ -29,7 +38,8 @@ func _wait(n: int = 3) -> void:
 
 
 func _ready() -> void:
-	get_tree().create_timer(90.0).timeout.connect(func() -> void:
+	# (lot F3, recalé : garde-fou en temps réel, 280 s — il comptait le temps de jeu, accéléré ×4–6 par les contrôles F2/F3)
+	get_tree().create_timer(280.0, true, false, true).timeout.connect(func() -> void:
 		printerr("  ÉCHEC délai dépassé")
 		get_tree().quit(2))
 	_run.call_deferred()
@@ -47,7 +57,12 @@ func _run() -> void:
 	save_node.set("enabled", false)
 	st.set("persist_tuto", false)
 	get_tree().root.get_node("Sfx").set("persist", false)      # lot E : jamais d'écriture dans user://audio.cfg du joueur
-	st.set("tuto_step", 1)      # le tutoriel démarre à l'étape « navire en rade »
+	# le tutoriel démarre à l'étape « navire en rade » (lot F3, recalé : retrouvée par son identifiant — trois étapes de l'acte 0
+	# sont en tête de la liste depuis la version 6)
+	var ship_idx := _tuto_index("ship")
+	st.set("tuto_step", ship_idx)
+	st.set("tuto_rev", int((st.get_script() as GDScript).get_script_constant_map()["TUTO_REV"]))
+	gs.set("auto_start", false)      # lot F2 : la partie de test commence tout bâti (le départ est contrôlé à part, _f2_checks)
 	gs.call("new_game")
 	var main := (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	get_tree().root.add_child(main)
@@ -223,7 +238,7 @@ func _run() -> void:
 
 	# tutoriel : étape « navire en rade » puis passage à la suivante quand le joueur touche le navire
 	var tu: Tutorial = hud.tutorial
-	check(tu != null and tu.active and tu.idx == 1, "tutoriel actif à l'étape 1")
+	check(tu != null and tu.active and tu.idx == ship_idx, "tutoriel actif à l'étape « navire » (%d)" % ship_idx)
 	var anchored: Ship = null
 	for _i in 200:
 		for sh in s.ships:
@@ -235,6 +250,9 @@ func _run() -> void:
 	check(anchored != null, "un navire est en rade")
 	if anchored != null:
 		await _wait(3)
+		# (lot F1, recalé) la carte se rafraîchit toutes les 0,25 s : trois images peuvent ne pas suffire après la fermeture
+		# d'Améliorer (plus haut) — on la rafraîchit comme le font les contrôles suivants
+		tu._refresh_card(false)
 		# un menu ouvert cache le repère « touche le navire » et la carte de cette étape, qui reviennent à la fermeture
 		check(not tu._target(tu.steps[tu.idx]).is_empty() and tu._card.visible, "repère du tutoriel sur le navire en rade (%s %s %s %s %s %s)" % [tu._target(tu.steps[tu.idx]), tu._card.visible, hud.any_sheet_open(), tu.idx, hud.diorama.opening_active(), str(hud.diorama.opening_queue)])
 		tu._update_lock()
@@ -253,7 +271,7 @@ func _run() -> void:
 		hud.diorama._on_tapped(wp, Vector2.ZERO)
 		check(s.counter("priority") >= 1, "toucher le navire en rade l'accoste en priorité")
 		tu._refresh_card(false)
-		check(tu.idx >= 2, "le tutoriel passe à l'étape suivante (%d)" % tu.idx)
+		check(tu.idx >= ship_idx + 1, "le tutoriel passe à l'étape suivante (%d)" % tu.idx)
 
 	# chapitres : la grue, le parc puis la gate au niveau 10 ouvrent le chapitre suivant, avec un bandeau explicatif
 	s.counters["evp"] = float(s.counters.get("evp", 0.0)) + 200.0
@@ -614,6 +632,11 @@ func _run() -> void:
 	await _e_confiance_checks(hud, ns)
 	# lot E-Flux (contrôles dans leur propre fonction)
 	await _e_flux_checks(hud)
+	# lot F1 — navires à l'écran (la partie est au T3 depuis les contrôles E-Flux) ; défilement des feuilles
+	await _f1_ship_checks(hud)
+	await _f1_scroll_checks(hud)
+	# lot F2 — départ de rien, chantiers, trafic lié à ce qui existe, bord du monde (nouvelle partie à la fin : elle remplace tout)
+	await _f2_checks(hud)
 
 	print("=== %d échec(s) ===" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
@@ -806,7 +829,9 @@ func _ship_view_checks(hud: Hud, s: PortSim) -> void:
 	sh.state = Ship.State.PILOTING
 	sh.timer = 20.0
 	var still := true
-	for i in 700:
+	# (lot F1, recalé : 1 500 images au lieu de 700 — à vitesse de croisière, le pilotage depuis la place n°2 prend ≈ 60 s, plus
+	# 29 s de retenue ; avant, la vue suivait le minuteur de la simulation et pouvait filer à 50 u/s)
+	for i in 1500:
 		v.hold = i >= 10 and i < 300
 		sh.timer -= dt
 		if sh.state == Ship.State.PILOTING and sh.timer <= 0.0:
@@ -858,7 +883,9 @@ func _ship_view_checks(hud: Hud, s: PortSim) -> void:
 			break
 		trail3.append(v.position)
 	var end_p: Vector3 = v.shown_path().back()
-	var far := Vector2(v.position.x, v.position.z).distance_to(Vector2(end_p.x, end_p.z)) < 0.5 and v.position.z < -150.0
+	# (lot F1, recalé : 0,5 u → une demi-longueur + 0,5 u) à la sortie, la coque reste sur la corde étrave–poupe : son centre
+	# finit une demi-longueur derrière le bout du trajet (avant, il revenait d'un coup sur le dernier point)
+	var far := Vector2(v.position.x, v.position.z).distance_to(Vector2(end_p.x, end_p.z)) < v.length * 0.5 + 0.5 and v.position.z < -150.0
 	check(kept and done and far and _trail_on_land(trail3) == 0,
 		"C7 A1 : un navire qui part n'est pas effacé en pleine vue — il finit son trajet jusqu'à la sortie (gardé %s, au bout %s, hors du port %s)" % [kept, done, far])
 	# A1 : cas symétrique — chacun « suit » l'autre : un seul cède (le plus grand identifiant)
@@ -1463,7 +1490,11 @@ func _d_monde_checks(hud: Hud, s: PortSim) -> void:
 	dio._ship_cargo0[sh.id] = sh.left.duplicate()
 	sh.left[0] = 0.0
 	sh.state = Ship.State.DEPARTING
+	# (lot F1, recalé) si un navire est à quai ou en route vers le poste à l'écran, le montant attend son départ (pay_out)
+	var bv0 := dio.berth_view(0)
 	dio._on_ship_state(sh)
+	if bv0 != null and got.is_empty():
+		dio.pay_out(0, bv0.position)
 	dio.ship_paid.disconnect(cb)
 	check(got.size() == 1 and float(got[0][1]) > 0.0 and (got[0][0] as Vector3).y > 2.0,
 		"D-Monde : ship_paid au départ du poste (%s)" % (Fmt.money(float(got[0][1])) if got.size() == 1 else "rien"))
@@ -1476,6 +1507,12 @@ func _d_monde_checks(hud: Hud, s: PortSim) -> void:
 		sh0.state = Ship.State.UNLOADING
 		sh0.berth = 0
 		s.berths[0].ship = sh0.id
+		# (lot F1, recalé) la foule entoure le navire à quai à l'écran : un navire posé au poste 1, en plein déchargement
+		var mv0 := ShipView.new()
+		dio.ships_root.add_child(mv0)
+		mv0.setup(_fake_ship(s, 99002, Ship.State.UNLOADING, 0, 0, 0.0), s)
+		mv0.moor_now(0, 0.3)
+		dio.fleet.push_front(mv0)
 		var lv0: int = s.levels.berths
 		var lc0: int = s.levels.cranes
 		s.levels.berths = 1
@@ -1494,9 +1531,17 @@ func _d_monde_checks(hud: Hud, s: PortSim) -> void:
 		sh0.state = st0
 		sh0.berth = b0
 		s.berths[0].ship = bs0
+		dio.fleet.erase(mv0)
+		mv0.queue_free()
 		check(deck_low >= 1 and n_high > n_low and n_high <= Diorama.CROWD_MAX and shown > 0 and shown <= Diorama.CROWD_MAX,
 			"D-Monde : dockers au déchargement — %d puis %d avec plus d'agents (plafond %d), dont %d sur le pont, %d affichés" % [n_low, n_high, Diorama.CROWD_MAX, deck_low, shown])
 	# conteneurs posés : un conteneur qui arrive sur le tablier descend à sa place au lieu d'apparaître d'un coup
+	# (lot F1, recalé) tablier ramené à 20 % d'abord : plein (la partie du test tourne en temps réel), aucun conteneur de plus ne
+	# pouvait s'y poser
+	for ci in s.apron.size():
+		s.apron[ci] = 0.0
+	s.apron[0] = s.apron_capacity() * 0.2
+	await _wait(2)
 	var d0 := dio.yard.drops_started
 	s.apron[0] = s.apron[0] + maxf(20.0, s.apron_capacity() * 0.3)
 	await get_tree().create_timer(0.3).timeout
@@ -1950,3 +1995,899 @@ func _e_flux_checks(hud: Hud) -> void:
 		and ra_ok and bc.b > bc.r and roofs >= 1,
 		"E-Flux mineurs : cargaison oubliée au départ (%s), %d douaniers réservés (%d dockers, plafond %d), bulle de rade sur une place (%s), gyrophares bleus, %d toit(s)" % [
 		not dio._ship_cargo0.has(99777), customs, dockers, Diorama.CROWD_MAX, ra_ok, roofs])
+
+
+# ---------------------------------------------------------------------------
+# Lot F1 — navires à l'écran
+# ---------------------------------------------------------------------------
+
+## Un voyage complet d'une vue (mouillage → poste → départ hors champ), image par image (0,1 s), seule sur l'eau : mesures.
+func _f1_voyage(dio: Diorama, s: PortSim, cls: String, slot: int, bi: int, id: int) -> Dictionary:
+	var sh := _fake_ship(s, id, Ship.State.ANCHORED, slot, bi, 0.0)
+	sh.cls = cls
+	var v := ShipView.new()
+	dio.ships_root.add_child(v)
+	v.setup(sh, s)
+	v.place(sh, s)
+	v.dispatch(bi)
+	v.gate_level = 2
+	var dt := 0.1
+	var cruise := v.cruise_speed()
+	var by := Layout.berth_yaw(bi)
+	var reclaim := bi >= Layout.EAST_BERTH0
+	var r := {"ratio": 0.0, "steady": 0.0, "steady_n": 0, "pivot": 0.0, "crab_yaw0": -1.0, "crab_lat": 1.0, "last8": 0.0,
+		"tug_man": 0, "man": 0, "bow": 0, "tug_sea": 0, "crab": 0, "out_lat": 1.0, "out_dyaw": 0.0, "land": 0, "t_in": 0.0, "t": 0.0,
+		"done": false, "yaw_rate": 0.0}
+	var crab_pts: Array = []
+	for i in 9000:
+		var ph := v.phase
+		if ph == ShipView.Phase.MOORED:
+			r.t_in = r.t
+			v.depart()
+			continue
+		var p0 := v.position
+		var y0 := v.yaw()
+		v.step(dt)
+		r.t = float(r.t) + dt
+		var dp := Vector2(v.position.x - p0.x, v.position.z - p0.z)
+		r.ratio = maxf(float(r.ratio), dp.length() / dt / cruise)
+		var dy := absf(angle_difference(y0, v.yaw()))
+		# en régime : à la vitesse de croisière, en ligne droite (dans un virage, la coque coupe la courbe)
+		if ph == ShipView.Phase.INBOUND and v.speed() >= cruise * 0.999 and dy < 0.002:
+			r.steady = float(r.steady) + dp.length() / dt
+			r.steady_n = int(r.steady_n) + 1
+		if v.speed() < 0.05 and ph != ShipView.Phase.ANCHOR:
+			r.pivot = float(r.pivot) + dy          # rotation navire arrêté (pivot sur place)
+		var fw0 := Vector2(cos(y0), -sin(y0)) * v.length * 0.5
+		var fw1 := Vector2(cos(v.yaw()), -sin(v.yaw())) * v.length * 0.5
+		if v.in_maneuver() and (Vector2(v.position.x, v.position.z) + fw1).distance_to(Vector2(p0.x, p0.z) + fw0) >= 0.3 * v.maneuver_speed() * dt:
+			r.bow = int(r.bow) + 1
+		var side := Vector2(sin(v.yaw()), cos(v.yaw()))
+		if ph == ShipView.Phase.CRAB_IN:
+			if float(r.crab_yaw0) < 0.0:
+				r.crab_yaw0 = absf(angle_difference(y0, by))
+			crab_pts.append([v.position, v.yaw()])
+			if dp.length() > 0.03:
+				r.crab_lat = minf(float(r.crab_lat), absf(dp.normalized().dot(side)))
+			r.crab = int(r.crab) + 1
+			if v.tug != null and v.tug.position.z < v.position.z - v.width * 0.5:
+				r.tug_sea = int(r.tug_sea) + 1
+		if v.in_maneuver():
+			r.man = int(r.man) + 1
+			if v.tug_attached() and v.tug.position.distance_to(v.position) < v.length * 0.5 + v.width + 4.0:
+				r.tug_man = int(r.tug_man) + 1
+		if ph == ShipView.Phase.CRAB_OUT:
+			if dp.length() > 0.03:
+				r.out_lat = minf(float(r.out_lat), absf(dp.normalized().dot(side)))
+			r.out_dyaw = maxf(float(r.out_dyaw), absf(angle_difference(v.yaw(), by)))
+		if Layout.on_land(Vector2(v.position.x, v.position.z), reclaim):
+			r.land = int(r.land) + 1
+		if v.phase == ShipView.Phase.DONE:
+			r.done = true
+			break
+	# cap sur les 8 derniers mètres avant le poste
+	var acc := 0.0
+	for k in range(crab_pts.size() - 1, 0, -1):
+		acc += (crab_pts[k][0] as Vector3).distance_to(crab_pts[k - 1][0])
+		if acc > 8.0:
+			break
+		r.last8 = maxf(float(r.last8), absf(angle_difference(float(crab_pts[k][1]), by)))
+	r.yaw_rate = v.max_yaw_rate_seen
+	r.steady = float(r.steady) / maxf(1.0, float(r.steady_n))
+	v.queue_free()
+	return r
+
+
+func _f1_ship_checks(hud: Hud) -> void:
+	var gs: Node = get_tree().root.get_node("GameState")
+	var s: PortSim = gs.get("sim")
+	var dio := hud.diorama
+	var t0 := Time.get_ticks_msec()
+	# 1. voyages : chaque classe vers ses postes, depuis plusieurs places de mouillage
+	var cases := []
+	for bi in 2:
+		for cls in ["mini", "coaster", "feeder"]:
+			for slot in [0, 1, 4]:
+				cases.append([cls, slot, bi])
+	for bi in [2, 3]:
+		for cls in ["feeder", "panamax"]:
+			for slot in [0, 7]:
+				cases.append([cls, slot, bi])
+	var by_cls := {}
+	var worst := {"ratio": 0.0, "yaw_rate": 0.0, "pivot": 0.0, "crab_yaw0": 0.0, "last8": 0.0, "crab_lat": 1.0, "out_lat": 1.0,
+		"out_dyaw": 0.0, "land": 0, "tug_man": 1.0, "tug_sea": 1.0, "bow": 1.0}
+	var not_done: Array[String] = []
+	var id := 98000
+	for c in cases:
+		id += 1
+		var r := _f1_voyage(dio, s, String(c[0]), int(c[1]), int(c[2]), id)
+		if not bool(r.done):
+			not_done.append("%s %d→%d" % [c[0], c[1], c[2]])
+		if not by_cls.has(c[0]):
+			by_cls[c[0]] = []
+		(by_cls[c[0]] as Array).append(float(r.steady))
+		worst.ratio = maxf(float(worst.ratio), float(r.ratio))
+		worst.yaw_rate = maxf(float(worst.yaw_rate), float(r.yaw_rate))
+		worst.pivot = maxf(float(worst.pivot), float(r.pivot))
+		worst.crab_yaw0 = maxf(float(worst.crab_yaw0), float(r.crab_yaw0))
+		worst.last8 = maxf(float(worst.last8), float(r.last8))
+		worst.crab_lat = minf(float(worst.crab_lat), float(r.crab_lat))
+		worst.out_lat = minf(float(worst.out_lat), float(r.out_lat))
+		worst.out_dyaw = maxf(float(worst.out_dyaw), float(r.out_dyaw))
+		worst.land = int(worst.land) + int(r.land)
+		worst.tug_man = minf(float(worst.tug_man), float(r.tug_man) / maxf(1.0, float(r.man)))
+		worst.tug_sea = minf(float(worst.tug_sea), float(r.tug_sea) / maxf(1.0, float(r.crab)))
+		worst.bow = minf(float(worst.bow), float(r.bow) / maxf(1.0, float(r.man)))
+	var spread := 0.0
+	var spread_txt := []
+	for k in by_cls:
+		var a: Array = by_cls[k]
+		var lo := INF
+		var hi := 0.0
+		for x in a:
+			lo = minf(lo, float(x))
+			hi = maxf(hi, float(x))
+		spread = maxf(spread, hi / maxf(0.01, lo) - 1.0)
+		spread_txt.append("%s %s–%s" % [k, Fmt.num(lo), Fmt.num(hi)])
+	check(not_done.is_empty() and float(worst.ratio) <= 1.3 and spread < 0.15,
+		"F1 : vitesse — au plus %s × la croisière (≤ 1,3), écart en régime d'un navire à l'autre de la même classe %d %% (< 15 %% ; u/s : %s), %d voyages complets %s" % [
+		Fmt.num(float(worst.ratio)), roundi(spread * 100.0), ", ".join(spread_txt), cases.size(), str(not_done)])
+	check(rad_to_deg(float(worst.yaw_rate)) < 25.0 and rad_to_deg(float(worst.pivot)) < 1.0 and int(worst.land) == 0,
+		"F1 : rotation au plus %s°/s (< 25), %s° de rotation à l'arrêt au plus sur un voyage (pas de pivot sur place), aucun point dans la terre (%d)" % [
+		Fmt.num(rad_to_deg(float(worst.yaw_rate))), Fmt.num(rad_to_deg(float(worst.pivot))), int(worst.land)])
+	check(rad_to_deg(float(worst.crab_yaw0)) < 3.0 and rad_to_deg(float(worst.last8)) < 5.0 and float(worst.crab_lat) > 0.98 and float(worst.tug_sea) > 0.9,
+		"F1 : accostage en crabe — cap à %s° du quai au début du glissement, %s° au plus sur les 8 derniers mètres (< 5), glissement latéral (%s), remorqueur côté large %d %% du temps" % [
+		Fmt.num(rad_to_deg(float(worst.crab_yaw0))), Fmt.num(rad_to_deg(float(worst.last8))), Fmt.num(float(worst.crab_lat)), roundi(float(worst.tug_sea) * 100.0)])
+	check(float(worst.tug_man) > 0.85 and float(worst.bow) > 0.9 and float(worst.out_lat) > 0.98 and rad_to_deg(float(worst.out_dyaw)) < 1.0,
+		"F1 : évitage en avançant (l'étrave avance %d %% du temps de la manœuvre), remorqueur à poste %d %% du temps (au plus près) ; départ : glissement latéral d'abord (%s, cap tenu à %s°)" % [
+		roundi(float(worst.bow) * 100.0), roundi(float(worst.tug_man) * 100.0), Fmt.num(float(worst.out_lat)), Fmt.num(rad_to_deg(float(worst.out_dyaw)))])
+	# 2. jamais plus vite parce que le port s'est amélioré : même voyage, Capitainerie et Renom au plus bas puis au plus haut
+	var lv_h: int = s.levels.harbor
+	var ren: int = s.renown
+	s.levels.harbor = 1
+	s.renown = 0
+	s.invalidate()
+	var slow := _f1_voyage(dio, s, "coaster", 1, 0, 98900)
+	s.levels.harbor = 400
+	s.renown = 50
+	s.invalidate()
+	var fast := _f1_voyage(dio, s, "coaster", 1, 0, 98901)
+	s.levels.harbor = lv_h
+	s.renown = ren
+	s.invalidate()
+	check(absf(float(slow.t_in) - float(fast.t_in)) < 0.2 and float(slow.t_in) > 40.0,
+		"F1 : durée du pilotage indépendante des améliorations (%s s au niveau 1, %s s au niveau 400 et Renom 50)" % [Fmt.num(float(slow.t_in)), Fmt.num(float(fast.t_in))])
+	# 3. chef d'orchestre du diorama sur une vraie partie au T3 (2 min 30 de jeu, image par image) : chaque escale en rade a
+	# sa vue, un navire au plus en route et à quai par poste, nombre de vues borné, navires déchargés à l'écran
+	var dt := 0.1
+	var missing := 0
+	var too_many := 0
+	var max_views := 0
+	var moored_seen := {}
+	var paid0 := dio.ships_paid
+	var reps0 := dio.berth_reps
+	var cap := s.rade_places() + 4 * s.berths.size() + 8
+	# mise en route (2 min) : le premier voyage mouillage → quai dure 70 à 150 s, la fenêtre observée commence port rempli
+	for i in 1200:
+		s.step(dt)
+		dio.step_ships(dt)
+	paid0 = dio.ships_paid
+	reps0 = dio.berth_reps
+	for i in 1500:
+		s.step(dt)
+		dio.step_ships(dt)
+		for sh in s.ships:
+			if (sh.state == Ship.State.ARRIVING or sh.state == Ship.State.ANCHORED) and not dio.ship_views.has(sh.id):
+				missing += 1
+		for bi in s.berths.size():
+			var n_in := 0
+			var n_at := 0
+			for v in dio.fleet:
+				if v.berth_i == bi and v.phase == ShipView.Phase.INBOUND:
+					n_in += 1
+				if v.berth_i == bi and (v.phase == ShipView.Phase.CRAB_IN or v.phase == ShipView.Phase.MOORED):
+					n_at += 1
+					if v.phase == ShipView.Phase.MOORED:
+						moored_seen[v.vid] = true
+			if n_in > Diorama.INBOUND_MAX or n_at > 1:
+				too_many += 1
+		max_views = maxi(max_views, dio.fleet.size() + dio.parting.size())
+	check(missing == 0 and too_many == 0 and max_views <= cap and moored_seen.size() >= 2 and dio.ships_paid > paid0,
+		"F1 : navires à l'écran au T3 — escales en rade sans vue %d, postes surchargés %d, %d vues au plus (≤ %d), %d navires déchargés à quai, %d encaissements, %d envois de la file" % [
+		missing, too_many, max_views, cap, moored_seen.size(), dio.ships_paid - paid0, dio.berth_reps - reps0])
+	print("  (F1 navires : %d ms)" % (Time.get_ticks_msec() - t0))
+	await _wait(2)
+
+
+## Lot F1 — défilement : un glissé (doigt : ScreenTouch/ScreenDrag ; souris : survol, appui, mouvements) de `dy` px en `steps`
+## pas depuis p ; `mid` est appelé au milieu du glissé, `before_move` juste après l'appui.
+func _f1_swipe(p: Vector2, dy: float, steps: int, mouse: bool, mid: Callable = Callable(), before_move: Callable = Callable()) -> void:
+	var vp := get_viewport()
+	if mouse:
+		var hv := InputEventMouseMotion.new()
+		hv.position = p
+		hv.global_position = p
+		vp.push_input(hv, true)
+		await _wait(1)
+		var mb := InputEventMouseButton.new()
+		mb.button_index = MOUSE_BUTTON_LEFT
+		mb.pressed = true
+		mb.button_mask = MOUSE_BUTTON_MASK_LEFT
+		mb.position = p
+		mb.global_position = p
+		vp.push_input(mb, true)
+	else:
+		var st := InputEventScreenTouch.new()
+		st.pressed = true
+		st.position = p
+		vp.push_input(st, true)
+	await _wait(1)
+	if before_move.is_valid():
+		before_move.call()
+	var q := p
+	for i in steps:
+		var rel := Vector2(0, dy / float(steps))
+		q += rel
+		if mouse:
+			var mm := InputEventMouseMotion.new()
+			mm.position = q
+			mm.global_position = q
+			mm.relative = rel
+			mm.button_mask = MOUSE_BUTTON_MASK_LEFT
+			vp.push_input(mm, true)
+		else:
+			var sd := InputEventScreenDrag.new()
+			sd.position = q
+			sd.relative = rel
+			vp.push_input(sd, true)
+		await _wait(1)
+		if i == steps / 2 and mid.is_valid():
+			mid.call()
+	if mouse:
+		var mr := InputEventMouseButton.new()
+		mr.button_index = MOUSE_BUTTON_LEFT
+		mr.pressed = false
+		mr.position = q
+		mr.global_position = q
+		vp.push_input(mr, true)
+	else:
+		var sr := InputEventScreenTouch.new()
+		sr.pressed = false
+		sr.position = q
+		vp.push_input(sr, true)
+	await _wait(2)
+
+
+func _f1_find(n: Node, want_hold: bool, sh: Sheet) -> Control:
+	var r := sh.scroll.get_global_rect().grow(-60)
+	for c in n.get_children():
+		if c is Control and (c as Control).is_visible_in_tree() and r.has_point((c as Control).get_global_rect().get_center()):
+			if want_hold and c is BaseButton and not (c as BaseButton).disabled:
+				for k in c.get_children():
+					if k is HoldRepeat:
+						return c
+			if not want_hold and c is Label:
+				return c
+		var f := _f1_find(c, want_hold, sh)
+		if f != null:
+			return f
+	return null
+
+
+func _f1_levels(s: PortSim) -> int:
+	var n := 0
+	for d in PortSim.DEPTS:
+		n += int(s.levels[d])
+	return n
+
+
+func _f1_scroll_checks(hud: Hud) -> void:
+	var gs: Node = get_tree().root.get_node("GameState")
+	var s: PortSim = gs.get("sim")
+	hud.tutorial.active = false
+	for c in hud.sheet_layer.get_children():
+		c.queue_free()
+	for p in hud.popup_layer.get_children():
+		p.queue_free()
+	s.money = maxf(s.money, 1e15)
+	await _wait(2)
+	hud.open_upgrades("")
+	await _wait(6)
+	var sh := hud.current_sheet()
+	var vbar := sh.scroll.get_v_scroll_bar()
+	var room := vbar.max_value - vbar.page
+	# reconstruction forcée avec la liste à mi-course : le défilement est gardé
+	sh.scroll.scroll_vertical = 300
+	await _wait(2)
+	sh.rebuild()
+	await _wait(4)
+	var kept := sh.scroll.scroll_vertical
+	# glissé au doigt depuis un texte, une reconstruction demandée au milieu (différée au relâchement)
+	sh.scroll.scroll_vertical = 200
+	await _wait(2)
+	var lab := _f1_find(sh.content, false, sh)
+	var found := lab != null
+	var d0 := sh.rebuilds_deferred
+	var b0 := sh.scroll.scroll_vertical
+	if lab != null:
+		await _f1_swipe(lab.get_global_rect().get_center(), -200.0, 10, false, func() -> void: sh.request_rebuild())
+	sh._fling = 0.0
+	await _wait(4)
+	var b1 := sh.scroll.scroll_vertical
+	check(room > 400.0 and kept == 300 and found and b1 - b0 > 150 and sh.rebuilds_deferred == d0 + 1 and not sh.touching(),
+		"F1 défilement : Améliorer garde sa position à travers une reconstruction (%d) ; un glissé au doigt depuis un texte fait défiler (%d → %d), la reconstruction demandée pendant le glissé attend le relâchement (%d ; doigt levé %s, marge %d px)" % [
+		kept, b0, b1, sh.rebuilds_deferred - d0, not sh.touching(), roundi(room)])
+	# glissé depuis un bouton d'achat (doigt, puis souris), appui maintenu 0,3 s avant de bouger : défile, n'achète pas
+	var res := []
+	for mouse in [false, true]:
+		sh.scroll.scroll_vertical = 250
+		await _wait(3)
+		var btn := _f1_find(sh.content, true, sh)
+		if btn == null:
+			res.append("aucun bouton")
+			continue
+		var hr: HoldRepeat = null
+		for k in btn.get_children():
+			if k is HoldRepeat:
+				hr = k
+		var lv0 := _f1_levels(s)
+		var c0 := sh.scroll.scroll_vertical
+		await _f1_swipe(btn.get_global_rect().get_center(), -60.0, 6, mouse, Callable(), func() -> void: hr.tick(0.3))
+		hr.tick(1.0)
+		sh._fling = 0.0
+		await _wait(3)
+		res.append([mouse, sh.scroll.scroll_vertical - c0, _f1_levels(s) - lv0, hr.is_repeating()])
+	var ok_btn := res.size() == 2
+	for r in res:
+		if not (r is Array) or int(r[1]) < 30 or int(r[2]) != 0 or bool(r[3]):
+			ok_btn = false
+	# appui bref à la souris sur le même genre de bouton : achète
+	sh.scroll.scroll_vertical = 250
+	await _wait(3)
+	var btn2 := _f1_find(sh.content, true, sh)
+	var lv1 := _f1_levels(s)
+	if btn2 != null:
+		await _f1_swipe(btn2.get_global_rect().get_center(), 0.0, 1, true)
+	var tap := _f1_levels(s) - lv1
+	check(ok_btn and tap >= 1,
+		"F1 défilement : glissé depuis un bouton d'achat (doigt, souris ; appui de 0,3 s avant de bouger) — défile sans acheter %s ; un appui bref achète (+%d niveau)" % [str(res), tap])
+	# molette (PC)
+	sh.scroll.scroll_vertical = 0
+	await _wait(2)
+	var wp := sh.scroll.get_global_rect().get_center()
+	for i in 2:
+		var w := InputEventMouseButton.new()
+		w.button_index = MOUSE_BUTTON_WHEEL_DOWN
+		w.pressed = true
+		w.factor = 1.0
+		w.position = wp
+		w.global_position = wp
+		get_viewport().push_input(w, true)
+		await _wait(1)
+	var wheel := sh.scroll.scroll_vertical
+	sh.close()
+	await _wait(3)
+	# Commerce et Gestion (onglet le plus long) : glissé à la souris depuis un texte
+	var other := []
+	for kind in ["commerce", "manage"]:
+		var best_sh: Sheet = null
+		for tb in 4:
+			for c in hud.sheet_layer.get_children():
+				c.queue_free()
+			await _wait(2)
+			hud.open_sheet(CommerceSheet.new(tb) if kind == "commerce" else ManageSheet.new(tb))
+			await _wait(5)
+			var cand := hud.current_sheet()
+			var vb := cand.scroll.get_v_scroll_bar()
+			if vb.max_value - vb.page > 300.0:
+				best_sh = cand
+				break
+			if kind == "commerce" and tb >= 2:
+				break
+		if best_sh == null:
+			other.append([kind, "liste courte"])
+			continue
+		best_sh.scroll.scroll_vertical = 100
+		await _wait(2)
+		var l2 := _f1_find(best_sh.content, false, best_sh)
+		var e0 := best_sh.scroll.scroll_vertical
+		if l2 != null:
+			await _f1_swipe(l2.get_global_rect().get_center(), -150.0, 8, true)
+		best_sh._fling = 0.0
+		other.append([kind, best_sh.tab, best_sh.scroll.scroll_vertical - e0])
+	for c in hud.sheet_layer.get_children():
+		c.queue_free()
+	var ok_other := true
+	for o in other:
+		if o.size() == 3 and int(o[2]) < 100:
+			ok_other = false
+	check(wheel > 100 and ok_other,
+		"F1 défilement : molette (0 → %d) ; glissé à la souris dans Commerce et Gestion %s" % [wheel, str(other)])
+	await _wait(2)
+
+
+## Lot F2 : achat d'un bâtiment sans passer par l'ordre de la liste (la simulation applique, le monde lance le chantier).
+func _f2_build(s: PortSim, bid: String) -> void:
+	if not s.built.has(bid):
+		s.built.append(bid)
+		s.rebuild_infra()
+		s.purchased.emit("building", bid)
+
+
+## Lot F2 : attend (temps accéléré) que le chantier `key` finisse ; renvoie le nombre d'images où `bad` a été vrai pendant
+## le chantier.
+func _f2_wait_site(dio: Diorama, key: String, bad: Callable = Callable()) -> int:
+	var n := 0
+	var guard := Time.get_ticks_msec()
+	while dio.sites.active(key) and Time.get_ticks_msec() - guard < 20000:
+		await get_tree().process_frame
+		if bad.is_valid() and bool(bad.call()):
+			n += 1
+	await _wait(3)
+	return n
+
+
+## Lot F2 — départ de rien (friche, cartes d'intro, séquence de chantiers du T1, premier navire), chantiers d'un achat, trafic
+## lié à ce qui existe (par palier et par bâtiment), bord du monde. Nouvelle partie avec son départ ; temps accéléré
+## (Engine.time_scale) : les durées se lisent sur les horloges du monde (chantiers, diorama), elles-mêmes accélérées.
+func _f2_checks(hud: Hud) -> void:
+	var t_start := Time.get_ticks_msec()
+	var gs: Node = get_tree().root.get_node("GameState")
+	var st: Node = get_tree().root.get_node("Settings")
+	var sim_r: Node = get_tree().root.get_node("Sim")
+	var dio := hud.diorama
+	for c in hud.sheet_layer.get_children():
+		c.queue_free()
+	for p in hud.popup_layer.get_children():
+		p.queue_free()
+	hud.tutorial.active = false
+	st.set("intro_seen", false)
+	gs.set("auto_start", true)
+	gs.call("new_game")
+	await _wait(4)
+	var s: PortSim = gs.get("sim")
+	_f3_gap = {"max": 0.0, "cur": 0.0, "last": -1.0, "on": false, "worst_at": ""}
+	# 1. la friche : rien de ce qui s'achète n'existe (ni quai, ni grue, ni barrières, ni navire, camion ou engin), l'estacade
+	# ruinée et les broussailles à la place ; l'autoroute a déjà son trafic léger de voitures ; la simulation est gelée et la
+	# première carte d'intro est à l'écran. (Lot F3, recalé : « HUD masqué » se lit sur le HUD lui-même — il s'efface sous les
+	# cartes d'intro — et non plus sur le départ, pendant lequel il reste visible ; 24 images d'attente pour son fondu.)
+	await get_tree().create_timer(0.6).timeout
+	var quay_nodes := 0
+	var ruin := 0
+	for c in dio.static_root.get_children():
+		if c.is_queued_for_deletion():
+			continue
+		if String(c.get_meta("site", "")) == "quay0":
+			quay_nodes += 1
+		if String(c.get_meta("before", "")) == "quay0":
+			ruin += 1
+	var cars_ok := dio.traffic.cars.size() >= 3 and dio.traffic.cars.size() <= 5
+	for cr in dio.traffic.cars:
+		var cp: Vector3 = (cr.node as Node3D).position
+		if cp.z < Layout.HIGHWAY_Z0 or cp.z > Layout.HIGHWAY_Z1 or cp.x < float(Layout.HIGHWAY_ENDS[0]) - 0.5 or cp.x > float(Layout.HIGHWAY_ENDS[1]) + 0.5:
+			cars_ok = false
+	var friche := quay_nodes == 0 and ruin >= 1 and dio.crane_views.is_empty() and dio.traffic.barriers.is_empty() and dio.fleet.is_empty() \
+		and dio.traffic.vehicles.is_empty() and dio.traffic.trucks.is_empty() and dio.traffic.queue.is_empty()
+	var gel := bool(sim_r.get("paused")) and s.time == 0.0
+	check(friche and cars_ok and hud.intro_active() and hud.intro_shown == 1 and gel and not hud.top_box.visible,
+		"F2 départ : friche (quai %d, estacade %d, grues %d, barrières %d, navires %d, engins %d, camions %d), %d voitures sur l'autoroute (%s), 1re carte d'intro (%s, %d), simulation gelée (%s), HUD masqué (%s)" % [
+		quay_nodes, ruin, dio.crane_views.size(), dio.traffic.barriers.size(), dio.fleet.size(), dio.traffic.vehicles.size(), dio.traffic.trucks.size() + dio.traffic.queue.size(), dio.traffic.cars.size(),
+		cars_ok, hud.intro_active(), hud.intro_shown, gel, not hud.top_box.visible])
+	# 2. trois cartes de la narratrice, chacune passée d'un toucher ; ensuite l'acte 0 (lot F3, recalé : la séquence de chantiers
+	# du T1 attend la bascule) — port fermé, 0 $, HUD visible, la pêche tourne, le ponton pourri d'Odette, aucun bateau
+	var t1_before := dio.t1_works_active()
+	for i in 3:
+		if hud.intro_active():
+			(hud.intro_layer as Button).pressed.emit()
+		await _wait(2)
+	_f3_gap.on = true
+	await _wait(24)
+	var anse_ruin := 0
+	for c in dio.fishing_view._static.get_children():
+		if not c.is_queued_for_deletion() and String(c.get_meta("before", "")) == "fish_pontoon":
+			anse_ruin += 1
+	check(not t1_before and not hud.intro_active() and hud.intro_shown == 3 and bool(st.get("intro_seen")) and not dio.t1_works_active()
+		and s.fishing.act0 and s.money == 0.0 and not bool(sim_r.get("paused")) and hud.top_box.visible and anse_ruin == 1 and dio.fishing_view.boats.is_empty(),
+		"F2/F3 intro : 3 cartes passées d'un toucher (%d), puis l'acte 0 — port fermé (%s), 0 $, HUD visible (%s), simulation en marche, ponton pourri (%d), aucun bateau" % [
+		hud.intro_shown, s.fishing.act0, hud.top_box.visible, anse_ruin])
+	# lot F3 — l'acte 0 « La Crique » (tutoriel, cartes, bateaux, coup de main, achats, camionnette)
+	await _f3_act0(hud, s)
+	# 3. la bascule (lot F3) : l'argent atteint le seuil — le caboteur de Corsaire & Fils (l'escale initiale) naît au large,
+	# hors champ, la narratrice parle ; un toucher, la cérémonie « Palier 1 — Le Vieux Quai », puis la séquence de chantiers
+	s.money = maxf(s.money, float(s.fishing.cfg.get("switch_money", 300.0)) + 10.0)
+	var spawn_seen := -1
+	var fid := -1
+	for k in 6:
+		await get_tree().process_frame
+		_f3_track(hud)
+		if dio.first_view != null and spawn_seen < 0:
+			var vr0 := Rect2(Vector2.ZERO, hud.get_viewport_rect().size)
+			var fp0 := dio.first_view.position
+			var fw0 := Vector3(cos(dio.first_view.yaw()), 0, -sin(dio.first_view.yaw())) * dio.first_view.length * 0.5
+			spawn_seen = 1 if (vr0.has_point(dio.to_screen(fp0)) or vr0.has_point(dio.to_screen(fp0 + fw0)) or vr0.has_point(dio.to_screen(fp0 - fw0))) else 0
+			fid = dio.first_view.sid
+	var fsh := s.ship_by_id(fid)
+	var corsaire := fsh != null and fsh.owner == "corsaire"
+	check(hud.bascule_on and hud.story_active() and corsaire and spawn_seen == 0 and s.fishing.act0 and s.time == 0.0 and not dio.t1_works_active(),
+		"F3 bascule : carte de la narratrice (%s), le caboteur de Corsaire & Fils déjà en route, né hors champ (%d), port encore fermé" % [hud.story_active(), spawn_seen])
+	if hud.story_active():
+		(hud.story_layer as Button).pressed.emit()
+	await _wait(2)
+	var cer := hud.ceremony_active() and hud.ceremonies >= 1
+	for k in 4:
+		await get_tree().process_frame
+		_f3_track(hud)
+	hud._finish_ceremony()
+	await _wait(2)
+	check(cer and dio.t1_works_active() and not hud.story_active(), "F3 bascule : un toucher passe la carte, cérémonie « Palier 1 — Le Vieux Quai », puis la séquence de chantiers du T1")
+	# la séquence (temps ×6) : quai → grue → parc → gate, chacun 3 à 6 s, qui se chevauchent (lot F3 : ≤ 15 s en tout) ; HUD
+	# visible et pêche qui rapporte ; le caboteur attend à l'entrée du chenal tant que le quai n'est pas debout (lot F3, recalé :
+	# avant, « aucun navire avant la fin du chantier du quai ») ; ni camion avant la gate, ni engin avant le parc ; l'horloge du
+	# port ne tourne pas
+	var hist0 := dio.sites.history.size()
+	Engine.time_scale = 6.0
+	var order: Array[String] = []
+	var ship_early := 0
+	var paused_ok := true
+	var truck_early := 0
+	var veh_early := 0
+	var hud_hidden := 0
+	var fish0 := s.fishing.earned
+	var fish_works := 0.0
+	var guard := Time.get_ticks_msec()
+	for k in dio.starter_state:
+		if String(dio.starter_state[k]) == "building" and not order.has(String(k)):
+			order.append(String(k))
+	while dio.start_flow_active() and Time.get_ticks_msec() - guard < 40000:
+		await get_tree().process_frame
+		_f3_track(hud)
+		for k in dio.starter_state:
+			if String(dio.starter_state[k]) == "building" and not order.has(String(k)):
+				order.append(String(k))
+		if dio.t1_works_active():
+			fish_works = s.fishing.earned - fish0
+			if not hud.top_box.visible:
+				hud_hidden += 1
+		var fv1 := dio.first_view
+		if not dio.ready_bid("quay0") and fv1 != null and is_instance_valid(fv1) and (fv1.position.z > -108.0 or fv1.phase >= ShipView.Phase.CRAB_IN):
+			ship_early += 1
+		if not dio.ready_bid("quay0") and dio.fleet.size() > (1 if dio.first_view != null else 0):
+			ship_early += 1
+		if s.time > 0.0:
+			paused_ok = false
+		if not dio.ready_bid("gate0") and (not dio.traffic.trucks.is_empty() or not dio.traffic.queue.is_empty()):
+			truck_early += 1
+		if not dio.ready_bid("yard0") and not dio.traffic.vehicles.is_empty():
+			veh_early += 1
+	var fv := dio.first_view
+	var released_crab := fv != null and is_instance_valid(fv) and fv.phase >= ShipView.Phase.CRAB_IN
+	var durs: Array[String] = []
+	var dur_ok := dio.sites.history.size() - hist0 == 4
+	var t0s := INF
+	var t1s := 0.0
+	for h in dio.sites.history.slice(hist0):
+		var real := float(h.t1) - float(h.t0)
+		durs.append("%s %s s" % [h.key, Fmt.num(real)])
+		t0s = minf(t0s, float(h.t0))
+		t1s = maxf(t1s, float(h.t1))
+		if absf(real - float(h.dur)) > 0.3 or float(h.dur) < 3.0 or float(h.dur) > 6.0:
+			dur_ok = false
+	var span := t1s - t0s
+	check(order == ["quay0", "crane0", "yard0", "gate0"] and dur_ok and span <= 15.0 and ship_early == 0 and paused_ok and truck_early == 0 and veh_early == 0 \
+		and hud_hidden == 0 and fish_works > 0.0,
+		"F2/F3 séquence du T1 : %s, chantiers %s, %s s en tout (≤ 15) ; HUD visible (%d images masqué), pêche %s pendant les chantiers ; caboteur au-delà de l'entrée du chenal avant le quai %d, horloge du port arrêtée (%s), camions avant la gate %d, engins avant le parc %d" % [
+		str(order), str(durs), Fmt.num(span), hud_hidden, Fmt.money(fish_works), ship_early, paused_ok, truck_early, veh_early])
+	# 4. le port ouvre quand le premier navire glisse vers le quai ; son escale (arrivée à quai dans la simulation) et son arrivée
+	# à quai à l'écran à moins de 15 s (le joueur le touche dès qu'il peut, comme le demande le tutoriel)
+	await _wait(3)
+	var t_sim := -1.0
+	var t_view := -1.0
+	var tapped := false
+	guard = Time.get_ticks_msec()
+	Engine.time_scale = 4.0
+	while (t_sim < 0.0 or t_view < 0.0) and Time.get_ticks_msec() - guard < 30000:
+		await get_tree().process_frame
+		_f3_track(hud)
+		var sh := s.ship_by_id(fid)
+		if sh != null and sh.state == Ship.State.ANCHORED and not tapped:
+			tapped = s.prioritize_ship(fid)
+		if sh != null and t_sim < 0.0 and sh.state >= Ship.State.MOORING and sh.state <= Ship.State.DEPARTING:
+			t_sim = dio._t
+		if t_sim < 0.0 and sh == null:
+			t_sim = dio._t
+		if fv != null and is_instance_valid(fv) and t_view < 0.0 and fv.phase >= ShipView.Phase.MOORED:
+			t_view = dio._t
+	_f3_gap.on = false
+	Engine.time_scale = 1.0
+	check(released_crab and not bool(sim_r.get("paused")) and not hud.start_flow and not s.fishing.act0 and t_sim >= 0.0 and t_view >= 0.0 and absf(t_sim - t_view) < 15.0 and hud.top_box.visible,
+		"F2 premier navire : le port ouvre au glissement (%s), escale à quai et arrivée à l'écran à %s s d'écart (< 15), HUD visible" % [
+		released_crab, Fmt.num(absf(t_sim - t_view))])
+	check(float(_f3_gap.max) <= 15.0,
+		"F3 : aucune fenêtre de plus de 15 s sans action possible de la fin de l'intro au premier cargo à quai (plus longue : %s s %s)" % [Fmt.num(float(_f3_gap.max)), String(_f3_gap.worst_at)])
+	# l'anse après l'acte 0 : la pêche est passive (revenu fixe), plus de carte ni de pastille, les bateaux vivent toujours
+	hud.open_upgrades("")
+	await _wait(4)
+	var up_after: UpgradesSheet = hud.sheet_layer.get_child(0)
+	var fish_after := up_after.cards.filter(func(c: Dictionary) -> bool: return c.has("fish")).size()
+	up_after.close()
+	await _wait(2)
+	var vis_boats := 0
+	for v in dio.fishing_view.boats:
+		if (v.node as Node3D).visible:
+			vis_boats += 1
+	check(fish_after == 0 and s.fishing.passive_rate() > 0.0 and dio.fishing_view.helpable().is_empty() and vis_boats >= 3 and Hud.worthwhile_count(s) >= 0 and not Hud.fishing_cards(s),
+		"F3 après l'acte 0 : pêche passive (%s/s), plus de carte de la pêche (%d) ni de coup de main, %d bateaux vivent dans l'anse" % [Fmt.num(s.fishing.passive_rate()), fish_after, vis_boats])
+	# 5. chantier d'un achat : palissade et engin, bâtiment caché puis monté, état d'avant effacé ; deux chantiers en même temps
+	s.money = 1.0e7
+	var par0 := dio.sites.max_parallel
+	_f2_build(s, "gravel2")
+	_f2_build(s, "customs1")
+	await _wait(3)
+	var props := 0
+	var machine := false
+	if dio.sites.sites.has("gravel2"):
+		props = (dio.sites.sites["gravel2"].props as Array).size()
+		machine = dio.sites.sites["gravel2"].machine != null
+	var hidden_ok := true
+	var before_n := 0
+	for c in dio.static_root.get_children():
+		if c.is_queued_for_deletion():
+			continue
+		if String(c.get_meta("site", "")) == "customs1" and (c as Node3D).scale.x > 0.05:
+			hidden_ok = false
+		if String(c.get_meta("before", "")) == "gravel2":
+			before_n += 1
+	var during := dio.sites.active("gravel2") and dio.sites.active("customs1") and not dio.ready_bid("gravel2") and dio.sites.sites.size() >= 2
+	Engine.time_scale = 6.0
+	await _f2_wait_site(dio, "gravel2")
+	await _f2_wait_site(dio, "customs1")
+	# (l'ouverture de la zone de la douane tient ses nœuds : le décor est reconstruit à sa fin)
+	var og := Time.get_ticks_msec()
+	while dio.opening_active() and Time.get_ticks_msec() - og < 10000:
+		await get_tree().process_frame
+	await _wait(3)
+	Engine.time_scale = 1.0
+	var after_scale := 0.0
+	var before_left := 0
+	for c in dio.static_root.get_children():
+		if c.is_queued_for_deletion():
+			continue
+		if String(c.get_meta("site", "")) == "customs1":
+			after_scale = maxf(after_scale, (c as Node3D).scale.x)
+		if String(c.get_meta("before", "")) == "gravel2":
+			before_left += 1
+	check(during and props >= 4 and machine and hidden_ok and before_n >= 2 and dio.ready_bid("gravel2") and dio.ready_bid("customs1") and after_scale > 0.95 and before_left == 0,
+		"F2 chantier d'un achat : deux à la fois (%s), palissade %d modules, engin %s, bâtiment caché pendant (%s) puis monté (×%s), état d'avant %d → %d" % [
+		during, props, machine, hidden_ok, Fmt.num(after_scale), before_n, before_left])
+	# 6. trafic lié à ce qui existe, par palier et par bâtiment : pendant son chantier, un bâtiment ne sert pas encore
+	s.tier = 2
+	s.levels["harbor"] = maxi(20, int(s.levels["harbor"]))
+	Engine.time_scale = 4.0
+	var tv := dio.traffic
+	var rows: Array[String] = []
+	var all_ok := true
+	# T2 : quai n°2 — aucun navire vers le poste 2 pendant son chantier
+	_f2_build(s, "berth2")
+	await _wait(2)
+	var to_b2 := await _f2_wait_site(dio, "berth2", func() -> bool:
+		for v in dio.fleet:
+			if is_instance_valid(v) and v.berth_i == 1 and (v.phase == ShipView.Phase.INBOUND or v.phase == ShipView.Phase.CRAB_IN or v.phase == ShipView.Phase.MOORED):
+				return true
+		return false)
+	rows.append("quai n°2 : %d" % to_b2)
+	all_ok = all_ok and to_b2 == 0 and dio.ready_bid("berth2")
+	# T2 : deuxième voie de gate et aire d'attente — ni voie ni places avant la fin de leur chantier
+	_f2_build(s, "gate2")
+	_f2_build(s, "parking1")
+	await _wait(2)
+	var g2_early := await _f2_wait_site(dio, "gate2", func() -> bool: return tv._gate2 or tv._lot_slots > 0)
+	await _f2_wait_site(dio, "parking1")
+	rows.append("gate2/parking : %d (après : voie %s, %d places)" % [g2_early, tv._gate2, tv._lot_slots])
+	all_ok = all_ok and g2_early == 0 and tv._gate2 and tv._lot_slots > 0
+	# T3 : terminal rail — pas de train avant la fin de son chantier
+	s.tier = 3
+	_f2_build(s, "berth3")
+	_f2_build(s, "rail")
+	await _wait(2)
+	var train_early := await _f2_wait_site(dio, "rail", func() -> bool: return tv.train != null and is_instance_valid(tv.train) and tv.train.visible and tv._train_t >= 0.0)
+	await _f2_wait_site(dio, "berth3")
+	rows.append("rail : %d" % train_early)
+	all_ok = all_ok and train_early == 0 and dio.ready_bid("rail")
+	Engine.time_scale = 1.0
+	check(all_ok, "F2 trafic lié à ce qui existe (pendant le chantier, images où le bâtiment sert déjà) : %s" % str(rows))
+	# 7. la caméra ne montre jamais le bord du monde : zoom le plus large, aux quatre coins des bornes, les coins de l'écran
+	# tombent dans le monde habillé (forêt, rives, eau)
+	var rg := dio.rig
+	rg.set_tier_bounds(3)
+	var b: Rect2 = rg.bounds
+	var vsz := hud.get_viewport_rect().size
+	var edge_bad: Array[String] = []
+	for c in [b.position, Vector2(b.end.x, b.position.y), b.end, Vector2(b.position.x, b.end.y)]:
+		rg.target = Vector3(c.x, 0, c.y)
+		rg.zoom = rg.zoom_max
+		rg._apply()
+		for sp in [Vector2.ZERO, Vector2(vsz.x, 0), Vector2(0, vsz.y), vsz]:
+			var g := rg.screen_to_ground(sp)
+			if not Layout.FOREST_AREA.has_point(Vector2(g.x, g.z)):
+				edge_bad.append("(%d, %d)" % [int(g.x), int(g.z)])
+	rg.target = CameraRig.START
+	rg.goal = CameraRig.START
+	rg.zoom = CameraRig.ZOOM_START
+	check(edge_bad.is_empty() and rg.zoom_max <= CameraRig.ZOOM_MAX, "F2 : au zoom le plus large (%d), coins de l'écran dans le monde habillé aux quatre coins des bornes (%s)" % [int(rg.zoom_max), str(edge_bad.slice(0, 3))])
+	# lot F3 — sauvegarde v6 : une partie enregistrée pendant l'acte 0 reprend dans l'anse (ni carte d'intro, ni chantier rejoué,
+	# port fermé) ; une partie d'avant F3 (sans « act0 ») se charge acte 0 fait, pêche passive, sans départ ni chantier
+	var a0 := PortSim.new(s.db, 11)
+	a0.begin_act0()
+	a0.buy_fish()
+	for k in 120:
+		a0.step(0.25)
+	a0.money += 25.0
+	a0.buy_fish()
+	var d0: Dictionary = JSON.parse_string(JSON.stringify(a0.to_dict()))
+	var intro0 := hud.intro_shown
+	gs.call("load_from", d0)
+	await _wait(4)
+	var ls: PortSim = gs.get("sim")
+	var resumed := hud.start_flow and not hud.intro_active() and hud.intro_shown == intro0 and ls.fishing.act0 and ls.fishing.level == 2 \
+		and not dio.t1_works_active() and dio.sites.sites.is_empty() and dio._any_pending() and dio.fishing_view.boats.size() == 4
+	var t1d := PortSim.new(s.db, 12).to_dict()
+	t1d.erase("act0")
+	gs.call("load_from", t1d)
+	await _wait(4)
+	var l2: PortSim = gs.get("sim")
+	check(resumed and not hud.start_flow and not l2.fishing.act0 and l2.fishing.level == 5 and dio.sites.sites.is_empty() and not dio.start_flow_active() \
+		and dio.fishing_view.boats.size() == 7,
+		"F3 sauvegarde v6 : partie de l'acte 0 rechargée dans l'anse (%s : sans intro ni chantier rejoué, port fermé) ; partie d'avant F3 chargée acte 0 fait, pêche passive (%d bateaux), sans départ" % [
+		resumed, dio.fishing_view.boats.size()])
+	gs.set("auto_start", false)
+	Engine.time_scale = 1.0
+	print("  (F2 : %d ms)" % (Time.get_ticks_msec() - t_start))
+	await _wait(2)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Lot F3 — l'acte 0 « La Crique »
+# ---------------------------------------------------------------------------------------------------------------------
+var _f3_gap: Dictionary = {"max": 0.0, "cur": 0.0, "last": -1.0, "on": false, "worst_at": ""}
+
+
+## Fenêtre sans action possible (de la fin de l'intro au premier cargo à quai) : une image compte si le joueur ne peut rien
+## faire — ni HUD (boutons, Améliorer), ni feuille ouverte, ni carte de la narratrice ou cérémonie à passer d'un toucher.
+func _f3_track(hud: Hud) -> void:
+	if not bool(_f3_gap.on):
+		_f3_gap.last = -1.0
+		return
+	var t := hud.diorama._t
+	var can := hud.hud_fade > 0.02 or hud.any_sheet_open() or hud.story_active() or hud.ceremony_active() or hud.intro_active()
+	if float(_f3_gap.last) >= 0.0 and not can:
+		_f3_gap.cur = float(_f3_gap.cur) + (t - float(_f3_gap.last))
+		if float(_f3_gap.cur) > float(_f3_gap.max):
+			_f3_gap.max = _f3_gap.cur
+			_f3_gap.worst_at = "(bascule %s, chantiers %s)" % [hud.bascule_on, hud.diorama.t1_works_active()]
+	elif can:
+		_f3_gap.cur = 0.0
+	_f3_gap.last = t
+
+
+## Bateaux de pêche à l'écran, une image : à terre ? sur un ponton ? rotation sans avancer (pivot) ?
+func _f3_observe(fv: FishingView, obs: Dictionary, rects: Array, delta: float) -> void:
+	obs.frames = int(obs.frames) + 1
+	var vis := 0
+	for i in fv.boats.size():
+		var n: Node3D = fv.boats[i].node
+		if not n.visible:
+			continue
+		vis += 1
+		var p := Vector2(n.position.x, n.position.z)
+		if Layout.any_land(p):
+			obs.land = int(obs.land) + 1
+		for r in rects:
+			if (r as Rect2).has_point(p):
+				obs.pontoon = int(obs.pontoon) + 1
+		var last: Dictionary = obs.last
+		if last.has(i) and delta > 0.0:
+			var lp: Array = last[i]
+			var moved := p.distance_to(lp[0]) / delta
+			var turn := absf(angle_difference(float(lp[1]), n.rotation.y)) / delta
+			if moved < 0.25 and turn > 0.15:      # (rotation de plus de 8,6°/s sans avancer)
+				obs.pivot = int(obs.pivot) + 1
+		last[i] = [p, n.rotation.y]
+	obs.max_vis = maxi(int(obs.max_vis), vis)
+	# camionnette du mareyeur : visible seulement sur la route du mareyeur, la rue du village ou devant la criée
+	if fv.van != null and is_instance_valid(fv.van) and fv.van.visible:
+		var vp := Vector2(fv.van.position.x, fv.van.position.z)
+		if not (Layout.FISH_ROAD.grow(1.0).has_point(vp) or Rect2(-133.5, 95.5, 110, 7).has_point(vp)):
+			obs.van_off = int(obs.van_off) + 1
+		obs.van_seen = true
+
+
+## L'acte 0 joué par l'interface : tutoriel « répare le ponton » sur AMÉLIORER, la carte de la pêche, le chantier ; les bateaux
+## qui arrivent du large et suivent leur boucle (jamais à terre, jamais sur un ponton, aucun sprint, aucune rotation sur
+## place) ; toucher une barque qui rentre (coup de main, « +X $ », tutoriel suivant) ; les cinq achats ; la camionnette.
+func _f3_act0(hud: Hud, s: PortSim) -> void:
+	var dio := hud.diorama
+	var fv := dio.fishing_view
+	var tu := hud.tutorial
+	fv.speed_seen = {}          # (vitesses mesurées par la vue : celles des contrôles précédents, simulation pas à pas, ne comptent pas)
+	tu.idx = 0
+	tu.active = true
+	tu._shown = ""
+	tu._refresh_card(true)
+	await _wait(3)
+	_f3_track(hud)
+	var t_pont := tu.idx == _tuto_index("a0_pontoon") and tu._card.visible and String(tu.steps[tu.idx].get("target", "")) == "ctl:upgrade"
+	hud.open_upgrades("")
+	await _wait(4)
+	_f3_track(hud)
+	var up: UpgradesSheet = hud.sheet_layer.get_child(0)
+	var fish_cards := up.cards.filter(func(c: Dictionary) -> bool: return c.has("fish")).size()
+	var dept_cards := up.cards.filter(func(c: Dictionary) -> bool: return c.has("dept")).size()
+	var c0 := up._card_for("fish", 0)
+	var free_txt := (c0.buy as Button).text if not c0.is_empty() else ""
+	var badge := hud.upgrade_badge.visible or true      # (la pastille est sous la feuille ; contrôlée par worthwhile_count)
+	var worth := Hud.worthwhile_count(s)
+	up._buy_fish()
+	await _wait(3)
+	var site_on := dio.sites.active("fish_pontoon")
+	up.close()
+	await _wait(3)
+	tu._refresh_card(false)
+	check(t_pont and fish_cards == 2 and dept_cards == 0 and free_txt.begins_with("RÉPARER") and worth == 1 and badge and s.fishing.level == 1 and site_on \
+		and s.money == 0.0 and tu.idx == _tuto_index("a0_boat"),
+		"F3 acte 0 : tutoriel « répare le ponton » sur AMÉLIORER (%s), cartes de la pêche (%d, %d de service, « %s »), ponton réparé (chantier %s), étape suivante « barque » (%d)" % [
+		t_pont, fish_cards, dept_cards, free_txt.replace("\n", " "), site_on, tu.idx])
+	# bateaux : ils arrivent du large et suivent leur boucle (temps ×6)
+	var rects: Array = []
+	for id in Layout.ANSE_PONTOONS:
+		for pd in Layout.anse_pontoons(id):
+			rects.append(Layout.pontoon_rect(pd))
+	var obs := {"land": 0, "pontoon": 0, "pivot": 0, "frames": 0, "last": {}, "max_vis": 0, "van_off": 0, "van_seen": false}
+	Engine.time_scale = 6.0
+	var target := -1
+	var guard := Time.get_ticks_msec()
+	var vr := Rect2(Vector2.ZERO, hud.get_viewport_rect().size)
+	while target < 0 and Time.get_ticks_msec() - guard < 20000:
+		await get_tree().process_frame
+		_f3_track(hud)
+		_f3_observe(fv, obs, rects, get_process_delta_time())
+		for i in fv.helpable():
+			if vr.grow(-40.0).has_point(dio.to_screen(fv.boat_pos(i))):
+				target = i
+				break
+	# toucher la barque qui rentre : elle débarque tout de suite, « +X $ » ; le tutoriel passe à l'étape suivante
+	var helps0 := s.fishing.helps
+	var pops0 := hud.fish_popups
+	var tp := tu._target(tu.steps[tu.idx]) if tu.idx < tu.steps.size() else {}
+	if target >= 0:
+		dio._on_tapped(fv.boat_pos(target), Vector2.ZERO)
+	guard = Time.get_ticks_msec()
+	while hud.fish_popups <= pops0 and Time.get_ticks_msec() - guard < 10000:
+		await get_tree().process_frame
+		_f3_track(hud)
+		_f3_observe(fv, obs, rects, get_process_delta_time())
+	tu._refresh_card(false)
+	check(target >= 0 and not tp.is_empty() and s.fishing.helps == helps0 + 1 and dio.fish_helps_shown >= 1 and hud.fish_popups > pops0 and tu.idx > _tuto_index("a0_boat"),
+		"F3 coup de main : repère du tutoriel sur la barque (%s), toucher la barque qui rentre l'aide à débarquer (%d), « +X $ » (%d), tutoriel suivant (%d)" % [
+		not tp.is_empty(), s.fishing.helps - helps0, hud.fish_popups - pops0, tu.idx])
+	# les quatre autres achats (la criée amène la route et la camionnette du mareyeur) ; la bascule n'est pas encore possible
+	var st0 := dio.sites.started
+	s.money = 0.0
+	for k in 4:
+		s.money += s.fishing.next_cost()
+		s.buy_fish()
+	await _wait(2)
+	var sites_n := dio.sites.started - st0
+	guard = Time.get_ticks_msec()
+	var t_obs := dio._t
+	while (dio._t - t_obs < 40.0 or fv.van_trips < 1) and Time.get_ticks_msec() - guard < 25000 and not s.act0_ready():
+		await get_tree().process_frame
+		_f3_track(hud)
+		_f3_observe(fv, obs, rects, get_process_delta_time())
+	Engine.time_scale = 1.0
+	var spd := 0.0
+	for k in fv.speed_seen:
+		spd = maxf(spd, float(fv.speed_seen[k]))
+	check(s.fishing.level == 5 and sites_n == 4 and int(obs.land) == 0 and int(obs.pontoon) == 0 and int(obs.pivot) == 0 and spd <= 6.5 \
+		and int(obs.max_vis) >= 5 and fv.van_trips >= 1 and bool(obs.van_seen) and int(obs.van_off) == 0,
+		"F3 l'anse vivante : 5 achats (%d chantiers), jusqu'à %d bateaux à l'écran, à terre %d, sur un ponton %d, rotation sur place %d, vitesse au plus %s u/s ; camionnette partie %d fois, hors de sa route %d" % [
+		sites_n, int(obs.max_vis), int(obs.land), int(obs.pontoon), int(obs.pivot), Fmt.num(spd), fv.van_trips, int(obs.van_off)])

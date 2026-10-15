@@ -307,7 +307,7 @@ func _decline(i: int) -> void:
 func refresh() -> void:
 	var s := sim()
 	if _signature() != _sig:
-		rebuild()
+		request_rebuild()
 		return
 	if traffic_l != null:
 		var dem := s.stat("demand")

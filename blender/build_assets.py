@@ -12,8 +12,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, 'parts'))
 import lib, palette
-import terrain, buildings, equipment, ships, cargo, world, harbour, baie
-for mod in (lib, palette, terrain, buildings, equipment, ships, cargo, world, harbour, baie):
+import terrain, buildings, equipment, ships, cargo, world, harbour, baie, crique, chantier, foret
+for mod in (lib, palette, terrain, buildings, equipment, ships, cargo, world, harbour, baie, crique, chantier, foret):
     importlib.reload(mod)
 
 BUILDING = 2500
@@ -34,7 +34,19 @@ PROPS = ('docker', 'customs_officer', 'inspector', 'manager', 'cone', 'barrel', 
          'rock', 'barrier', 'swatch', 'light_', 'zone_sign', 'riprap')
 
 
+# Lot F (docs/ORDRE_BLENDER_F.md § 2) : budgets donnés modèle par modèle, prioritaires sur les préfixes.
+EXACT = {
+    'boat_dinghy': PROP, 'boat_trawler': BIG, 'boat_tuna': BIG, 'pontoon': PROP, 'pontoon_ruin': PROP,
+    'fish_hall': BUILDING, 'ice_plant': BUILDING, 'odette_hut': BUILDING, 'jetty_ruin': BUILDING, 'fish_van': PROP,
+    'site_hoarding': PROP, 'scaffold': PROP, 'site_crane': BIG, 'excavator': PROP, 'dust_pile': PROP,
+    'tree_pine': PROP, 'tree_pine_b': PROP, 'tree_oak': PROP, 'forest_block': BUILDING, 'forest_road': BUILDING,
+    'far_shore': BUILDING,
+}
+
+
 def budget(name):
+    if name in EXACT:
+        return EXACT[name]
     for k in VEHICLES + PROPS:
         if name.startswith(k):
             return PROP
@@ -78,7 +90,7 @@ def main():
             only = set(args[i + 1].split(','))
     os.makedirs(out, exist_ok=True)
     all_assets = {}
-    for mod in (terrain, buildings, equipment, ships, cargo, world, harbour, baie):
+    for mod in (terrain, buildings, equipment, ships, cargo, world, harbour, baie, crique, chantier, foret):
         all_assets.update(mod.ASSETS)
     meta_path = os.path.join(out, 'assets_meta.json')
     meta = {}
@@ -109,7 +121,15 @@ def main():
         meta[name] = info
     with open(meta_path, 'w', encoding='utf-8') as f:
         json.dump(meta, f, indent=1)
-    palette.copy_to(os.path.join(HERE, '..', 'godot', 'data', 'palette.json'))
+    # la copie Godot de la palette n'est réécrite que si son contenu change (évite de toucher godot/data pour rien)
+    dst = os.path.join(HERE, '..', 'godot', 'data', 'palette.json')
+    try:
+        with open(dst, encoding='utf-8') as f:
+            same = json.load(f) == palette.load()
+    except (OSError, ValueError):
+        same = False
+    if not same:
+        palette.copy_to(dst)
     print('TOTAL %d assets, %d tris, hors budget : %s' % (len(meta), total, over or 'aucun'))
     if over:
         sys.exit(2)

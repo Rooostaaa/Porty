@@ -25,7 +25,8 @@ const HIGHWAY_Z1 := 144.0
 const HIGHWAY_LANE_E := 142.0   # voie vers l'est, au sud (circulation à droite, lot D) : les camions y entrent et en sortent
 const HIGHWAY_LANE_W := 140.0
 const MAINLAND_X := [-132.0, 186.0]
-## Bouts de l'autoroute : les véhicules apparaissent et disparaissent sous les collines-tunnels (voir PROPS), hors écran.
+## Bouts de l'autoroute : les véhicules apparaissent et disparaissent dans l'ombre des routes sous les arbres (FOREST_ROADS,
+## lot F2 ; avant : sous des collines-tunnels).
 const HIGHWAY_ENDS := [-128.0, 183.0]
 
 # ---------------------------------------------------------------------------
@@ -364,13 +365,102 @@ static func channel_lane(i: int, side: int) -> Vector3:
 	return Vector3(c.x + n.x, 0, c.z + n.y)
 
 
+## Lot F1 — manœuvres (vues des navires, ShipView). Partout : évitage à l'arrivée, puis approche déjà parallèle au quai,
+## glissement latéral jusqu'au poste ; au départ, glissement inverse, puis la route sans demi-tour.
+## - Postes 1–2 (bassin ouest) : le navire sort du chenal, tourne à gauche (arrondi de rayon BASIN_TURN_R) sur la voie
+##   d'évitage z −33 vers l'est, dépasse son poste, fait demi-tour à droite côté quai (rayon 6 u, le remorqueur pousse la
+##   hanche) et revient vers l'ouest sur la voie d'arrivée z −21 : il est amarré **étrave à l'ouest**, vers la passe. Au départ,
+##   glissement vers la voie z −21, cap à l'ouest le long des quais, virage à droite (rayon 8 u) dans la voie de sortie du
+##   chenal. (Un départ étrave à l'est demandait un demi-tour au large des postes, puis un virage serré autour de la tête du
+##   brise-lames : la coque passait sur le feu rouge.)
+## - Postes 3–4 (bassin est, palier 3) : voie d'arrivée est, évitage en demi-cercle (rayon 7,5 u) devant le poste, amarré
+##   étrave à l'est ; départ par la voie z −25 et la passe est.
+## Points d'attente : le premier (« gate 1 », dans la passe ou sur la voie d'arrivée est) tant qu'un autre navire est en route
+## vers le même poste ; le second (« gate 2 », avant l'évitage) tant que le poste n'est pas libre ou que le remorqueur n'est
+## pas à poste.
+const ANCHOR_YAW := 0.35
+const ANCHOR_LEG := 16.0                 # dernier bord de l'arrivée au mouillage, déjà au cap du mouillage (aucune giration sur place)
+const BASIN_TURN_R := 12.0
+const W_TURN_Z := -33.0                  # voie d'évitage des postes 1–2 (vers l'est), au large de la voie d'arrivée z −21 (demi-tour de rayon 6 u)
+const W_TURN_DX := 22.0                  # l'évitage se fait 22 u à l'est du poste : on revient droit, déjà parallèle au quai
+const DEPART_W_TURN_X := -19.0           # départ des postes 1–2 : début du virage vers la voie de sortie du chenal
+const DEPART_W_TURN_R := 8.0
+## Départ des postes 3–4 : du glissement latéral, écart vers la voie de départ est (z −25) sur 16 u.
+const DEPART_E_DX := 16.0
+## Point d'attente de l'arrivée par la passe est : sur la voie d'arrivée (z −36), 10 u à l'est du poste.
+const EAST_GATE_DX := 10.0
+
+
+## Cap d'un navire amarré au poste bi : étrave à l'ouest aux postes 1–2 (vers la passe ouest), à l'est aux postes 3–4.
+static func berth_yaw(bi: int) -> float:
+	return 0.0 if bi >= EAST_BERTH0 else PI
+
+
+## Points d'un arc de cercle (centre c, rayon r) de l'angle a0 à a1 (radians ; point = c + r·(cos a, 0, sin a) : 0 = est,
+## π/2 = sud, −π/2 = nord), n segments, sans le premier point.
+static func _arc(c: Vector3, r: float, a0: float, a1: float, n: int) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	for i in range(1, n + 1):
+		var a := lerpf(a0, a1, float(i) / float(n))
+		out.append(Vector3(c.x + r * cos(a), 0, c.z + r * sin(a)))
+	return out
+
+
+## Coin b d'une polyligne a → b → c arrondi (rayon r, réduit si les bras sont trop courts) : [début de l'arc, …, fin de l'arc].
+static func _fillet(a: Vector3, b: Vector3, c: Vector3, r: float, n: int) -> Array[Vector3]:
+	var d1 := (b - a).normalized()
+	var d2 := (c - b).normalized()
+	var theta := acos(clampf(d1.dot(d2), -1.0, 1.0))
+	if theta < 0.02:
+		return [b]
+	var t := minf(r * tan(theta * 0.5), minf(a.distance_to(b), b.distance_to(c)) * 0.9)
+	var rr := t / tan(theta * 0.5)
+	var p1 := b - d1 * t
+	var p2 := b + d2 * t
+	var n1 := (d2 - d1 * d1.dot(d2)).normalized()
+	var cen := p1 + n1 * rr
+	var a1 := atan2(p1.z - cen.z, p1.x - cen.x)
+	var a2 := atan2(p2.z - cen.z, p2.x - cen.x)
+	var da := wrapf(a2 - a1, -PI, PI)
+	var out: Array[Vector3] = [p1]
+	out.append_array(_arc(cen, rr, a1, a1 + da, n))
+	out[-1] = p2
+	return out
+
+
+## Points d'attente d'un navire piloté vers le poste bi : [gate 1, gate 2] (voir plus haut).
+static func pilot_gates(bi: int) -> Array[Vector3]:
+	if bi >= EAST_BERTH0:
+		var g := Vector3(berth_center(bi) + EAST_GATE_DX, 0, ARRIVE_E_Z)
+		return [g, g]
+	var l2 := channel_lane(CHANNEL.size() - 3, 1)
+	var l3 := channel_lane(CHANNEL.size() - 2, 1)
+	return [l2.lerp(l3, 0.3), Vector3(berth_center(bi) + W_TURN_DX, 0, W_TURN_Z)]
+
+
+## Point d'attente final (avant l'évitage).
+static func pilot_gate(bi: int) -> Vector3:
+	return pilot_gates(bi)[1]
+
+
+## Fin de la manœuvre de départ du poste bi (virage dans la voie de sortie du chenal ; écart vers la voie de départ est) :
+## au-delà, le navire reprend sa vitesse de croisière et le remorqueur le lâche.
+static func depart_maneuver_end(bi: int, width: float) -> Vector3:
+	var bx := berth_ship_pos(bi, width).x
+	if bi >= EAST_BERTH0:
+		return Vector3(bx + DEPART_E_DX, 0, DEPART_E_Z)
+	return Vector3(DEPART_W_TURN_X - DEPART_W_TURN_R, 0, APPROACH_Z - DEPART_W_TURN_R)
+
+
 ## Trajets des navires (polylignes au niveau de l'eau, y = 0) : ils ne coupent ni la terre, ni le brise-lames, ni un poste.
+## Arrivée au mouillage : le dernier bord (ANCHOR_LEG) est déjà au cap du mouillage.
 static func ship_path_arrive(k: int) -> Array[Vector3]:
 	var a := anchor_pos(k)
-	return [SPAWN, Vector3(lerpf(SPAWN.x, a.x, 0.6), 0, minf(a.z - 30.0, -100.0)), a]
+	var leg := Vector3(cos(ANCHOR_YAW), 0, -sin(ANCHOR_YAW)) * ANCHOR_LEG
+	return [SPAWN, Vector3(lerpf(SPAWN.x, a.x, 0.6), 0, minf(a.z - 30.0, -100.0)), a - leg, a]
 
 
-## Du mouillage au poste : vers l'entrée du chenal, la passe, le bassin d'évitage (pivot), puis la voie d'arrivée.
+## Du mouillage au poste : vers l'entrée du chenal, la passe, le bassin d'évitage, puis la voie d'arrivée.
 static func ship_path_pilot(k: int, bi: int) -> Array[Vector3]:
 	return ship_path_pilot_from(anchor_pos(k), bi)
 
@@ -386,27 +476,37 @@ static func ship_path_pilot_from(a: Vector3, bi: int) -> Array[Vector3]:
 		out.append(EAST_APPROACH[0])
 	if a.z > CHANNEL_ENTRY.z + 4.0 or a.x > float(CHANNEL[0].x) + 10.0 or a.x < CHANNEL_ENTRY.x - 4.0:
 		out.append(CHANNEL_ENTRY)
-	for i in range(0, CHANNEL.size() - 1):
+	for i in range(0, CHANNEL.size() - 2):
 		out.append(channel_lane(i, 1))
-	out.append(BASIN)
-	out.append(Vector3(berth_center(bi), 0, APPROACH_Z))
+	out.append(pilot_gates(bi)[0])
+	# (lot F1) virage arrondi à la sortie du chenal sur la voie d'évitage (vers l'est), demi-tour à droite côté quai à l'est du
+	# poste, retour vers l'ouest sur la voie d'arrivée : étrave à l'ouest, déjà parallèle au quai
+	var bx := berth_center(bi)
+	var e0 := Vector3(bx + W_TURN_DX, 0, W_TURN_Z)
+	out.append_array(_fillet(out[-1], channel_lane(CHANNEL.size() - 2, 1), e0, BASIN_TURN_R, 6))
+	out.append(e0)
+	var r := (APPROACH_Z - W_TURN_Z) * 0.5
+	out.append_array(_arc(Vector3(e0.x, 0, W_TURN_Z + r), r, -PI * 0.5, PI * 0.5, 10))
+	out.append(Vector3(bx, 0, APPROACH_Z))
 	return out
 
 
-## Départ : écart vers la voie de départ. Postes 1–2 (à tous les paliers, lot D) : retour au bassin, voie de sortie du
-## chenal, passe ouest, puis le large au nord. Postes 3–4 (terre-plein, palier 3) : voie de départ est, passe est, hors écran.
+## Départ (lot F1) : glissement latéral du poste jusqu'à la voie d'arrivée (z −21, tiré par le remorqueur), puis la route.
+## Postes 1–2 (à tous les paliers, lot D) : cap à l'ouest le long des quais, virage à droite dans la voie de sortie du chenal,
+## puis le large au nord. Postes 3–4 (terre-plein, palier 3) : voie de départ est, passe est, hors écran.
 ## (`tier` : gardé pour les appels existants ; depuis le lot D, c'est le poste qui décide de la passe.)
 static func ship_path_depart(bi: int, width: float, _tier: int = EAST_EXIT_TIER) -> Array[Vector3]:
 	var b := berth_ship_pos(bi, width)
-	var out: Array[Vector3] = [b]
+	var out: Array[Vector3] = [b, Vector3(b.x, 0, APPROACH_Z)]
 	if bi >= EAST_BERTH0:
-		out.append(Vector3(b.x + 10.0, 0, DEPART_E_Z))
+		out.append(Vector3(b.x + DEPART_E_DX, 0, DEPART_E_Z))
 		for p in DEPART_EAST:
 			out.append(p)
 		out.append(EXIT)
 		return out
-	# en biais vers le bassin (l'étrave ne pointe jamais vers le feu rouge au moment de virer)
-	out.append(Vector3(b.x - 8.0, 0, DEPART_TURN_Z))
+	if b.x > DEPART_W_TURN_X + 0.5:
+		out.append(Vector3(DEPART_W_TURN_X, 0, APPROACH_Z))
+	out.append_array(_arc(Vector3(DEPART_W_TURN_X, 0, APPROACH_Z - DEPART_W_TURN_R), DEPART_W_TURN_R, PI * 0.5, PI, 6))
 	for i in range(CHANNEL.size() - 2, -1, -1):
 		out.append(channel_lane(i, -1))
 	for p in EXIT_NORTH:
@@ -430,9 +530,12 @@ static func _pilot_east(a: Vector3, bi: int) -> Array[Vector3]:
 		for p in EAST_APPROACH_E:
 			out.append(p)
 		out.append(EAST_PASS_IN)
+	if (out[-1] as Vector3).x > bx + EAST_GATE_DX + 2.0:
+		out.append(pilot_gate(bi))
+	# (lot F1) évitage : demi-cercle à gauche (rayon 7,5 u) de la voie d'arrivée est à la voie d'arrivée des quais
+	var r := (APPROACH_Z - ARRIVE_E_Z) * 0.5
 	out.append(Vector3(bx - 16.0, 0, ARRIVE_E_Z))
-	out.append(Vector3(bx - 24.0, 0, (ARRIVE_E_Z + APPROACH_Z) * 0.5))
-	out.append(Vector3(bx - 16.0, 0, APPROACH_Z))
+	out.append_array(_arc(Vector3(bx - 16.0, 0, ARRIVE_E_Z + r), r, -PI * 0.5, -PI * 1.5, 10))
 	out.append(Vector3(bx, 0, APPROACH_Z))
 	return out
 
@@ -654,17 +757,16 @@ static func lot_slot(j: int) -> Vector3:
 # cond : "" (toujours), "t2"/"t3" (palier), ou id de bâtiment. Les dalles plus bas dans la liste remplacent les précédentes.
 # ---------------------------------------------------------------------------
 const GROUNDS := [
-	{"cond": "", "type": "ground_gravel", "r": [-36, 0, 0, 18]},
+	{"cond": "", "type": "ground_gravel", "r": [-36, 0, 0, 18], "grp": "yard0"},
 	{"cond": "gravel2", "type": "ground_gravel", "r": [-36, 18, -18, 30]},
 	{"cond": "gravel3", "type": "ground_gravel", "r": [-18, 18, 0, 30]},
-	# plages au pied du continent
-	{"cond": "", "type": "ground_sand", "r": [-132, 66, -126, 150]},
+	# (lot F2 : plus de plage au pied du continent à l'ouest : la rive ouest du golfe et sa forêt le prolongent)
 	{"cond": "", "type": "road_x", "r": [-132, HIGHWAY_Z0, 186, HIGHWAY_Z1]},
 	# route d'accès à la gate (les camions entrent et sortent par elle), élargie par la gate à deux voies
-	{"cond": "", "type": "road_z", "r": [-24, 36, -18, HIGHWAY_Z0]},
+	{"cond": "", "type": "road_z", "r": [-24, 36, -18, HIGHWAY_Z0], "grp": "gate0"},
 	{"cond": "gate2", "type": "road_z", "r": [-18, 36, -12, HIGHWAY_Z0]},
 	# voie des camions entre le parc et La Porte, prolongée avec le Terminal puis le Terre-plein
-	{"cond": "", "type": "road_x", "r": [-24, 30, 0, 36]},
+	{"cond": "", "type": "road_x", "r": [-24, 30, 0, 36], "grp": "gate0"},
 	{"cond": "t2", "type": "road_x", "r": [0, 30, 48, 36]},
 	{"cond": RECLAIM_BUILDING, "type": "road_x", "r": [48, 30, 150, 36]},
 	# village des pêcheurs
@@ -692,11 +794,11 @@ const GROUNDS := [
 ## Bâtiments et décors : modèle, position, rotation Y (degrés), condition (voir GROUNDS), « not » : retiré par ce bâtiment,
 ## « alt » : modèle de repli tant que le modèle n'est pas livré (échelle alt_s).
 const PROPS := [
-	{"cond": "", "m": "harbor_office", "p": [-43, 0, 6]},
+	{"cond": "", "m": "harbor_office", "p": [-43, 0, 6], "grp": "quay0"},
 	{"cond": "customs1", "m": "customs_hut", "p": [-28.5, 0, 40.5]},
 	# hangar du vieux port ; au palier 3, la halle d'inspection de la douane prend sa place (dans l'enceinte, desservie côté
 	# mer par les engins : allée du tablier et allée verticale du T1)
-	{"cond": "", "m": "hangar", "p": [-42, 0, 19], "ry": 90, "not": "t3"},
+	{"cond": "", "m": "hangar", "p": [-42, 0, 19], "ry": 90, "not": "t3", "grp": "yard0"},
 	{"cond": "t3", "m": "inspection_hall", "p": [-42, 0, 19], "ry": 90},
 	{"cond": "", "m": "lighthouse", "p": [-66, 0, -36]},
 	{"cond": "", "m": "rock", "p": [-62, -1, -47]},
@@ -705,38 +807,35 @@ const PROPS := [
 	{"cond": "", "m": "rock", "p": [-78, -1, -36], "ry": 120},
 	{"cond": "", "m": "tree", "p": [-71, 0, -26]}, {"cond": "", "m": "tree", "p": [-80, 0, -12]},
 	{"cond": "", "m": "tree", "p": [-66, 0, -1]}, {"cond": "", "m": "bush", "p": [-66.5, 0, -20.5]},
-	{"cond": "", "m": "lamp", "p": [-36, 0, 1.5]},
-	{"cond": "", "m": "barrel", "p": [-46.5, 0, 11]},
-	{"cond": "", "m": "pallet", "p": [-46.5, 0, 12.8]},
+	{"cond": "", "m": "lamp", "p": [-36, 0, 1.5], "grp": "quay0"},
+	{"cond": "", "m": "barrel", "p": [-46.5, 0, 11], "grp": "yard0"},
+	{"cond": "", "m": "pallet", "p": [-46.5, 0, 12.8], "grp": "yard0"},
 	# feux de passe : vert sur le cap, rouge à la tête du brise-lames (repli : bouées agrandies) ; passe est au palier 3 (lot D) :
 	# vert à la tête du brise-lames est, rouge à l'angle du terre-plein
 	{"cond": "", "m": "light_green", "p": [-58, -1, -46], "alt": "buoy_green", "alt_s": 1.6, "tag": "pass_light"},
 	{"cond": "", "m": "light_red", "p": [-21, -1, -44], "alt": "buoy", "alt_s": 1.6, "tag": "pass_light"},
 	{"cond": "berth3", "m": "light_green", "p": [164.5, -1, -44], "alt": "buoy_green", "alt_s": 1.6, "tag": "pass_light"},
 	{"cond": "berth3", "m": "light_red", "p": [152.5, -1, -7.5], "alt": "buoy", "alt_s": 1.6, "tag": "pass_light"},
-	# vieux quai en T1 : deux bateaux de pêche, filets et caisses de poisson ; mouettes sur le toit du hangar
-	{"cond": "t1", "m": "fishing_boat", "p": [-51, -1, -11], "ry": 75},
-	{"cond": "t1", "m": "fishing_boat", "p": [-52.5, -1, -19], "ry": 100},
-	{"cond": "t1", "m": "net_pile", "p": [-46.5, 0, -1.2]},
-	{"cond": "t1", "m": "net_pile", "p": [-40.5, 0, -0.6], "ry": 40},
-	{"cond": "t1", "m": "crate_fish", "p": [-42, 0, 1.4]},
-	{"cond": "t1", "m": "crate_fish", "p": [-41, 0, 1.4], "ry": 90},
-	{"cond": "", "m": "gull", "p": [-44, 0, 16], "on": "hangar", "ry": 30, "not": "t3"},
-	{"cond": "", "m": "gull", "p": [-40, 0, 22], "on": "hangar", "ry": 160, "not": "t3"},
-	{"cond": "", "m": "gull", "p": [-42, 0, 19], "on": "hangar", "ry": 250, "not": "t3"},
+	# vieux quai en T1 : filets d'amarrage ; mouettes sur le toit du hangar. (Lot F3 : plus de bateaux de pêche immobiles
+	# ni de caisses de poisson dans la crique — la flottille vit dans l'anse des pêcheurs, à l'ouest du cap, FishingView.)
+	{"cond": "t1", "m": "net_pile", "p": [-46.5, 0, -1.2], "grp": "quay0"},
+	{"cond": "t1", "m": "net_pile", "p": [-40.5, 0, -0.6], "ry": 40, "grp": "quay0"},
+	{"cond": "", "m": "gull", "p": [-44, 0, 16], "on": "hangar", "ry": 30, "not": "t3", "grp": "yard0"},
+	{"cond": "", "m": "gull", "p": [-40, 0, 22], "on": "hangar", "ry": 160, "not": "t3", "grp": "yard0"},
+	{"cond": "", "m": "gull", "p": [-42, 0, 19], "on": "hangar", "ry": 250, "not": "t3", "grp": "yard0"},
 	{"cond": "t3", "m": "gull", "p": [-43, 0, 17], "on": "inspection_hall", "ry": 80},
 	# bouées de sauvetage sur poteau : capitainerie, musoir, milieu du quai
-	{"cond": "", "m": "life_ring_post", "p": [-39.5, 0, 0.6]},
-	{"cond": "", "m": "life_ring_post", "p": [-45, 0, -0.4], "ry": 90},
-	{"cond": "", "m": "life_ring_post", "p": [-12, 0, 0.6]},
+	{"cond": "", "m": "life_ring_post", "p": [-39.5, 0, 0.6], "grp": "quay0"},
+	{"cond": "", "m": "life_ring_post", "p": [-45, 0, -0.4], "ry": 90, "grp": "quay0"},
+	{"cond": "", "m": "life_ring_post", "p": [-12, 0, 0.6], "grp": "quay0"},
 	# gate, circulation à droite (lot D) : barrière d'entrée sur la voie est (pivot au bord est de la route), barrière de
 	# sortie sur la voie ouest, côté douane (pivot au bord ouest) ; avec gate2 la route s'élargit à l'est : l'entrée passe en
 	# x −15, une deuxième barrière de sortie ferme la voie x −19,5 ; marquage des voies retourné (sens de circulation)
-	{"cond": "", "m": "barrier", "p": [-18, 0, 45], "ry": 180, "tag": "barrier_in", "not": "gate2"},
-	{"cond": "", "m": "barrier", "p": [-24, 0, 43], "tag": "barrier_out"},
+	{"cond": "", "m": "barrier", "p": [-18, 0, 45], "ry": 180, "tag": "barrier_in", "not": "gate2", "grp": "gate0"},
+	{"cond": "", "m": "barrier", "p": [-24, 0, 43], "tag": "barrier_out", "grp": "gate0"},
 	{"cond": "gate2", "m": "barrier", "p": [-12, 0, 45], "ry": 180, "tag": "barrier_in"},
 	{"cond": "gate2", "m": "barrier", "p": [-17.6, 0, 43], "ry": 180, "tag": "barrier_out", "s": 0.8},
-	{"cond": "", "m": "gate_lanes", "p": [-21, 0.02, 40], "ry": 180, "not": "gate2"},
+	{"cond": "", "m": "gate_lanes", "p": [-21, 0.02, 40], "ry": 180, "not": "gate2", "grp": "gate0"},
 	{"cond": "gate2", "m": "gate_lanes", "p": [-18, 0.02, 40], "ry": 180},
 	{"cond": "gate2", "m": "gate_booth", "p": [-17.25, 0.15, 46.5], "s": 0.85},      # sur son îlot (E10, Layout.GATE_ISLAND)
 	{"cond": "parking1", "m": "sign_p", "p": [-10.5, 0, 55]},
@@ -799,7 +898,7 @@ const PROPS := [
 	{"cond": "", "m": "house_b", "p": [-120, 0, 112], "ry": 180}, {"cond": "", "m": "house_a", "p": [-106, 0, 112], "ry": 180},
 	{"cond": "", "m": "house_a", "p": [-48, 0, 112], "ry": 180},
 	{"cond": "", "m": "lamp", "p": [-70.5, 0, 94]}, {"cond": "", "m": "lamp", "p": [-70.5, 0, 104]},
-	{"cond": "", "m": "tree", "p": [-76, 0, 80]}, {"cond": "", "m": "bush", "p": [-100, 0, 94]},
+	{"cond": "", "m": "tree", "p": [-76, 0, 80]}, {"cond": "", "m": "bush", "p": [-92.5, 0, 92]},
 	# voitures garées devant les maisons (modèle « car_c » attendu de Blender)
 	{"cond": "", "m": "car_c", "p": [-83, 0, 76], "ry": 90}, {"cond": "", "m": "car_c", "p": [-67, 0, 88], "ry": -90},
 	{"cond": "", "m": "car_c", "p": [-106, 0, 93], "ry": 0}, {"cond": "", "m": "car_c", "p": [-48, 0, 105], "ry": 180},
@@ -809,13 +908,10 @@ const PROPS := [
 	{"cond": "", "m": "stack", "p": [44, 0, 116], "neutral": "rail"}, {"cond": "", "m": "stack", "p": [62, 0, 116], "neutral": "rail"},
 	{"cond": "", "m": "stack", "p": [80, 0, 116], "neutral": "rail"}, {"cond": "", "m": "stack", "p": [98, 0, 121], "neutral": "rail"},
 	{"cond": "", "m": "lamp", "p": [36, 0, 87], "neutral": "rail"}, {"cond": "", "m": "lamp", "p": [120, 0, 87], "neutral": "rail"},
-	{"cond": "", "m": "sign", "p": [-25.5, 0, 68], "ry": 90},
-	# --- relief ; collines-tunnels aux deux bouts de l'autoroute et de la voie ferrée ---
-	{"cond": "", "m": "hill", "p": [-100, 0, 156], "s": 1.5}, {"cond": "", "m": "hill", "p": [-30, 0, 156], "s": 1.0},
-	{"cond": "", "m": "hill", "p": [60, 0, 154], "s": 1.3}, {"cond": "", "m": "hill", "p": [140, 0, 156], "s": 1.6},
+	{"cond": "", "m": "sign", "p": [-25.5, 0, 68], "ry": 90, "grp": "gate0"},
+	# (lot F2 : plus de collines-tunnels ; l'autoroute, la rue du village et la voie ferrée entrent sous les arbres,
+	# FOREST_ROADS ; deux buttes boisées gardent du relief dans l'arrière-pays)
 	{"cond": "", "m": "hill", "p": [162, 0, 84], "s": 1.2}, {"cond": "", "m": "hill", "p": [-110, 0, 126], "s": 1.0},
-	{"cond": "", "m": "hill", "p": [-128, 0, 141], "s": 1.3}, {"cond": "", "m": "hill", "p": [183, 0, 141], "s": 1.3},
-	{"cond": "", "m": "hill", "p": [184, 0, 58], "s": 1.1},
 ]
 
 ## Appontements construits dans Godot (dalle de béton sur pieux) : condition, centre (x, z), taille (x, z).
@@ -923,6 +1019,8 @@ static func _make_scatter() -> Array:
 		Rect2(-82, -34, 30, 34),     # pôle nautique (cap)
 		Rect2(52, 36, 104, 36),      # gare (lot D : contre le terre-plein)
 		Rect2(148, 49, 52, 16),      # voie ferrée vers le tunnel est
+		Rect2(-134, 44, 46, 28),     # lot F3 : l'anse des pêcheurs (pontons, criée, cabane, route du mareyeur)
+		Rect2(-96, 14, 16, 34),      # lot F3 : fabrique de glace et quai des chalutiers (flanc ouest du cap)
 	]
 	# en bosquets (revue du 13/10 : plus d'arbres « saupoudrés ») : un centre, puis 3 à 7 arbres serrés autour, des buissons
 	# en lisière ; quelques rochers isolés
@@ -1237,6 +1335,240 @@ static func path_length(path: Array) -> float:
 	return total
 
 
+# ---------------------------------------------------------------------------
+# Lot F2 — le golfe d'Ambre : rives du golfe, rive d'en face, forêt dense, routes et voie ferrée sous les arbres
+# ---------------------------------------------------------------------------
+## Terres au-delà du plan (sol vert sombre sous la forêt) : la rive ouest du golfe ferme l'anse des pêcheurs à l'ouest du cap,
+## la rive est prolonge la baie est, l'arrière-pays s'étend au sud. Hors du continent (COAST) : ni zones, ni voies, ni
+## navires (le large, le mouillage, les sorties nord et est restent à ≥ 60 u). Pas dans `land_polys` (plan coté inchangé) :
+## le diorama les ajoute à la texture de l'eau (écume des rives).
+const GULF_WEST := [Vector2(-132, 170), Vector2(-132, 60), Vector2(-148, 54), Vector2(-166, 36), Vector2(-182, 8),
+	Vector2(-200, -34), Vector2(-222, -86), Vector2(-246, -140), Vector2(-276, -200), Vector2(-320, -262),
+	Vector2(-380, -330), Vector2(-560, -330), Vector2(-560, 170)]
+const GULF_EAST := [Vector2(186, 50), Vector2(208, 46), Vector2(236, 30), Vector2(262, 2), Vector2(276, -38),
+	Vector2(286, -96), Vector2(312, -164), Vector2(350, -236), Vector2(400, -310), Vector2(600, -310), Vector2(600, 170),
+	Vector2(186, 170)]
+const HINTERLAND := [Vector2(-560, 166), Vector2(600, 166), Vector2(600, 600), Vector2(-560, 600)]
+## Rive d'en face (modèle far_shore, 260 × 68, face au port) : deux pans au nord, de part et d'autre de l'entrée du golfe
+## (les navires entrent et sortent par x −120…100) ; voilée de brume (Diorama).
+const FAR_SHORES := [{"p": Vector3(-250, -1.0, -300), "ry": 0.0}, {"p": Vector3(232, -1.0, -300), "ry": 0.0}]
+const FAR_HAZE := Color(0.78, 0.86, 0.93)
+## Routes et voie ferrée qui entrent sous les arbres (modèle forest_road : route selon son axe local Z, entrée en +Z, le
+## trafic disparaît dans l'ombre 6 u derrière l'origine) : autoroute (les deux bouts, là où les véhicules apparaissent et
+## disparaissent, HIGHWAY_ENDS), rue du village vers l'ouest, voie ferrée à l'est (bouche RAIL_TUNNEL_X). « vanish » : point
+## où le trafic se perd.
+const FOREST_ROADS := [
+	{"id": "highway_w", "p": Vector3(-122, 0, 141), "ry": 90.0, "vanish": Vector3(-128, 0, 141)},
+	{"id": "highway_e", "p": Vector3(177, 0, 141), "ry": -90.0, "vanish": Vector3(183, 0, 141)},
+	{"id": "village_w", "p": Vector3(-126, 0, 99), "ry": 90.0, "vanish": Vector3(-132, 0, 99)},
+	{"id": "rail_e", "p": Vector3(175, 0, 57), "ry": -90.0, "vanish": Vector3(181, 0, 57)},
+]
+const FOREST_BLOCK := 19.0          # pas de la lisière (modèle forest_block ≈ 18,9 × 18,2)
+const FOREST_DEEP := 21.0           # pas de la forêt profonde (lot F3 : blocs ×0,92–1,05 au lieu de ×2–2,4, plus serrés)
+## Lot F3 : échelle des blocs de la forêt profonde — pins de 5,9 à 6,7 u, ≈ 1,3 × les arbres du village (« tree » ×0,85–1,3 :
+## 3,1 à 4,8 u) ; avant : ×2,2, des couronnes deux à trois fois plus larges qu'une maison.
+const FOREST_DEEP_SCALE := Vector2(0.92, 1.05)
+## Étendue de la forêt : ce que la caméra peut montrer au zoom le plus large (CameraRig.set_tier_bounds), avec une marge.
+const FOREST_AREA := Rect2(-345, -345, 770, 710)
+const FOREST_CHUNK := 120.0         # un MultiMesh par carré de 120 u (les carrés hors champ ne sont pas dessinés)
+## Bande de forêt sur le continent, au sud de l'autoroute (là où étaient les collines-tunnels).
+const FOREST_STRIP := Rect2(-132, 152, 318, 16)
+
+
+## Blocs de forêt [{p, ry, s}] (graine fixe, calculés une fois) : lisière (deux rangs serrés le long du continent et des rives),
+## forêt profonde au-delà ; jamais à moins de 9 u de l'eau, d'une route sous les arbres, ni dans la bande de l'autoroute.
+static var _forest_cache: Array = []
+
+
+static func forest() -> Array:
+	if _forest_cache.is_empty():
+		_forest_cache = _make_forest()
+	return _forest_cache
+
+
+static func gulf_polys() -> Array[PackedVector2Array]:
+	return [PackedVector2Array(GULF_WEST), PackedVector2Array(GULF_EAST), PackedVector2Array(HINTERLAND)]
+
+
+## Terre (continent, rives du golfe, arrière-pays) en p ? (brise-lames et terre-plein exclus : la forêt n'y va pas)
+static func any_land(p: Vector2) -> bool:
+	if Geometry2D.is_point_in_polygon(p, PackedVector2Array(COAST)):
+		return true
+	for poly in gulf_polys():
+		if Geometry2D.is_point_in_polygon(p, poly):
+			return true
+	return false
+
+
+## Tout le cercle de rayon r autour de p est-il à terre (8 points) ?
+static func _land_ring(p: Vector2, r: float) -> bool:
+	for k in 8:
+		var a := TAU * float(k) / 8.0
+		if not any_land(p + Vector2(cos(a), sin(a)) * r):
+			return false
+	return any_land(p)
+
+
+static func _make_forest() -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20261015
+	var out: Array = []
+	var avoid: Array[Rect2] = [Rect2(-140, 133, 334, 16)]      # autoroute (et ses deux bouts)
+	for fr in FOREST_ROADS:
+		var c: Vector3 = fr.p
+		avoid.append(Rect2(c.x - 11.0, c.z - 11.0, 22.0, 22.0))
+	avoid.append(Rect2(150, 50, 40, 14))                         # voie ferrée jusqu'à la bouche est
+	var coast := PackedVector2Array(COAST)
+	# lisière (blocs serrés) : la bande au sud de l'autoroute, les quatre premiers rangs de l'arrière-pays, les terres du
+	# golfe proches du continent ou de la mer ; forêt profonde (blocs agrandis) au-delà
+	for pass_i in 2:
+		var step := FOREST_BLOCK if pass_i == 0 else FOREST_DEEP
+		var x := FOREST_AREA.position.x
+		while x <= FOREST_AREA.end.x:
+			var z := FOREST_AREA.position.y
+			while z <= FOREST_AREA.end.y:
+				var p := Vector2(x, z) + Vector2(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3)) * step
+				z += step
+				if Geometry2D.is_point_in_polygon(p, coast) and not FOREST_STRIP.has_point(p):
+					continue
+				var bad := false
+				for r in avoid:
+					if (r as Rect2).has_point(p):
+						bad = true
+				if bad or not _land_ring(p, 9.0 if pass_i == 0 else 16.0):
+					continue
+				var near := (p.y > 150.0 and p.y < 206.0) or (p.x < -132.0 and p.x > -190.0) or (p.x > 186.0 and p.x < 244.0) \
+					or not _land_ring(p, 36.0)
+				if (pass_i == 0) != near:
+					continue
+				out.append({"m": "forest_block", "p": Vector3(p.x, 0.0, p.y), "ry": float(rng.randi_range(0, 3)) * 90.0 + rng.randf_range(-12.0, 12.0),
+					"s": rng.randf_range(0.95, 1.1) if pass_i == 0 else rng.randf_range(FOREST_DEEP_SCALE.x, FOREST_DEEP_SCALE.y), "deep": pass_i == 1})
+			x += step
+	return out
+
+
+## Lot F2 — départ de rien : ce que le T1 fournit sans achat (le vieux quai et sa capitainerie, la grue mobile, le parc gravier et
+## le hangar, la route et les barrières de la gate) se bâtit à l'entrée du T1, une pièce après l'autre (quai → grue → parc →
+## gate), chacune avec son chantier. « rects » : emprises (palissade « hoarding », échafaudage « scaffold », quai « quay » :
+## grue de chantier à terre, « none » : poussière seule) ; « dur » : durée du chantier (s) ; « machine » : engin qui travaille.
+## Les éléments de chaque pièce portent « grp » dans PROPS et GROUNDS (quai, grue, musoirs : Diorama).
+const STARTER := [
+	{"id": "quay0", "name": "Le vieux quai", "dur": 6.0, "machine": "site_crane", "machine_p": Vector3(-30, 0, 3.5),
+	 "rects": [[Rect2(-48, -6.5, 36, 7), "quay"], [Rect2(-46.2, 3.4, 6.4, 5.3), "scaffold"]], "focus": Rect2(-50, -12, 40, 22)},
+	{"id": "crane0", "name": "La grue mobile", "dur": 3.5, "machine": "", "machine_p": Vector3.ZERO,
+	 "rects": [[Rect2(-29.2, -4.6, 6.4, 6.0), "scaffold"]], "focus": Rect2(-38, -12, 24, 20)},
+	{"id": "yard0", "name": "Le parc et le hangar", "dur": 5.0, "machine": "excavator", "machine_p": Vector3(-14, 0, 9),
+	 "rects": [[Rect2(-36, 0.5, 36, 17.5), "hoarding"], [Rect2(-45.6, 13.9, 7.2, 10.2), "scaffold"]], "focus": Rect2(-48, -2, 50, 32)},
+	{"id": "gate0", "name": "La route et la gate", "dur": 4.0, "machine": "excavator", "machine_p": Vector3(-12, 0, 41),
+	 "rects": [[Rect2(-25, 30, 26, 6), "none"], [Rect2(-25, 36, 8, 18), "hoarding"]], "focus": Rect2(-34, 26, 34, 34)},
+]
+
+
+static func starter(id: String) -> Dictionary:
+	for s in STARTER:
+		if String(s.id) == id:
+			return s
+	return {}
+
+
+## Chantier d'un bâtiment acheté : emprises, genre, durée (3 s pour une petite case, 6 s pour un quai ou une grande case).
+static func site_spec(bid: String) -> Dictionary:
+	if not LOTS.has(bid):
+		return {}
+	var l: Dictionary = LOTS[bid]
+	var r := lot_rect(bid)
+	var area := r.get_area()
+	var dur := clampf(3.0 + 3.0 * (area - 30.0) / (600.0 - 30.0), 3.0, 6.0)
+	var kind := "hoarding"
+	var machine := "excavator"
+	if bid == RECLAIM_BUILDING:
+		kind = "water"          # le terre-plein : le remblai avance sur l'eau (ouverture de zone, barges et sable)
+		machine = ""
+		dur = 6.0
+	elif bid.begins_with("berth") or bid == "quay_ext":
+		kind = "quay"
+		machine = "site_crane"
+		dur = 6.0
+	elif bool(l.get("water", false)):
+		kind = "water"
+		machine = ""
+		dur = 5.0 if bid == "dredge1" else 3.0
+	elif l.has("on") or bool(l.get("portal", false)):
+		kind = "scaffold"
+		machine = ""
+	elif area <= 80.0:
+		kind = "scaffold"
+		machine = "" if area < 20.0 else "excavator"
+	var mp := Vector3(r.end.x + 3.5, 0, r.get_center().y)
+	if kind == "quay":
+		mp = Vector3(r.get_center().x - r.size.x * 0.25, 0, r.end.y + 4.0)
+	return {"id": bid, "dur": dur, "machine": machine, "machine_p": mp, "rects": [[r, kind]], "focus": r.grow(6.0)}
+
+
+## État d'avant d'une case (lot F2) : rochers et broussailles sur une case à terre, rien sur l'eau, sur un quai ou sur une
+## route ; rien non plus sur le terre-plein (sable neuf). [{m, p, ry, s}], graine fixe par case.
+static func before_state(bid: String) -> Array:
+	if not LOTS.has(bid):
+		return []
+	var l: Dictionary = LOTS[bid]
+	var z := zone_by_id(int(l.zone))
+	if bool(l.get("water", false)) or l.has("on") or bool(l.get("portal", false)) or bool(z.get("reclaim", false)) \
+			or bid.begins_with("berth") or bid == "quay_ext" or bid == "gate2":
+		return []
+	return _rubble(lot_rect(bid), hash(bid))
+
+
+## Rochers et broussailles dans un rectangle (état d'avant), à 0,8 u des bords.
+static func _rubble(r: Rect2, seed_v: int) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_v
+	var n := clampi(int(r.get_area() / 45.0), 2, 9)
+	var out: Array = []
+	var inner := r.grow(-0.8)
+	for i in n:
+		var p := Vector2(rng.randf_range(inner.position.x, inner.end.x), rng.randf_range(inner.position.y, inner.end.y))
+		var m := "rock" if rng.randf() < 0.35 else "bush"
+		out.append({"m": m, "p": Vector3(p.x, 0.0, p.y), "ry": rng.randf_range(0.0, 360.0),
+			"s": rng.randf_range(0.7, 1.0) if m == "rock" else rng.randf_range(0.8, 1.25)})
+	return out
+
+
+## État d'avant d'une pièce de départ (friche) : l'estacade ruinée devant le vieux quai, des rochers et des broussailles sur
+## le parc, devant la capitainerie et à la gate.
+static func starter_before(id: String) -> Array:
+	match id:
+		"quay0":
+			var out := _rubble(Rect2(-46.2, 3.4, 6.4, 5.3), 11)
+			out.append({"m": "jetty_ruin", "p": Vector3(-24.0, 0.0, -7.2), "ry": 0.0, "s": 1.0})
+			out.append({"m": "rock", "p": Vector3(-44.0, -1.0, -8.0), "ry": 40.0, "s": 1.0})
+			out.append({"m": "rock", "p": Vector3(-8.0, -1.0, -7.5), "ry": 200.0, "s": 0.8})
+			return out
+		"yard0":
+			var out2 := _rubble(Rect2(-36, 0.5, 36, 17.5), 12)
+			out2.append_array(_rubble(Rect2(-45.6, 13.9, 7.2, 10.2), 13))
+			return out2
+		"gate0":
+			return _rubble(Rect2(-25, 37, 8, 12), 14)
+	return []
+
+
+## Lot F2 — premier navire du T1 : il naît hors champ dans le chenal (voie d'entrée, tronçon FIRST_SHIP_LANE) à la fin du
+## chantier du quai et file vers son poste, sans passer par le mouillage.
+const FIRST_SHIP_LANE := 1
+
+
+static func first_ship_path(bi: int) -> Array[Vector3]:
+	var full := ship_path_pilot_from(CHANNEL_ENTRY + Vector3(0, 0, -6), bi)
+	var start := channel_lane(FIRST_SHIP_LANE, 1)
+	var out: Array[Vector3] = []
+	for p in full:
+		if not out.is_empty():
+			out.append(p)
+		elif (p as Vector3).distance_to(start) < 0.01:
+			out.append(p)
+	return out
+
+
 ## Échantillons d'une polyligne tous les `step` u (tests de trajets).
 static func sample_path(path: Array, step: float) -> Array[Vector3]:
 	var out: Array[Vector3] = []
@@ -1249,3 +1581,226 @@ static func sample_path(path: Array, step: float) -> Array[Vector3]:
 	if not path.is_empty():
 		out.append(path[-1])
 	return out
+
+
+# ---------------------------------------------------------------------------
+# Lot F3 — l'anse des pêcheurs (acte 0 « La Crique ») : à l'ouest du cap, entre le cap et la rive ouest du golfe, loin du
+# chenal et des voies des cargos (arrivée par le nord-ouest au-delà de z −60 : les bateaux de pêche restent au sud de z −35,
+# à ≥ 45 u du mouillage). Plan coté : PLAN_COTE.md § 5 ter.
+# ---------------------------------------------------------------------------
+## Cadrage de l'acte 0 : l'anse, ses pontons, la criée, la cabane d'Odette, le flanc du cap.
+const ANSE_LOOK := Vector3(-109.0, 0.0, 41.0)
+const ANSE_ZOOM := 58.0
+## Pontons (modèle pontoon : module 6 × 1,6 le long de X, plancher à +0,45 au-dessus de la flottaison) par achat :
+## centre (x, z), nombre de modules, axe (« x » : le long de la plage ; « z » : passerelle vers la plage ou quai le long du cap).
+const ANSE_PONTOONS := {
+	"pontoon": [{"c": Vector2(-124, 51.5), "n": 2, "axis": "x"}, {"c": Vector2(-124, 54.6), "n": 1, "axis": "z"}],
+	"pontoon2": [{"c": Vector2(-110, 49.5), "n": 2, "axis": "x"}, {"c": Vector2(-110, 51.8), "n": 1, "axis": "z"}],
+	"trawler": [{"c": Vector2(-95.6, 31.0), "n": 5, "axis": "z"}],
+}
+## Bâtiments de l'anse (modèle, position, rotation Y en degrés) : la criée (façade côté route), la fabrique de glace sur le cap
+## (goulotte vers le quai des chalutiers), la cabane d'Odette (toujours là), et l'état d'avant du ponton (ponton pourri).
+const ANSE_BUILDINGS := {
+	"hall": {"m": "fish_hall", "p": Vector3(-99.0, 0.0, 55.5), "ry": 0.0},
+	"ice": {"m": "ice_plant", "p": Vector3(-88.5, 0.0, 28.0), "ry": 90.0},
+}
+const ODETTE_HUT := {"m": "odette_hut", "p": Vector3(-127.0, 0.0, 62.5), "ry": 0.0}
+const ANSE_RUIN := {"m": "pontoon_ruin", "p": Vector3(-124.0, -1.0, 51.5), "ry": 0.0}
+## Route du mareyeur (construite avec la criée) : de la criée à la rue du village, puis sous les arbres (village_w).
+const FISH_ROAD := Rect2(-102, 59, 6, 37)
+const FISH_VAN_PARK := Vector3(-97.5, 0.0, 63.5)       # voie montante (à droite vers le nord) ; descente en x −100,5
+## Places (centre du bateau, cap en radians : 0 = étrave à l'est, PI/2 = étrave au nord) par classe et numéro de place.
+const FISH_BERTHS := {
+	"dinghy": [Vector3(-127, 0, 49.9), Vector3(-121, 0, 49.9), Vector3(-113, 0, 47.9), Vector3(-107, 0, 47.9)],
+	"trawler": [Vector3(-98.0, 0, 40.5), Vector3(-98.0, 0, 31.5)],
+	"tuna": [Vector3(-98.4, 0, 21.0)],
+}
+## Coins de pêche (centre du cercle de dérive) par classe et numéro : dans l'anse pour les barques, à son entrée pour les
+## chalutiers, au large le long de la rive ouest pour le thonier.
+const FISH_GROUNDS := {
+	"dinghy": [Vector2(-126, 14), Vector2(-116, 6), Vector2(-130, 2), Vector2(-120, -4)],
+	"trawler": [Vector2(-140, -12), Vector2(-128, -20)],
+	"tuna": [Vector2(-160, -28)],
+}
+## Point d'arrivée d'un bateau qui vient pour la première fois, par classe (au nord de l'anse, hors du cadrage de l'acte 0 :
+## il y paraît en fondu, puis descend la voie ouest à sa vitesse).
+const FISH_SEA_ENTRY := {"dinghy": Vector2(-138, -10), "trawler": Vector2(-142, -20), "tuna": Vector2(-150, -30)}
+
+
+static func fish_sea_entry(cls: String) -> Vector2:
+	return FISH_SEA_ENTRY.get(cls, Vector2(-140, -14))
+## Boucle à sens unique (sens inverse des aiguilles d'une montre) : on descend la voie ouest (x −136), on longe la plage
+## vers l'est (z 44, au nord des barques amarrées), on remonte la voie est (x −102, le long du quai des chalutiers).
+const FISH_LANE_W := -136.0
+const FISH_LANE_BEACH := 44.0
+const FISH_LANE_E := -102.0
+const FISH_EXIT_Z := 16.0
+const FISH_TURN_R := 4.0
+
+
+static func fish_berth(cls: String, slot: int) -> Vector3:
+	var a: Array = FISH_BERTHS.get(cls, [])
+	return a[clampi(slot, 0, a.size() - 1)] if not a.is_empty() else Vector3(-120, 0, 30)
+
+
+## Cap d'un bateau à sa place : les barques ont l'étrave à l'est (on longe la plage vers l'est), les autres au nord.
+static func fish_berth_yaw(cls: String) -> float:
+	return 0.0 if cls == "dinghy" else PI * 0.5
+
+
+static func fish_ground(cls: String, slot: int) -> Vector2:
+	var a: Array = FISH_GROUNDS.get(cls, [])
+	return a[slot % a.size()] if not a.is_empty() else Vector2(-125, 5)
+
+
+## Trajet de sortie {pts, crab} : `crab` = indices i des tronçons i → i+1 parcourus en glissement latéral (cap tenu). Barques :
+## glissement vers la voie de la plage, à l'est le long de la plage, voie est vers le nord, puis le coin de pêche. Chalutiers,
+## thonier : glissement vers la voie est, puis le nord. Coins arrondis (aucune rotation sur place).
+static func fish_path_out(cls: String, slot: int) -> Dictionary:
+	var b := fish_berth(cls, slot)
+	var g := fish_ground(cls, slot)
+	var raw: Array[Vector3] = [b]
+	if cls == "dinghy":
+		raw.append(Vector3(b.x, 0, FISH_LANE_BEACH))
+		raw.append(Vector3(FISH_LANE_E, 0, FISH_LANE_BEACH))
+	else:
+		raw.append(Vector3(FISH_LANE_E, 0, b.z))
+	raw.append(Vector3(FISH_LANE_E, 0, FISH_EXIT_Z))
+	raw.append(Vector3(g.x, 0, g.y))
+	return {"pts": _round_corners(raw, 2, raw.size() - 1, FISH_TURN_R), "crab": [0]}
+
+
+## Trajet de retour {pts, crab} depuis `from` (le coin de pêche, ou l'arrivée du large) : voie ouest vers le sud, la plage
+## vers l'est ; une barque glisse à sa place depuis la voie de la plage ; un chalutier (ou le thonier) remonte la voie est
+## puis glisse à sa place.
+static func fish_path_back(cls: String, slot: int, from: Vector2, lead := Vector2.ZERO) -> Dictionary:
+	var b := fish_berth(cls, slot)
+	var raw: Array[Vector3] = [Vector3(from.x, 0, from.y)]
+	# (`lead` : cap de départ — au coin de pêche, celui de la fin de la dérive : le bateau repart en avançant, sans tourner sur place)
+	if lead != Vector2.ZERO:
+		raw.append(Vector3(from.x + lead.x * 6.0, 0, from.y + lead.y * 6.0))
+	raw.append(Vector3(FISH_LANE_W, 0, minf(from.y + 6.0, 10.0)))
+	raw.append(Vector3(FISH_LANE_W, 0, FISH_LANE_BEACH))
+	if cls == "dinghy":
+		raw.append(Vector3(b.x, 0, FISH_LANE_BEACH))
+	else:
+		raw.append(Vector3(FISH_LANE_E, 0, FISH_LANE_BEACH))
+		raw.append(Vector3(FISH_LANE_E, 0, b.z))
+	raw.append(b)
+	var pts := _round_corners(raw, 1, raw.size() - 2, FISH_TURN_R)
+	return {"pts": pts, "crab": [pts.size() - 2]}
+
+
+## Arrondit les coins d'indices [i0, i1[ d'une polyligne (rayon r) ; les autres coins restent vifs (glissements).
+static func _round_corners(raw: Array[Vector3], i0: int, i1: int, r: float) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	for i in raw.size():
+		if i >= i0 and i < i1 and i > 0 and i < raw.size() - 1:
+			out.append_array(_fillet(raw[i - 1], raw[i], raw[i + 1], r, 6))
+		else:
+			out.append(raw[i])
+	return _dedup(out)
+
+static func _dedup(pts: Array[Vector3]) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	for p in pts:
+		if out.is_empty() or (out[-1] as Vector3).distance_to(p) > 0.05:
+			out.append(p)
+	return out
+
+
+## Pontons d'un achat de l'acte 0 : [{c, n, axis}] (vide si l'achat n'a pas de ponton).
+static func anse_pontoons(buy_id: String) -> Array:
+	return ANSE_PONTOONS.get(buy_id, [])
+
+
+## Rectangle (x, z) d'un ponton (module 6 × 1,6).
+static func pontoon_rect(pd: Dictionary) -> Rect2:
+	var c: Vector2 = pd.c
+	var l := 6.0 * float(pd.n)
+	return Rect2(c.x - l * 0.5, c.y - 0.8, l, 1.6) if String(pd.axis) == "x" else Rect2(c.x - 0.8, c.y - l * 0.5, 1.6, l)
+
+
+## Chantier d'un achat de l'acte 0 (SiteWorks) : pontons et quai sur l'eau (éclaboussures), criée et fabrique en palissade.
+static func anse_site_spec(buy_id: String) -> Dictionary:
+	var rects: Array = []
+	for pd in anse_pontoons(buy_id):
+		rects.append([pontoon_rect(pd), "water"])
+	var machine := ""
+	var mp := Vector3.ZERO
+	if ANSE_BUILDINGS.has(buy_id):
+		var bd: Dictionary = ANSE_BUILDINGS[buy_id]
+		var fp: Array = Assets.meta(String(bd.m)).get("footprint", [6.0, 6.0])
+		var w := float(fp[0])
+		var d := float(fp[1])
+		if absf(float(bd.ry)) > 45.0:
+			var tmp := w
+			w = d
+			d = tmp
+		var p: Vector3 = bd.p
+		rects.append([Rect2(p.x - w * 0.5, p.z - d * 0.5, w, d), "hoarding"])
+		machine = "excavator"
+		mp = Vector3(p.x + w * 0.5 + 3.0, 0, p.z + 2.0)
+		if buy_id == "hall":
+			rects.append([FISH_ROAD, "none"])
+	if rects.is_empty():
+		return {}
+	var all: Rect2 = rects[0][0]
+	for rk in rects:
+		all = all.merge(rk[0])
+	return {"id": "fish_" + buy_id, "dur": 3.5 if machine == "" else 4.5, "machine": machine, "machine_p": mp, "rects": rects,
+		"focus": all.grow(6.0)}
+
+
+## Lot F3 — bascule : le caboteur de Corsaire & Fils entre dans le golfe au nord-ouest (hors champ), longe le large jusqu'à
+## l'entrée du chenal (point d'attente tant que le vieux quai n'est pas debout), puis suit le pilotage du premier navire.
+const BASCULE_SHIP_FROM := Vector3(-150.0, 0.0, -118.0)
+
+
+static func bascule_ship_path(bi: int) -> Array[Vector3]:
+	return ship_path_pilot_from(BASCULE_SHIP_FROM, bi)
+
+## Lot F3 — mouvement des bateaux de pêche (FishingView ; pur, testé par run_all) : un mètre de glissement latéral « coûte »
+## trois mètres de route (lent) ; rampes d'accélération et de freinage de 2 s en début et fin de trajet.
+const FISH_CRAB_WEIGHT := 3.0
+const FISH_RAMP_S := 2.0
+
+
+## Longueurs pondérées d'un trajet (glissement latéral plus lent).
+static func fish_weigh(p: Dictionary) -> Dictionary:
+	var pts: Array = p.pts
+	var crab: Array = p.crab
+	var cum: Array[float] = [0.0]
+	var w: Array[float] = []
+	for i in pts.size() - 1:
+		var k := FISH_CRAB_WEIGHT if crab.has(i) else 1.0
+		w.append(k)
+		cum.append(cum[-1] + (pts[i] as Vector3).distance_to(pts[i + 1]) * k)
+	return {"pts": pts, "crab": crab, "cum": cum, "w": w, "len": cum[-1]}
+
+
+## Profil trapézoïdal (0–1 → 0–1) : rampes de `r` au départ et à l'arrivée, vitesse constante entre les deux.
+static func fish_profile(f: float, r: float) -> float:
+	f = clampf(f, 0.0, 1.0)
+	r = clampf(r, 0.001, 0.5)
+	var v := 1.0 / (1.0 - r)
+	if f < r:
+		return v * f * f / (2.0 * r)
+	if f > 1.0 - r:
+		return 1.0 - v * (1.0 - f) * (1.0 - f) / (2.0 * r)
+	return v * (f - r * 0.5)
+
+
+## Point d'un trajet pondéré à la fraction `e` de sa longueur : [position, direction, glissement ?].
+static func fish_path_at(wp: Dictionary, e: float) -> Array:
+	var pts: Array = wp.pts
+	var cum: Array = wp.cum
+	var target := clampf(e, 0.0, 1.0) * float(wp.len)
+	for i in pts.size() - 1:
+		if target <= float(cum[i + 1]) or i == pts.size() - 2:
+			var a: Vector3 = pts[i]
+			var b: Vector3 = pts[i + 1]
+			var seg := float(cum[i + 1]) - float(cum[i])
+			var f := clampf((target - float(cum[i])) / maxf(0.0001, seg), 0.0, 1.0)
+			return [a.lerp(b, f), (b - a).normalized(), (wp.crab as Array).has(i)]
+	return [pts[-1], Vector3.RIGHT, false]

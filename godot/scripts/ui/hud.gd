@@ -125,6 +125,11 @@ func _ready() -> void:
 	diorama.zone_tapped.connect(func(zid: int, pos: Vector3) -> void: overlay.show_zone_info(zid, pos))
 	diorama.zone_opened.connect(_on_zone_opened)
 	diorama.gesture_done.connect(_on_gesture)
+	# lot F3 : débarque vendue sur le ponton ou à la criée (« +X $ »), plus grande après un coup de main
+	diorama.fish_popup.connect(func(p: Vector3, t: String, big: bool) -> void:
+		fish_popups += 1
+		Sfx.play("coin", 0.05)
+		overlay.add_popup(p, t, UI.AMBER if big else UI.MONEY, big))
 	if diorama.has_signal("ship_paid"):
 		diorama.connect("ship_paid", _on_ship_paid)
 	bind(GameState.sim)
@@ -192,6 +197,12 @@ func bind(s: PortSim) -> void:
 		diorama.rig.input_enabled = true
 	_money_disp = -1.0
 	_refresh(s)
+	# lot F2 : partie neuve — cartes d'intro (la première fois), friche, séquence de chantiers du T1, premier navire
+	_end_start()
+	if GameState.consume_start():
+		_begin_start()
+	elif s.fishing.act0:
+		_resume_act0()          # lot F3 : partie chargée pendant l'acte 0 (ou pendant la bascule) : on reprend dans l'anse
 	if s.legacy_notice == "commerce":
 		s.legacy_notice = ""
 		_commerce_notice.call_deferred()
@@ -788,6 +799,7 @@ func _process(delta: float) -> void:
 	# Feuille mi-hauteur (Améliorer, Commerce) : le port continue de vivre au-dessus (lot D-UI) — seule une ouverture de zone
 	# en attente patiente (elle masquerait l'interface sous la feuille).
 	diorama.fx_paused = full or _npopups() > 0 or ceremony_active() or (half and not diorama.opening_queue.is_empty())
+	_sync_start()
 	_sync_opening(delta)
 	# la surcouche monde est « top_level » : elle passerait sur les écrans plein cadre ; pendant une ouverture de zone, rien
 	# lot E : ni sous une fenêtre (la bulle « en rade » passait au-dessus de la fenêtre du palier)
@@ -831,7 +843,8 @@ func _refresh(s: PortSim) -> void:
 	# (lot E : revenu réel sur la fenêtre écoulée depuis le chargement — juste après un chargement, `income_per_min`
 	# affichait « +41K $/s » pour un port qui en gagne 1,3M : les seaux d'une minute ne sont pas sauvegardés)
 	var ips := s.real_income_rate() + _income_lift(s)
-	if s.counter("evp") <= 0.0 and s.prestiges == 0:
+	# (lot F3 : la pêche rapporte avant le premier conteneur — acte 0, puis revenu passif)
+	if s.counter("evp") <= 0.0 and s.prestiges == 0 and s.fishing.earned <= 0.0:
 		ips = 0.0
 	income_l.text = ("+" if ips >= 0 else "") + Fmt.num(ips) + " $/s"
 	amber_l.text = str(s.amber)
@@ -865,7 +878,7 @@ func _refresh(s: PortSim) -> void:
 	(contracts_badge.get_child(0) as Label).text = str(s.contracts_active.size())
 	# conseil de goulot (masqué pendant une carte du tutoriel : la narratrice parle seule, revue N3)
 	hint_card.visible = not (tutorial != null and tutorial.active and tutorial._card.visible and tutorial.idx < tutorial.steps.size()
-		and String(tutorial.steps[tutorial.idx].get("target", "")) != "ctl:hint")
+		and String(tutorial.steps[tutorial.idx].get("target", "")) != "ctl:hint") and not s.fishing.act0      # lot F3 : pas de goulot pendant l'acte 0
 	var key: String = s.shown_analysis().get("key", "")
 	hint_title.text = hint_title_for(s)
 	hint_text.text = String(s.shown_analysis().get("hint", ""))
@@ -1140,9 +1153,9 @@ func _income_lift(s: PortSim) -> float:
 ## font avancer le chapitre en cours (le service dont le niveau ouvre le chapitre suivant). Jamais un service sous un aléa.
 ## Les estimations rejouent l'analyse : une fois par seconde.
 func _affordable_count(s: PortSim) -> int:
-	if s.time - _aff_t < 1.0 and s.time >= _aff_t:
+	if s.clock() - _aff_t < 1.0 and s.clock() >= _aff_t:      # (lot F3 : l'horloge du port ne tourne pas pendant l'acte 0)
 		return _aff_n
-	_aff_t = s.time
+	_aff_t = s.clock()
 	_aff_n = worthwhile_count(s)
 	return _aff_n
 
@@ -1303,7 +1316,14 @@ static func _fixes(key: String, e: Dictionary, s: PortSim) -> bool:
 
 ## Nombre d'achats d'un niveau abordables qui valent le coup (pastille d'Améliorer, voir `Advice.worthwhile_count`).
 static func worthwhile_count(s: PortSim) -> int:
+	if fishing_cards(s):
+		return 1 if s.money >= s.fishing.next_cost() else 0      # lot F3 : l'achat suivant de l'acte 0
 	return Advice.worthwhile_count(s)
+
+
+## Lot F3 : la feuille Améliorer montre les achats de la pêche (acte 0 en cours, bascule pas encore possible).
+static func fishing_cards(s: PortSim) -> bool:
+	return s != null and s.fishing.act0 and not s.act0_ready()
 
 
 func _on_hint_pressed() -> void:
@@ -1579,7 +1599,7 @@ func _covered() -> bool:
 ## Ouverture de zone : le HUD s'efface (barres, cartes, boutons, notifications, bandeaux, tutoriel), « Toucher pour
 ## passer » discret en bas ; il revient à la fin. Les notifications et bandeaux attendent leur tour (file).
 func _sync_opening(delta: float) -> void:
-	var op := diorama.opening_active()
+	var op := diorama.opening_active() or intro_active()      # (lot F3 : le HUD s'efface aussi sous les cartes d'intro)
 	hud_fade = move_toward(hud_fade, 0.0 if op else 1.0, delta * 4.0)
 	for c in [top_box, bottom_box, toast_box, gain_pill, _banner, tutorial]:
 		if c != null and is_instance_valid(c):
@@ -2162,7 +2182,7 @@ func _welcome_back(r: Dictionary) -> void:
 func _intro() -> void:
 	Settings.set_intro_seen()
 	var body: Array = []
-	body.append(UI.wrap_label("Un vieux quai de pêche, une grue rouillée… et tout un terminal à bâtir.", 32, UI.TEXT))
+	body.append(UI.wrap_label("La pêche de l'anse tourne toute seule ; derrière le cap, le vieux quai est rebâti… et tout un terminal reste à construire.", 32, UI.TEXT))
 	for line in [
 		["ship", "Les navires accostent, la grue décharge, les conteneurs gagnent le parc puis sortent par la gate."],
 		["upgrade", "Le maillon le plus lent est le goulot : la carte rouge en haut te dit quoi améliorer."],
@@ -2174,6 +2194,230 @@ func _intro() -> void:
 		body.append(h)
 	show_popup("Bienvenue, directeur·rice !", body, "harbor")
 
+
+# ---------------------------------------------------------------------------
+# Lot F2 — le départ ; lot F3 — l'acte 0 « La Crique » et la bascule vers le T1.
+# Partie neuve : trois cartes d'intro (simulation gelée), puis l'acte 0 dans l'anse des pêcheurs : HUD visible, la pêche tourne,
+# le port à conteneurs est fermé (`PortSim.fishing.act0` : son horloge ne tourne pas). Quand `act0_ready()`, la bascule : le
+# caboteur de Corsaire & Fils (l'escale initiale de la simulation) paraît au large, la narratrice, la cérémonie « Palier 1 —
+# Le Vieux Quai » (la caméra passe le cap), la séquence de chantiers du T1 (≤ 15 s, chantiers qui se chevauchent, caméra qui
+# suit), HUD visible et pêche qui rapporte ; le port ouvre (`open_port`) quand le premier navire glisse vers le quai
+# (mécanisme F2 : `Diorama.start_flow_active`). Nouvelle concession : pas d'acte 0, la bascule se joue tout de suite
+# (`hold_port`). Une partie chargée pendant l'acte 0 reprend dans l'anse (`_resume_act0`), sans cartes.
+# ---------------------------------------------------------------------------
+var intro_layer: Control              # carte d'intro affichée (null sinon)
+var _intro_cards: Array = []
+var _intro_i := -1
+var intro_shown := 0                  # (tests) cartes montrées
+var start_flow := false               # départ en cours (acte 0, bascule)
+var bascule_on := false               # la bascule vers le T1 se joue
+var bascule_t := -1.0                 # (tests) instant (horloge du diorama) du début de la bascule
+var fish_popups := 0                  # (tests) « +X $ » de débarques montrés
+var story_layer: Control              # carte de la narratrice pendant la bascule (null sinon)
+var _story_then: Callable
+var _story_left := 0.0
+const STORY_AUTO := 7.0               # s : la carte de la bascule se passe seule (un toucher l'abrège)
+
+
+func _begin_start() -> void:
+	start_flow = true
+	bascule_on = false
+	var s := GameState.sim
+	if s.fishing.level <= 0 and not s.fishing.act0:
+		s.begin_act0()          # partie neuve : l'acte 0 (0 $, port fermé)
+	elif not s.fishing.act0:
+		s.hold_port()           # nouvelle concession : la pêche continue, la bascule se joue port fermé
+	Sim.paused = true
+	diorama.start_works_pending()
+	_frame(INTRO_LOOK, INTRO_ZOOM, true)
+	var cards: Array = GameState.db.tier_def(0).get("intro", [])
+	if not Settings.intro_seen and not cards.is_empty() and s.prestiges == 0:
+		_intro_cards = cards
+		_intro_i = -1
+		_next_intro_card()
+	else:
+		_intro_done()
+
+
+## Partie chargée pendant l'acte 0 (ou pendant la bascule) : l'anse, sans cartes ni chantier rejoué.
+func _resume_act0() -> void:
+	start_flow = true
+	bascule_on = false
+	diorama.start_works_pending()
+	_frame(Layout.ANSE_LOOK, Layout.ANSE_ZOOM, true)
+	_intro_done()
+
+
+## Cadrage des cartes d'intro : le fond du golfe, l'anse des pêcheurs, le cap et la friche de l'autre côté.
+const INTRO_LOOK := Vector3(-92.0, 0.0, 26.0)
+const INTRO_ZOOM := 100.0
+
+
+func _frame(p: Vector3, zoom: float, now: bool = false) -> void:
+	if diorama == null or diorama.rig == null or diorama.rig.locked:
+		return
+	diorama.rig.focus(p)
+	diorama.rig.zoom_goal = clampf(zoom, diorama.rig.zoom_min, diorama.rig.zoom_max)
+	if now:
+		diorama.rig.target = diorama.rig.goal
+		diorama.rig.zoom = diorama.rig.zoom_goal
+
+
+func intro_active() -> bool:
+	return intro_layer != null and is_instance_valid(intro_layer)
+
+
+func story_active() -> bool:
+	return story_layer != null and is_instance_valid(story_layer)
+
+
+## Partie remplacée pendant le départ : on arrête tout (la nouvelle partie décide de son propre départ).
+func _end_start() -> void:
+	if intro_active():
+		intro_layer.queue_free()
+	intro_layer = null
+	_intro_cards = []
+	if story_active():
+		story_layer.queue_free()
+	story_layer = null
+	_story_then = Callable()
+	bascule_on = false
+	if start_flow:
+		start_flow = false
+		Sim.paused = false
+
+
+func _sync_start() -> void:
+	if not start_flow:
+		return
+	var s := GameState.sim
+	Sim.paused = intro_active()          # seules les cartes d'intro gèlent tout ; ensuite la pêche tourne
+	if intro_active():
+		return
+	if story_active():
+		_story_left -= get_process_delta_time()
+		if _story_left <= 0.0:
+			_close_story()
+	if not bascule_on and s.act0_ready():
+		_begin_bascule()
+	# le premier navire glisse vers le quai (chantiers finis) : le port ouvre
+	if bascule_on and not diorama.start_flow_active() and not story_active() and not ceremony_active():
+		s.open_port()
+		bascule_on = false
+		start_flow = false
+
+
+## Les cartes sont passées : l'acte 0 (la caméra descend sur l'anse ; le tutoriel prend la main), ou la bascule tout de suite
+## (nouvelle concession).
+func _intro_done() -> void:
+	Sim.paused = false
+	_frame(Layout.ANSE_LOOK, Layout.ANSE_ZOOM)
+
+
+## Bascule vers le T1 : le caboteur au large (la caméra le suit), la narratrice, puis la cérémonie et les chantiers.
+func _begin_bascule() -> void:
+	bascule_on = true
+	bascule_t = diorama._t
+	var v := diorama.spawn_bascule_ship()
+	if v != null:
+		_frame(v.position + Vector3(-10.0, 0, 26.0), 84.0)
+	if GameState.sim.fishing.replay:
+		_bascule_ceremony()
+		return
+	var card: Dictionary = GameState.db.tier_def(0).get("bascule", {})
+	if card.is_empty():
+		_bascule_ceremony()
+	else:
+		_show_story(card, _bascule_ceremony)
+
+
+func _bascule_ceremony() -> void:
+	var td := GameState.db.tier_def(1)
+	ceremony("Palier 1 — %s" % String(td.get("name", "")), "De l'autre côté du cap", UI.AMBER, "tier1", Vector3(-70.0, 0, -6.0),
+		func() -> void: diorama.start_t1_works())
+
+
+## Carte de la narratrice (même habit que les cartes d'intro), passée d'un toucher ou seule au bout de STORY_AUTO s.
+func _show_story(c: Dictionary, then: Callable) -> void:
+	_story_then = then
+	_story_left = STORY_AUTO
+	story_layer = _narrator_card(c, "Toucher pour continuer", _close_story)
+
+
+func _close_story() -> void:
+	if story_active():
+		story_layer.queue_free()
+	story_layer = null
+	var then := _story_then
+	_story_then = Callable()
+	if then.is_valid():
+		then.call()
+
+
+func _next_intro_card() -> void:
+	if intro_active():
+		intro_layer.queue_free()
+	intro_layer = null
+	_intro_i += 1
+	if _intro_i >= _intro_cards.size():
+		Settings.set_intro_seen()
+		_intro_done()
+		return
+	var c: Dictionary = _intro_cards[_intro_i]
+	intro_layer = _narrator_card(c, "%d / %d  ·  Toucher pour continuer" % [_intro_i + 1, _intro_cards.size()], _next_intro_card)
+	intro_shown += 1
+
+
+## Carte de la narratrice en bas de l'écran ; toute la surface est un bouton transparent : un toucher n'importe où appelle `cb`.
+func _narrator_card(c: Dictionary, foot_text: String, cb: Callable) -> Control:
+	var layer := Button.new()
+	layer.flat = true
+	layer.focus_mode = Control.FOCUS_NONE
+	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var clear := StyleBoxEmpty.new()
+	for st in ["normal", "hover", "pressed", "focus", "disabled"]:
+		layer.add_theme_stylebox_override(st, clear)
+	layer.pressed.connect(func() -> void:
+		Sfx.play("click")
+		cb.call())
+	add_child(layer)
+	var card := PanelContainer.new()
+	var sb := UI.card_style(Color.WHITE, 30, 22)
+	sb.border_color = UI.AMBER
+	sb.set_border_width_all(5)
+	card.add_theme_stylebox_override("panel", sb)
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	card.offset_left = 40
+	card.offset_right = -40
+	card.offset_bottom = -150
+	card.offset_top = -150
+	card.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	layer.add_child(card)
+	var h := UI.hbox(18)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(h)
+	var left := UI.vbox(2)
+	var nar := Narrator.new(132.0)
+	nar.pose = String(c.get("pose", "hello"))
+	left.add_child(nar)
+	var who := UI.label("Capitaine Roche", 24, UI.MUTED)
+	who.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	left.add_child(who)
+	h.add_child(left)
+	var v := UI.vbox(10)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(v)
+	v.add_child(UI.label(String(c.get("title", "")), 38, UI.VIOLET))
+	v.add_child(UI.wrap_label(String(c.get("text", "")), 30, UI.TEXT))
+	var foot := UI.label(foot_text, 24, UI.MUTED)
+	foot.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	v.add_child(foot)
+	for n in card.find_children("*", "Control", true, false):
+		(n as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.modulate.a = 0.0
+	card.create_tween().tween_property(card, "modulate:a", 1.0, 0.25)
+	return layer
 
 func _end_screen() -> void:
 	var s := GameState.sim

@@ -29,7 +29,7 @@ const BUILDING_SHORT := {
 ## distinctes — « services » n'apparaissait pas du tout.
 const SOURCE_NAMES := {"handling": "Manutention", "dues": "Droits de port", "services": "Services aux escales (atelier, GNL)",
 	"gate": "Gate", "inspection": "Inspections", "reefer": "Prises frigo", "fees": "Services facturés (niveaux)",
-	"contract": "Contrats", "auction": "Enchères", "salaries": "Salaires"}
+	"contract": "Contrats", "auction": "Enchères", "salaries": "Salaires", "fish": "Pêche de l'anse (loyers, criée)"}
 ## Statistique principale de chaque service (aléas : « Suspendu (brouillard) », jamais « meilleur achat » sous un aléa).
 const STAT_DEPT := {"pilot_speed": "harbor", "moor_speed": "berths", "inspect_rate": "customs", "crane_rate": "cranes",
 	"transfer_rate": "yard_ops", "gate_rate": "gate"}

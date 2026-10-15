@@ -12,6 +12,7 @@ func _ready() -> void:
 	if a.has("fresh"):
 		Settings.persist_tuto = false
 		Settings.tuto_step = 0
+		Settings.intro_seen = a.has("skip-intro")      # lot F2 : une partie de test montre les cartes d'intro
 		Save.enabled = false
 		GameState.new_game()
 		GameState.offline_report = {}
@@ -27,6 +28,13 @@ func _ready() -> void:
 	var cheats := DebugArgs.apply(a, GameState.sim, GameState.db, DebugArgs.allowed())
 	if float(cheats.speed) > 0.0:
 		Sim.speed = float(cheats.speed)
+	# lot F2 : le départ (cartes d'intro, friche, chantiers du T1) se joue pour une partie neuve ; pas pour une partie trichée
+	# (palier, bâtiments), ni pour une capture, sauf si elle le demande (--start)
+	if GameState.sim.tier > 1 or not GameState.sim.built.is_empty() or (a.has("capture") and not a.has("start")) or a.has("no-start"):
+		GameState.start_pending = false
+		# lot F3 : une partie trichée ou une capture sans départ a fait l'acte 0 (la pêche de l'anse tourne, passive)
+		if GameState.sim.fishing.level == 0 and not a.has("load-sim"):
+			GameState.sim.fishing.migrate_done()
 	# --event=wind [--event-delay=3] : un aléa démarre après quelques secondes (captures, binaire de l'éditeur seulement ; lot E)
 	if a.has("event") and DebugArgs.allowed():
 		get_tree().create_timer(float(a.get("event-delay", "3"))).timeout.connect(func() -> void:
@@ -46,13 +54,46 @@ func _ready() -> void:
 	if a.has("capture"):      # capture automatique : la souris ne doit pas pouvoir déplacer la caméra
 		diorama.rig.input_enabled = false
 		diorama.rig.locked = a.has("look")      # --look fixe le cadrage : les recentrages du jeu sont ignorés
+	if a.has("ship-demo") and DebugArgs.allowed():   # captures du lot F1 : --ship-demo=coaster:0:0 (classe, place, poste)
+		var sd := String(a["ship-demo"]).split(":")
+		diorama.demo_ship(sd[0], int(sd[1]) if sd.size() > 1 else 0, int(sd[2]) if sd.size() > 2 else 0)
 	if a.has("open-zone") and DebugArgs.allowed():   # capture d'une ouverture de zone (--open-zone=10 après --build=berth3)
 		diorama.opening_queue.append(int(a["open-zone"]))
+	if a.has("site") and DebugArgs.allowed():        # capture d'un chantier (lot F2 : --site=berth2 après --build=berth2)
+		var sid := String(a["site"])
+		get_tree().create_timer(float(a.get("site-delay", "0.5"))).timeout.connect(func() -> void:
+			diorama.start_site(sid)
+			diorama.rebuild())      # (comme après un achat : les accessoires du bâtiment attendent la fin du chantier)
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	hud = Hud.new()
 	hud.diorama = diorama
 	layer.add_child(hud)
+	# lot F3 (captures, binaire de l'éditeur seulement) : --act0=N fait les N premiers achats de l'acte 0 (le chantier du dernier
+	# se joue) ; --act0-warm=S fait tourner la pêche S secondes avant le dernier (bateaux en mer, chantiers d'avant finis) ;
+	# --bascule : l'argent de la bascule (elle se joue).
+	if (a.has("act0") or a.has("bascule")) and DebugArgs.allowed() and GameState.sim.fishing.act0:
+		var s := GameState.sim
+		var n := int(a.get("act0", "5"))
+		var warm := float(a.get("act0-warm", "0"))
+		for k in n:
+			if k == n - 1 and warm > 0.0:
+				for i in int(warm / 0.25):
+					s.step(0.25)
+				diorama.sites.clear()
+				diorama.fishing_view.rebuild()
+				for v in diorama.fishing_view.boats:
+					v.fresh = false
+					v.fade = 1.0
+			s.money += s.fishing.next_cost()
+			s.buy_fish()
+		if warm > 0.0 and n == 0:
+			for i in int(warm / 0.25):
+				s.step(0.25)
+		if a.has("bascule"):
+			s.money = maxf(s.money, float(s.fishing.cfg.get("switch_money", 300.0)) + 20.0)
+		else:
+			s.money = minf(s.money, 120.0)      # (sans --bascule, la bascule ne part pas pendant la capture)
 	if a.has("open"):
 		await get_tree().create_timer(float(a.get("open-delay", "1"))).timeout
 		match String(a.open):

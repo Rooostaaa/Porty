@@ -1,5 +1,16 @@
 [
-  {"id": 1, "name": "Le Vieux Quai", "story": "Un quai à l'abandon, une grue rouillée et beaucoup de goélands.",
+  {"id": 0, "name": "La Crique", "story": "L'anse des pêcheurs, à l'ouest du cap : le ponton d'Odette, sa cabane, les barques des voisins. On loue des places, on vend le poisson, puis la criée.",
+   "intro": [
+     {"title": "Une lettre du notaire", "pose": "think",
+      "text": "« Votre grand-tante Odette vous lègue sa crique, au fond du golfe d'Ambre : un ponton, une cabane, des filets… et la friche de l'autre côté du cap. » Au crayon, Odette a ajouté : « Fais-en quelque chose de bien. Et nourris les goélands. »"},
+     {"title": "L'anse des pêcheurs", "pose": "hello",
+      "text": "Bienvenue au fond du golfe ! Les voisins pêcheurs sortent avant l'aube et rentrent avec du poisson et des avis sur tout. Moi, c'est Mathilde Roche : je tenais la capitainerie, du temps où il y avait un quai."},
+     {"title": "Le ponton d'Odette", "pose": "bravo",
+      "text": "Le ponton tient avec trois clous et beaucoup d'optimisme. Répare-le : les barques du village paieront leur place, et tu vendras leur poisson. On commence petit, mais on commence !"}
+   ],
+   "bascule": {"title": "Un caboteur au large !", "pose": "think",
+     "text": "Tiens, Corsaire & Fils… Ce caboteur cherche un quai pour décharger. De l'autre côté du cap, il y a la vieille estacade. Un port à conteneurs, ça te dit ?"}},
+  {"id": 1, "name": "Le Vieux Quai", "story": "Derrière le cap, une estacade en ruine et une friche : on y rebâtit le vieux quai, sa grue et son parc. Le caboteur de Corsaire & Fils attend déjà au large.",
    "value_mult": 1.8, "dues_mult": 1.8, "traffic_mult": 1.0},
   {"id": 2, "name": "Port régional", "story": "Les premiers armateurs sérieux frappent à la porte.",
    "value_mult": 3.0, "dues_mult": 3.0, "traffic_mult": 3.0, "amber": 5,

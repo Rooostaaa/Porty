@@ -553,3 +553,131 @@ leur instant ne l'est pas : une fonction chargée compte comme révélée « dep
   ce qui s'ouvre (`tiers.json` → `opens`, 3 icônes par palier) et VOIR cadre la zone du prochain bâtiment du palier ; la couche
   de cérémonie passe sous les fenêtres ; la surcouche monde est masquée sous une fenêtre.
 - Volume enregistré au relâchement de la réglette (ou à la fermeture de Réglages) ; `Sfx.persist` faux pendant les tests.
+
+## Lot F — modèles de la crique, des chantiers et de la forêt — 14/10 (ordre `docs/ORDRE_BLENDER_F.md`, expert Blender)
+- **21 nouveaux modèles**, aucun `.glb` existant modifié, palette inchangée (aucune teinte ajoutée) : `blender/parts/crique.py`,
+  `chantier.py`, `foret.py`, branchés dans `build_assets.py` (budgets fixés nom par nom dans `EXACT`, tous respectés).
+  Rendus : `docs/previews/f_crique.png`, `f_chantier.png`, `f_foret.png`.
+- **Conventions** : bateaux étrave en +X, origine sur la ligne de flottaison (à poser à `WATER_Y`, comme `fishing_boat`) ;
+  pontons idem, plancher à z = 0,45 (`deck_z`), module 6 × 1,6 sur X qui se raccorde bout à bout ; bâtiments, estacade et forêt
+  origine au sol, face principale −Y. `ice_plant.chute_end` (repère Godot) = point où la goulotte déverse, à aligner sur le quai.
+  `jetty_ruin` : 24 × 3,2 sur X, plancher à 0,25, pieux jusqu'à −2,85, partie effondrée x ∈ [−3, 3] (`collapsed_x`).
+  `forest_road` : route sur Y, entrée ouverte en −Y, le trafic disparaît vers y = +6 (fond noir). `far_shore` : 260 × 50, face −Y.
+- **Modèles articulés** (pièces nommées, aucun rig ; axes en repère Godot dans `assets_meta.json` → `nodes`) :
+  `site_crane` = `base` + `jib` (pivot (0, 10, 0), `rotation.y`) dont l'enfant `hook` (chariot + crochet, glisser `position.x`
+  entre 1,5 et 8,5) ; `excavator` = `base` + `turret` (`rotation.y`) > `boom` (`rotation.z`, > 0 lève) > `arm` (`rotation.z`,
+  > 0 ouvre vers l'avant).
+- `scaffold` (4 × 4 × 4) et `site_hoarding` (module 4 u) sont faits pour être étirés / répétés par le jeu ; le centre de
+  l'échafaudage est vide (le bâtiment en chantier se voit dedans).
+- `build_assets.py` ne réécrit plus `godot/data/palette.json` quand son contenu est identique.
+- Limites : aperçus sur sol vert (pas d'eau : coques et flotteurs coupés à z = 0) ; `far_shore` jamais vu à 300 u dans le jeu
+  (à vérifier en F2, éventuellement brume) ; les nouveaux `.glb` n'ont pas encore de `.import` (premier lancement de Godot).
+
+## Navires et défilement (lot F1) — 14–15/10 (ordre `docs/ORDRE_F1.md`, journal `JOURNAL_PLAN_BAIE.md` § « Lot F1 »)
+- **Simulation inchangée, le monde montre un échantillon des escales.** Mesuré : une escale occupe un poste ≈ 6,5 s au T1, 3 s
+  au T2, 7 s au T3 (jusqu'à 36 escales par minute) ; un navire à vitesse de croisière met 70 à 150 s du mouillage au quai. Mettre
+  le trajet dans la simulation (recommandation de l'ordre) aurait multiplié le cycle d'un poste par 5 à 10 : rejeté. Les vues
+  des navires font leur propre voyage (`ShipView`) ; en rade, une vue par escale (liée) ; vers chaque poste, un navire en route
+  à la fois ; à quai, déchargement à l'écran (8–20 s), puis départ ; l'argent des escales du poste s'affiche au départ du
+  navire à l'écran. Sonde, sauvegarde et économie identiques au bit près.
+- **Vitesse de croisière par classe** (mini 7,5 · caboteur 7 · feeder 6 · panamax 5 u/s ; 0,55 × dans le port, 0,38 × en
+  manœuvre), **jamais liée aux achats** ; rotation ≤ 19°/s, aucune rotation navire arrêté ; plus de rattrapage (`CATCHUP_K`).
+- **Postes 1–2 amarrés étrave à l'ouest** (évitage à l'arrivée devant le poste, départ droit vers la passe) ; postes 3–4
+  étrave à l'est (inchangé). Accostage et départ en **glissement latéral** de 10–12 u avec le remorqueur (épaule côté large).
+- **Remorqueur** de la crique (−51 ; −15) : rendez-vous à l'entrée du chenal (ou passe est), remorque en tête, hanche pendant
+  l'évitage, épaule pour le glissement ; un navire n'entame pas l'évitage ni ne quitte le quai sans lui.
+- **Défilement géré par la feuille** (`Sheet._input`) : un glissé de plus de 14 px défile d'où qu'il parte (bouton compris),
+  au doigt et à la souris ; le bouton sous le doigt n'agit pas (`NOTIFICATION_SCROLL_BEGIN`, `HoldRepeat.cancel`) ; appui bref
+  inchangé ; reconstructions de `refresh()` différées au relâchement (`request_rebuild`), position gardée.
+- Limite connue : le bassin intérieur (≈ 28 u) est plus étroit qu'un feeder (34 u) : son évitage se fait coque sur la corde,
+  centre lent au milieu de la manœuvre — à revoir avec l'espace du lot F4. `run_all` se lance aussi en trois parts
+  (`-- --part=1|2|3`).
+
+## Le golfe, partir de rien (lot F2) — 15/10 (ordre `docs/ORDRE_F2_F3.md`, journal `JOURNAL_PLAN_BAIE.md` § « Lot F2 »)
+- **La simulation n'est pas modifiée** : sonde identique au bit près, pas de nouvelle version de sauvegarde.
+  - Le départ se joue **simulation gelée** (`Sim.paused`, piloté par `Hud`) : cartes d'intro, friche, séquence de chantiers
+    du T1, arrivée du premier navire. Il ne coûte aucun temps de jeu.
+  - *Rejeté* : un premier pilotage de 60 s dans la simulation pour caler le premier navire. T2 +7,6 % en moyenne et aucun
+    revenu la première minute, hors tolérance.
+- **Premier navire du T1** :
+  - sa vue naît hors champ dans le chenal à la fin du chantier du quai (`Diorama._spawn_first_ship`, `Layout.first_ship_path`)
+    et file au poste n°1 sans mouiller ;
+  - la simulation démarre quand il glisse vers le quai depuis 5 s (`FIRST_CRAB_LEAD`) ;
+  - mesuré : escale et arrivée à l'écran à 7,5 s d'écart (< 15), le joueur l'ayant touché aussitôt ;
+  - le tutoriel « touche le navire » le suit au lieu de viser le mouillage.
+- **Chantiers** (`SiteWorks`, présentation seule) :
+  - lancés par `purchased` (bâtiments seulement) et par la séquence du T1, jamais au chargement ;
+  - 3 s (petite case) à 6 s (quais, grandes cases), jamais accélérés ni passés ; en pause sous un écran plein ;
+  - palissade, échafaudage ou rien sur l'eau ; pelleteuse ou grue de chantier animées ; poussière ou éclaboussures ; son
+    `works` ;
+  - montée avec dépassement de 8 % ; l'état d'avant rétrécit dans la poussière ;
+  - le terre-plein garde son remblai (ouverture de zone).
+  - Les nœuds portent `site` (bâtiment ou pièce de départ) et `before` (état d'avant). Les accessoires en MultiMesh
+    attendent la fin du chantier, sauf pour les bâtiments clés d'une zone (`_SITE_ZONE_KEYS`) : leur ouverture de zone les
+    montre déjà.
+- **Trafic lié à ce qui existe** (`Diorama.ready_bid`, `TrafficView.ready_fn`). Pendant le chantier d'un bâtiment, rien ne
+  s'en sert :
+  - pas de navire à l'écran avant le quai (ni vers un poste en chantier) ;
+  - pas de camion avant la gate ; pas d'engin avant le parc ;
+  - ni deuxième voie ni places de parking avant leurs chantiers ; pas de train avant la gare.
+  - Voitures : 5, sur l'autoroute seulement, dès le départ.
+- **Départ de rien** : quatre pièces (`Layout.STARTER`), quai → grue → parc → gate.
+  - Leurs éléments sont marqués `grp` dans PROPS et GROUNDS. Tant qu'une pièce est en friche, rien d'elle n'est créé : on
+    voit l'estacade ruinée, des rochers et des broussailles.
+  - Toute case à terre pas encore achetée montre son état d'avant (`Layout.before_state`).
+  - Pas de musoir sur un quai pas encore construit.
+  - Une partie chargée, de test ou de capture commence tout bâtie. Le départ ne se joue que pour une partie neuve
+    (`GameState.start_pending` ; `auto_start` coupé par `ui_smoke` ; captures : `--start`, `--skip-intro`).
+- **Golfe et forêt** :
+  - rives du golfe et arrière-pays hors du plan coté (`Layout.gulf_polys`, pas dans `land_polys`) ;
+  - rive d'en face voilée de brume (matériau vcol + `flash`) ;
+  - forêt ≈ 400 blocs en MultiMesh par carrés de 120 u ;
+  - routes sous les arbres aux points où le trafic se perd ;
+  - collines-tunnels supprimées ;
+  - bornes de la caméra : z −150 au nord, zoom le plus large 130 (190 avant).
+- **Intro** : trois cartes de la narratrice dans `tiers.json`, palier 0 « La Crique » (`intro`), passées d'un toucher.
+  Montrées une fois (`Settings.intro_seen`, jamais écrit par une partie `--fresh`).
+- Limites :
+  - la rive d'en face ne se voit qu'au zoom le plus large, près de la borne nord. Plus près, elle couperait les places
+    du mouillage au-delà de 25 places ;
+  - les blocs de forêt profonde, agrandis ×2,2, font de très grands arbres de près (corrigé au lot F3) ;
+  - le remorqueur du premier navire part de sa base au moment où le navire naît.
+
+## Acte 0 « La Crique » (lot F3) — 15/10 (ordre `docs/ORDRE_F2_F3.md`, journal `JOURNAL_PLAN_BAIE.md` § « Lot F3 »)
+- **La pêche est un module léger possédé par la simulation** (`sim/fishing.gd`, `PortSim.fishing`, données
+  `config.json` › `fishing`), pas un palier 0 : `PortSim.tier` reste borné à 1–3.
+  - Pendant l'acte 0 (`fishing.act0`), le port à conteneurs est fermé : `step` n'avance que la pêche et les seaux de revenu ;
+    `PortSim.time` (l'horloge du port) ne tourne pas — tout le T1 et la sonde se mesurent depuis l'entrée au T1.
+  - `PortSim.new()` : port ouvert, pas de pêche (tests). Une partie neuve jouée appelle `begin_act0()` (0 $), la bascule finit
+    par `open_port()`. Rien ne se bâtit au port pendant l'acte 0.
+- **Cinq achats** sur la carte AMÉLIORER (pas d'écran nouveau) : réparer le ponton (0 $), deuxième ponton (25 $), criée (60 $,
+  ventes ×2), quai des chalutiers (120 $, 2 chalutiers ×4), fabrique de glace (200 $, un thonier ×10). Loyer 0,04 $/s par
+  place + vente à chaque débarque (±10 %, tirage à part du port). **Geste manuel** : toucher un bateau qui rentre (ou qui
+  débarque) — il débarque tout de suite, vente ×1,2. Aucun responsable, aucun aléa, pas de Commerce pendant l'acte 0.
+- **Bascule** quand les cinq achats sont faits et l'argent ≥ 300 $ (`act0_ready`) : le caboteur de Corsaire & Fils (l'escale
+  initiale de la simulation, toujours de Corsaire au T1) naît au large, hors champ, et attend à l'entrée du chenal si le quai
+  n'est pas fini (`ShipView.hold_d`) ; narratrice (`tiers.json` › palier 0 › `bascule`), cérémonie « Palier 1 — Le Vieux
+  Quai », chantiers du T1 **qui se chevauchent** (`Diorama.T1_STAGGER`, ≈ 12 s en tout), **HUD visible et pêche qui rapporte**
+  ; le port ouvre au glissement du premier navire (mécanisme F2). Mesuré : séquence 12 s, escale/écran 7,4 s, aucune fenêtre
+  sans action possible.
+- **Après l'acte 0** : revenu fixe **0,5 $/s** (≈ 1/12 du revenu de la fin de l'acte, 6,2 $/s : 1 $/s et plus accéléraient le
+  T1 hors tolérance), dans le revenu du HUD et Gestion › Stats (« Pêche de l'anse ») ; plus de carte ni de coup de main ; les
+  bateaux vivent dans l'anse à tous les paliers (7 au plus). Hors-ligne : la pêche continue (acte 0 : rendement de base).
+- **Durée** (bot) : 3 min 41–3 min 46 sur les 4 graines ; sans aucun coup de main 4 min 47–4 min 54. Progression depuis l'entrée
+  au T1 : T2 −1,6 %, T3 +0,9 %, fin −1,8 % en moyenne (chaque graine dans ±15 %).
+- **Sauvegarde v6** : clé `act0` (`Fishing.to_dict`). Absente = partie d'avant F3 : acte 0 fait, cinq achats, pêche passive,
+  aucun chantier rejoué. Une partie enregistrée pendant l'acte 0 reprend dans l'anse (sans cartes d'intro). Nouvelle concession :
+  la pêche est reprise, pas d'acte 0, la bascule se joue port fermé (`hold_port`).
+- **L'anse des pêcheurs** (`FishingView`, `Layout` « Lot F3 », `PLAN_COTE.md` § 5 ter) : cabane d'Odette, ponton pourri (état
+  d'avant), pontons le long de la plage, quai des chalutiers le long du cap, criée à l'est des pontons (vue du sud-est, elle ne
+  les cache pas) et sa route jusqu'à la rue du village, fabrique de glace sur le cap. Bateaux sur une **boucle à sens
+  unique** (voie ouest → plage → voie est), position déduite de la phase de la simulation et interpolée entre deux pas,
+  rampes de 2 s, glissement latéral lent à la place, jamais de rotation sur place, ≤ 6 u/s ; ≥ 40 u du mouillage et de
+  l'arrivée des cargos, ≥ 60 u du chenal. Caisses `crate_fish` à la débarque ; camionnette du mareyeur qui part sous les arbres.
+- **Bateaux de décor** : les deux `fishing_boat` de la crique du vieux port et ses caisses de poisson sont **retirés** (ils
+  contredisaient l'acte 0 : la flottille vit dans l'anse) ; le « pêcheur du musoir » devient un docker (même modèle).
+- **Tutoriel** (version 6) : trois étapes en tête (réparer le ponton sur AMÉLIORER, toucher une barque qui rentre, la criée),
+  puis « Bienvenue » à l'ouverture du port ; une progression enregistrée avant F3 se retrouve (`REV5_ORDER`).
+- **Forêt profonde** : blocs ×0,92–1,05 (au lieu de ×2–2,4) au pas de 21 u, ≈ 1,3 × les arbres du village ; 673 blocs ;
+  carrés profonds sans ombre ; triangles dessinés au zoom le plus large identiques à F2 (LOD du modèle).
+- Captures de débogage (binaire de l'éditeur) : `--start --skip-intro --act0=N [--act0-warm=S] [--bascule]`.

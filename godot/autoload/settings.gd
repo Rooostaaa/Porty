@@ -4,7 +4,8 @@ extends Node
 signal changed()
 
 const PATH := "user://settings.cfg"
-const TUTO_REV := 5                # liste d'étapes du tutoriel (data/tutorial.json) : 5 = le parc avant Yasmine (revue C7 B5)
+const TUTO_REV := 6                # liste d'étapes du tutoriel (data/tutorial.json) : 5 = le parc avant Yasmine (revue C7 B5)
+                                   # 6 = lot F3, trois étapes de l'acte 0 en tête (ponton, barque, criée)
 
 var muted: bool = false
 var show_flows: bool = false
@@ -25,7 +26,8 @@ func _ready() -> void:
 
 func set_intro_seen() -> void:
 	intro_seen = true
-	_save()
+	if persist_tuto:          # (lot F2 : une partie de test --fresh ne marque pas l'intro comme vue chez le joueur)
+		_save()
 
 
 ## Étape courante du tutoriel guidé (0 = pas commencé ; ≥ nombre d'étapes = terminé).

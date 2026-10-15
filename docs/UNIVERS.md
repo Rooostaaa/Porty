@@ -1,10 +1,34 @@
 # Port Horizon — Bible de l'univers
 
 ## Le monde
-Archipel fictif de la **Mer d'Ambre**. Le joueur est le·la **directeur·rice du terminal** de *Port Horizon* :
-il hérite du vieux quai n°1 d'un village de pêcheurs et le transforme, palier après palier, en terminal national.
+**Mer d'Ambre**, fictive. Le port est **au fond du golfe d'Ambre** (lot F, 14/10) : ce n'est pas une île. La rive d'en face
+se devine au large, au nord, dans la brume : des collines et un phare. Une forêt de pins borde toute la terre, et l'autoroute,
+la route du village et la voie ferrée s'enfoncent sous les arbres.
+
+Le joueur hérite de **la crique de sa grand-tante Odette**, pêcheuse. Il y trouve un ponton pourri, une cabane, des voisins
+pêcheurs et, de l'autre côté du cap, une friche et une estacade en ruine. Il veut en faire une affaire rentable. Devenu·e
+**directeur·rice du terminal** de *Port Horizon*, il·elle transforme la friche, palier après palier, en terminal national.
 Ton : chaleureux, humoristique, jamais cynique. Aucune marque, aucun drapeau réel.
 Ports d'origine fictifs : Nordhaven, Sakura Bay, Port Aurore, Cap Zéphyr, Rio Verde.
+
+### Odette, la crique et l'anse des pêcheurs
+- **Odette** : la grand-tante, pêcheuse, disparue. Sa lettre passe par le notaire : « Fais-en quelque chose de bien. Et nourris
+  les goélands. » Sa cabane (`odette_hut`) reste au bord de l'anse, à côté de son ponton.
+- **L'anse des pêcheurs** : à l'ouest du cap, entre le cap et la rive ouest du golfe (plage ouest). Les voisins y ont leurs
+  barques. C'est le lieu de l'**acte 0** (palier 0 « La Crique », lot F3) : on répare le ponton d'Odette et on loue ses places
+  aux barques du village (loyer + vente des caisses sur le ponton), un deuxième ponton, la **criée** (vente aux enchères :
+  chaque débarque rapporte deux fois plus ; le mareyeur vient en camionnette par la route du village), le **quai des
+  chalutiers** le long du cap, la **fabrique de glace** (un thonier vient du large). Geste du joueur : toucher une barque qui
+  rentre pour l'aider à débarquer. Ensuite la pêche tourne toute seule : un petit revenu de fond, et l'anse vit à tous les
+  paliers (barques, chalutiers, thonier, camionnette).
+- **Corsaire & Fils** déclenche le passage aux conteneurs : un de leurs caboteurs passe au large, cherche un quai ; « de l'autre
+  côté du cap, il y a la vieille estacade ».
+- **La narratrice** : Capitaine Mathilde Roche. Elle tenait la capitainerie « du temps où il y avait un quai ». Elle lit la
+  lettre, présente les voisins, puis lance les chantiers.
+- **Le départ** (lots F2, F3) : trois cartes d'intro (`tiers.json`, palier 0 : la lettre, l'anse, « répare le ponton »),
+  l'acte 0 dans l'anse (3 à 5 min), puis la bascule : le caboteur de Corsaire & Fils au large, la cérémonie « Palier 1 — Le
+  Vieux Quai », et la friche se bâtit sous nos yeux en une douzaine de secondes (le vieux quai et sa capitainerie, la grue
+  mobile, le parc et son hangar, la route et la gate, chantiers qui se chevauchent). Le caboteur entre au port.
 
 ## La vie d'un navire (fil rouge)
 1. **Rade** (Capitainerie) — le navire annonce son escale et attend. Patience limitée. 😊 → 😐 → 😠 → départ furieux.
@@ -58,7 +82,8 @@ Le joueur ne corrompt, ne juge, ne saisit jamais. Il finance la capacité d'insp
 ## Paliers
 | Palier | Nom | Récit |
 |---|---|---|
-| T1 | Le Vieux Quai | reprendre un quai à l'abandon : grue mobile, stock sur gravier, douane en cabane |
+| T0 | La Crique | l'anse des pêcheurs, à l'ouest du cap : ponton d'Odette, barques des voisins, criée, chalutiers, thonier ; la pêche tourne ensuite toute seule (acte 0, lot F3) |
+| T1 | Le Vieux Quai | rebâtir la friche derrière le cap : vieux quai, grue mobile, parc en gravier, gate ; douane en cabane |
 | T2 | Port régional | quai 2, premier portique STS, parc bitumé, gate, frigo |
 | T3 | Terminal national | quais 3–4, scanner, zone IMO, rail, contrats nationaux |
 
@@ -67,11 +92,12 @@ Le joueur ne corrompt, ne juge, ne saisit jamais. Il finance la capacité d'insp
 
 ## Le port sur la carte : la baie et le terre-plein (13/10)
 Un petit port de pêche abrité derrière un cap devient, palier après palier, un terminal gagné sur la mer, d'ouest en est.
-Plan coté : `docs/PLAN_COTE.md`. Neuf quartiers, chacun avec son sol, sa couleur et son repère vertical :
+Plan coté : `docs/PLAN_COTE.md`. Dix quartiers (l'anse des pêcheurs depuis le lot F3), chacun avec son sol, sa couleur et son repère vertical :
 
 | Quartier | Où | Sol | Repère | Ambiance |
 |---|---|---|---|---|
-| **Vieux port** | crique derrière le cap | planches, gravier beige | phare rouge et blanc, grue mobile | mouettes, cordages, bateaux de pêche |
+| **Anse des pêcheurs** | à l'ouest du cap (lot F3) | plage, pontons de bois | criée rayée bleu et blanc, cabane d'Odette | barques, chalutiers, caisses de poisson, camionnette du mareyeur |
+| **Vieux port** | crique derrière le cap | planches, gravier beige | phare rouge et blanc, grue mobile | mouettes, cordages (les bateaux de pêche sont dans l'anse) |
 | **La Porte** | entre le parc et la route | béton clair, bandes jaunes et noires | barrières, portique scanner | bips, moteurs au ralenti |
 | **Colline du port** | butte derrière le vieux port | herbe vive | tour de contrôle (T2) | calme, drapeaux |
 | **Terminal** | au centre, côte droite | asphalte violet | premier portique bleu | engins, signaux de recul |
@@ -82,6 +108,8 @@ Plan coté : `docs/PLAN_COTE.md`. Neuf quartiers, chacun avec son sol, sa couleu
 | **Village** | colline ouest, derrière les arbres | rues, trottoirs | boutique | vie civile |
 
 Les navires mouillent devant la passe, entrent entre le feu vert du cap et le feu rouge du brise-lames, suivent le chenal
-balisé, pivotent au bassin d'évitage et accostent le long du quai ; ils repartent par l'est. Les camions sortent d'un tunnel
-à l'ouest, passent la gate, chargent le long du parc et repartent par le tunnel est. Le palier 1 se raconte en quatre
-chapitres : le petit quai, le parc, la gate, faire venir les navires.
+balisé, pivotent au bassin d'évitage et accostent le long du quai ; ils repartent par l'est. Les camions sortent de la forêt
+à l'ouest (l'autoroute passe sous les arbres), passent la gate, chargent le long du parc et repartent dans la forêt à l'est.
+Rien ne roule ni ne navigue sans le bâtiment qui le crée : pas de cargo sans quai, pas de camion sans gate. Seules quelques
+voitures passent sur l'autoroute dès le départ. Le palier 1 se raconte en quatre chapitres : le petit quai, le parc, la
+gate, faire venir les navires.

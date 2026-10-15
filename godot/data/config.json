@@ -7,6 +7,27 @@
   "seed": 12345,
   "hazard_cost_cap": 0.25,
 
+  "fishing": {
+    "rent": 0.04, "help_mult": 1.2, "help_land": 2.5, "hall_mult": 2.0, "switch_money": 300, "passive": 0.5, "jitter": 0.1,
+    "boats": {
+      "dinghy":  {"name": "Barque",    "value": 10, "out": 20, "fish": 6,  "back": 20, "land": 6,  "max_shown": 4},
+      "trawler": {"name": "Chalutier", "value": 34, "out": 22, "fish": 6,  "back": 24, "land": 8,  "max_shown": 2},
+      "tuna":    {"name": "Thonier",   "value": 80, "out": 26, "fish": 8,  "back": 30, "land": 10, "max_shown": 1}
+    },
+    "buys": [
+      {"id": "pontoon",  "name": "Réparer le ponton",   "cost": 0,   "icon": "berth",  "boats": {"dinghy": 2},
+       "text": "Deux places louées aux barques du village : loyer des places et vente des caisses sur le ponton."},
+      {"id": "pontoon2", "name": "Deuxième ponton",     "cost": 25,  "icon": "berth",  "boats": {"dinghy": 2},
+       "text": "Deux places de plus : deux barques de plus qui débarquent chez toi."},
+      {"id": "hall",     "name": "La criée",            "cost": 60,  "icon": "money",  "hall": true,
+       "text": "La halle à marée vend aux enchères : chaque débarque rapporte ×2. Le mareyeur vient en camionnette."},
+      {"id": "trawler",  "name": "Quai des chalutiers", "cost": 120, "icon": "ship",   "boats": {"trawler": 2},
+       "text": "Deux chalutiers s'amarrent : quatre fois plus de poisson par débarque."},
+      {"id": "ice",      "name": "Fabrique de glace",   "cost": 200, "icon": "reefer", "boats": {"tuna": 1},
+       "text": "De la glace pour la cale : un thonier vient du large, dix fois plus de poisson par débarque."}
+    ]
+  },
+
   "arrive_time": 7,
   "depart_time": 7,
   "pilot_time": 5,

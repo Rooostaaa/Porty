@@ -1,4 +1,4 @@
-# Plan coté définitif — « La baie et le terre-plein » (13/10/2026, réorganisé au lot D le 14/10, flux du lot E le 14/10 au soir)
+# Plan coté définitif — « La baie et le terre-plein » (13/10/2026, réorganisé au lot D le 14/10, flux du lot E le 14/10 au soir, anse des pêcheurs au lot F3 le 15/10)
 
 Source unique des cotes : `godot/scripts/world/layout.gd` (constantes citées entre parenthèses). Repère du jeu : **x vers l'est**
 (droite-bas de l'écran), **z vers le sud** (gauche-bas), mer en z négatif, bord des quais à **z = −6**. Captures de validation :
@@ -8,7 +8,7 @@ Source unique des cotes : `godot/scripts/world/layout.gd` (constantes citées en
 `ghost_lot`).** Lot D (revue `REVUE_CRITIQUE_PORT.md`, axe 1) : circulation à droite, douane côté sortie dans une enceinte, pôle
 nautique sur le cap, bureaux du port côté public, gare contre le terre-plein, brise-lames et passe est au palier 3.
 
-## 1. Terrain (polygones construits dans Godot, `COAST`, `BREAKWATER`, `BREAKWATER_E`, `RECLAIM`)
+## 1. Terrain (polygones construits dans Godot, `COAST`, `BREAKWATER`, `BREAKWATER_E`, `RECLAIM` ; lot F2 : rives du golfe et forêt, § 5 bis)
 - **Continent** : plage ouest (−132, 60) → (−94, 48) ; **cap** (−92, 24) → (−86, −16) → (−72, −42) → pointe (−64, −44) → (−58, −38) ;
   **crique** (−56, −26) → (−56, −14) → (−52, −8) → (−48, −6) ; **côte des quais** z = −6 de x = −48 à 48 ; **baie est**
   (48, 32) → (62, 40) → (100, 44) → (136, 42) → (152, 36) → (186, 50). Dessus herbe, flancs en deux couches de terre (2,4 u).
@@ -43,7 +43,7 @@ La zone logistique (z 84…126) reste en arrière-plan, grise jusqu'à la gare. 
 x 9 et 52, z 36…80 (végétation `scatter`), gare dans la bande x 56…150.
 
 ## 3. Voies et trajets
-- **Camions — circulation à droite** (`LANE_*`, `ROAD_*`, `truck_route_*`) : tunnel ouest (x −128) → autoroute, voie vers l'est
+- **Camions — circulation à droite** (`LANE_*`, `ROAD_*`, `truck_route_*`) : route sous les arbres à l’ouest (x −128, lot F2 ; tunnel avant) → autoroute, voie vers l'est
   **au sud** (z 142, `HIGHWAY_LANE_E` ; vers l'ouest z 140) → virage à gauche sur la **voie d'entrée à l'est** de la route
   (x −19,5 ; −15 avec gate2) → file depuis z 49, aire d'attente x −12…6 → **barrière d'entrée** (pivot −18, z 45) → voie A
   (aller, à vide) **z 34,6 vers l'est** jusqu'au **bout du groupe de blocs de son arrêt** (x −2 / 45 / 146, `tier_for_stop` ;
@@ -51,7 +51,7 @@ x 9 et 52, z 36…80 (végétation `scatter`), gare dans la bande x 56…150.
   arrêt devant le bloc (z 30,4), **face à l'ouest**, arrivée et départ en biais doux (4,5 u pour 2 u, `LOAD_APPROACH`),
   chargement → **voie de sortie à l'ouest** (x −22,5, et −19,5 une
   fois sur deux avec gate2) : devant la douane, **sous un scanner à portique** (un par voie de sortie), barrière de sortie (pivot −24, z 43) → route vers
-  le sud → virage à gauche sur l'autoroute vers l'est → tunnel est (x 183). Aucun croisement entre entrée et sortie.
+  le sud → virage à gauche sur l'autoroute vers l'est → route sous les arbres à l’est (x 183). Aucun croisement entre entrée et sortie.
 - **Engins** : inchangés (côté mer, allées z 3,4 / 17,2, allées verticales −20,3 / 16,3 / 90,1).
 - **Navires** : mouillage, chenal, passe ouest, bassin d'évitage inchangés. **Postes 1–2** : arrivée et départ par la passe ouest
   **à tous les paliers**. **Postes 3–4** (palier 3) : du mouillage, entre deux colonnes de places puis voie au large z = −108
@@ -59,6 +59,15 @@ x 9 et 52, z 36…80 (végétation `scatter`), gare dans la bande x 56…150.
   est à droite** (lot E) : voie d'arrivée **z −36 au nord** vers l'ouest, **évitage devant le poste** (boucle côté quai), voie
   d'arrivée z −21 vers l'est, accostage ; départ par la voie **z −25 au sud** (11 u d'entraxe : deux panamax à 2,4 u), sortie à
   l'est de la ligne d'arrivée (200 ; −25) → (215 ; −90), hors écran.
+- **Manœuvres (lot F1, `Layout` « Lot F1 — manœuvres »)** : partout, évitage à l'arrivée, approche déjà parallèle au quai,
+  **glissement latéral** de la voie z −21 au poste (remorqueur à l'épaule côté large) ; au départ, glissement inverse puis la
+  route sans demi-tour. **Postes 1–2 : amarrés étrave à l'ouest** — sortie du chenal arrondie (rayon 12) sur la voie d'évitage
+  **z −33** vers l'est, demi-tour à droite 22 u à l'est du poste (rayon 6), retour vers l'ouest sur z −21 ; départ le long des
+  quais vers l'ouest, virage à droite (rayon 8, début en x −19) dans la voie de sortie du chenal. **Postes 3–4 : amarrés étrave à
+  l'est**, évitage en demi-cercle (rayon 7,5) de z −36 à z −21, départ par (x + 16 ; −25). Points d'attente : dans la passe
+  (voie d'entrée, 30 % de la voie 2 à la voie 3) et avant l'évitage (postes 1–2), sur z −36 10 u à l'est du poste (postes 3–4).
+  Mouillage : dernier bord de l'arrivée (16 u) au cap du mouillage (0,35 rad). Remorqueur : base (−51 ; −15), rendez-vous à
+  l'entrée du chenal (−31 ; −97) ou dans la passe est (152 ; −31).
 - **Règles de passage des navires** (lot E, `ShipRules`, vues seulement) : distance de suivi ; on cède au navire qui coupe la
   route devant l'étrave ; **croisements** (`SHIP_CROSSINGS`) : « large » (voie z −108 × chenal ouest, x −50…−10 × z −126…−90,
   **balisé** : contour jaune et bouées cardinales en (−30 ; −128,5) et (−46 ; −87,5)), « chenal » (entrée du chenal, x −40…−8 ×
@@ -83,6 +92,78 @@ maison bleue de la capitainerie et la tour ouvrent toutes deux la Capitainerie. 
 ## 5. Cadrage
 Départ `CameraRig.START` = (−45 ; −29), largeur 58 u : vieux port, passe, cap (la zone grise du pôle nautique y est « discrète » :
 herbe du cap, pointillés très pâles) et un navire au mouillage n°1. À l'ouverture d'une zone, `Zones.focus` cadre la zone entière.
+
+**Bornes (lot F2, `CameraRig.set_tier_bounds`)** :
+- centre de la caméra dans x −130…(bord des quais du palier + 60), z **−150**…160 (−90 avant : la rive d'en face paraît en
+  haut de l'écran) ;
+- zoom le plus large **130 u** (`ZOOM_MAX` ; 190 avant).
+- À ce zoom, aux quatre coins des bornes, l'écran reste dans x −320…400, z −340…350. Tout ce rectangle est habillé (eau,
+  rives et forêt dans `Layout.FOREST_AREA`) : on ne voit jamais le bord du monde (contrôlé dans `run_all` et `ui_smoke`).
+- Cadrage des cartes d'intro (lot F3) : (−92 ; 26), largeur 100 u (l'anse, le cap, la friche) ; acte 0 : `Layout.ANSE_LOOK`
+  (−109 ; 41), largeur 58 u (l'anse, ses pontons, la cabane, le quai des chalutiers).
+
+## 5 bis. Le golfe d'Ambre, la forêt, le départ (lot F2)
+- **Rives du golfe** (`GULF_WEST`, `GULF_EAST`, `HINTERLAND` ; sol vert sombre, hors du plan coté et de `land_polys`, ajoutées
+  à la texture de l'eau pour l'écume) :
+  - la rive ouest part de la plage ouest (−132 ; 60) et remonte vers le nord-ouest jusqu'à (−380 ; −330). Elle ferme
+    **l'anse des pêcheurs** à l'ouest du cap (l'anse fait ≈ 80–110 u de large) ;
+  - la rive est part de (186 ; 50) et remonte vers le nord-est jusqu'à (400 ; −310) ;
+  - au sud, l'arrière-pays.
+  - Toutes sont à ≥ 40 u des voies des navires (arrivée, 42 places de mouillage, départs, sorties nord et est, barges du
+    terre-plein).
+- **Rive d'en face** (`FAR_SHORES`, modèle `far_shore` 260 × 68, voilé de brume) : deux pans au nord, centrés en
+  (−250 ; −300) et (232 ; −300). L'entrée du golfe, x −120…102, laisse passer les sorties nord.
+- **Forêt dense** (`Layout.forest()`, ≈ 400 blocs `forest_block`, un MultiMesh par carré de 120 u) :
+  - lisière serrée (pas de 19 u) : bande du continent au sud de l'autoroute (z 152…168, ex-collines), quatre rangs de
+    l'arrière-pays, terres du golfe proches du continent ou de la mer ;
+  - forêt profonde au-delà (lot F3 : pas de 21 u, blocs ×0,92–1,05 — ≈ 1,3 × les arbres du village ; avant : 40 u, ×2–2,4) ;
+  - jamais à moins de 9 u de l'eau, sur l'autoroute ni sur une route forestière.
+- **Routes sous les arbres** (`FOREST_ROADS`, modèle `forest_road`), là où le trafic apparaît et disparaît :
+  - autoroute ouest, origine (−122 ; 141), trafic perdu en x −128 = `HIGHWAY_ENDS[0]` ;
+  - autoroute est, origine (177 ; 141), perdu en x 183 ;
+  - rue du village, origine (−126 ; 99), perdue en x −132 ;
+  - voie ferrée, origine (175 ; 57), perdue en x 181 = `RAIL_TUNNEL_X`.
+  - Plus de collines-tunnels (deux buttes boisées restent, en (162 ; 84) et (−110 ; 126)).
+- **Départ de rien** :
+  - pièces de départ (`STARTER`, éléments marqués « grp ») :
+    - `quay0`, 6 s : le quai n°1 x −36…−12, les musoirs ouest, la capitainerie, lampes, bouées, filets et caisses ;
+    - `crane0`, 3,5 s : la grue mobile ;
+    - `yard0`, 5 s : le parc gravier x −36…0 × z 0…18, le hangar, les tonneaux ;
+    - `gate0`, 4 s : la route d'accès x −24…−18, la voie des camions z 30…36, les barrières, le marquage, le panneau.
+  - État d'avant de la friche : l'estacade ruinée `jetty_ruin` en (−24 ; −7,2), devant le quai ; des rochers et des
+    broussailles sur le parc, la capitainerie et la gate.
+  - Cases à acheter : rochers et broussailles dans l'empreinte (`Layout.before_state`) ; rien sur l'eau, un quai, une route
+    ou le terre-plein.
+  - Pas de musoir sur la case d'un quai pas encore construit (allongement x −12…0, quai n°2 x 0…36) : la berge nue.
+- **Premier navire du T1** : il naît dans le chenal, voie d'entrée, tronçon 1 (≈ (−36 ; −72), hors champ), et file vers le
+  poste n°1 (`first_ship_path`) sans passer par le mouillage.
+- **Anse des pêcheurs** : cotes de l'acte 0 au § 5 ter (lot F3).
+
+## 5 ter. L'anse des pêcheurs (lot F3, `Layout` « Lot F3 », `FishingView`)
+À l'ouest du cap, entre la plage ouest (−132 ; 60) → (−94 ; 48), le flanc ouest du cap (−94 ; 48) → (−90 ; 0) et la rive ouest
+du golfe. Hors du bassin des conteneurs ; les bateaux restent au sud de z −35 : **≥ 40 u du mouillage et de l'arrivée des
+cargos** (SPAWN, places −121 et −71), **≥ 60 u du chenal** (contrôlé dans `run_all`).
+- **Pontons** (modèle `pontoon`, module 6 × 1,6, plancher à −0,55) :
+  - ponton d'Odette (réparé, 0 $) : x −130…−118 sur z 51,5, passerelle x −124 vers la plage ; état d'avant : `pontoon_ruin`
+    au même endroit ; places des barques (étrave à l'est) en (−127 ; 49,9) et (−121 ; 49,9) ;
+  - deuxième ponton (25 $) : x −116…−104 sur z 49,5, passerelle x −110 ; places (−113 ; 47,9) et (−107 ; 47,9) ;
+  - quai des chalutiers (120 $) : le long du cap, x −95,6, z 16…46 ; chalutiers (étrave au nord) en (−98 ; 40,5) et
+    (−98 ; 31,5) ; thonier (fabrique de glace, 200 $) en (−98,4 ; 21).
+- **Bâtiments** : criée (60 $) `fish_hall` en (−99 ; 55,5), à l'est des pontons (vue du sud-est, elle ne les cache pas), et sa
+  **route du mareyeur** x −102…−96, z 59…96 jusqu'à la rue du village (z 96…102), puis sous les arbres (village_w) ; fabrique
+  de glace `ice_plant` en (−88,5 ; 28), tournée de 90° (goulotte vers le quai) ; cabane d'Odette `odette_hut` en (−127 ; 62,5)
+  (toujours là). Camionnette `fish_van` garée en (−97,5 ; 63,5) (voie montante ; descente en x −100,5 ; rue : z 97,5 vers
+  l'ouest, 100,5 vers l'est).
+- **Boucle des bateaux, à sens unique** (sens inverse des aiguilles d'une montre) : voie ouest x −136 vers le sud, voie de la
+  plage z 44 vers l'est (au nord des barques amarrées, ≥ 2 u), voie est x −102 vers le nord (le long des chalutiers), sortie
+  au nord de z 16. Barques : glissement latéral de la voie de la plage à leur place ; chalutiers et thonier : glissement depuis
+  la voie est. Coins arrondis (rayon 4 à 6), aucune rotation sur place.
+- **Coins de pêche** (cercle de dérive de 1,6 u) : barques (−126 ; 14), (−116 ; 6), (−130 ; 2), (−120 ; −4) ; chalutiers
+  (−140 ; −12), (−128 ; −20) ; thonier (−160 ; −28). Arrivée d'un bateau neuf (en fondu, hors du cadrage de l'acte 0) :
+  barques (−138 ; −10), chalutiers (−142 ; −20), thonier (−150 ; −30).
+- **Caboteur de la bascule** : naît en (−150 ; −118), au large au nord-ouest, rejoint l'entrée du chenal (−33 ; −116) (point
+  d'attente tant que le vieux quai n'est pas fini), puis le pilotage du premier navire (poste n°1).
+- Scatter (bosquets) : rien dans x −134…−88 × z 44…72 ni dans x −96…−80 × z 14…48.
 
 ## 6. Non fait (lot D)
 **Gate est au palier 3** : non faite. La simulation n'a qu'une file de camions et un débit de gate ; `TrafficView` ne montre

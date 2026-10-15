@@ -32,7 +32,25 @@ static func attach(b: BaseButton, single_cb: Callable, repeat_cb: Callable) -> H
 	return h
 
 
+var _cancelled := false            # (lot F1) un glissé est parti de ce bouton : ni rafale ni achat au relâchement
+
+
+## Un glissé de la liste commence (la feuille propage NOTIFICATION_SCROLL_BEGIN) : la rafale s'arrête, l'appui est oublié.
+func _notification(what: int) -> void:
+	if what == Control.NOTIFICATION_SCROLL_BEGIN:
+		cancel()
+
+
+func cancel() -> void:
+	if _held and _repeating:
+		burst_ended.emit(count)
+	_held = false
+	_repeating = false
+	_cancelled = true
+
+
 func press() -> void:
+	_cancelled = false
 	_held = true
 	_repeating = false
 	_t = FIRST_DELAY
@@ -44,8 +62,9 @@ func release() -> void:
 	if _repeating and _held:
 		burst_ended.emit(count)
 	_held = false
-	# `pressed` (émis juste avant `button_up`) a déjà été ignoré si la rafale avait commencé
+	# `pressed` (émis juste avant `button_up`) a déjà été ignoré si la rafale avait commencé, ou si un glissé l'a annulée
 	_repeating = false
+	_cancelled = false
 
 
 func is_repeating() -> bool:
@@ -53,7 +72,7 @@ func is_repeating() -> bool:
 
 
 func _on_pressed() -> void:
-	if not _repeating:
+	if not _repeating and not _cancelled:
 		single.call()
 
 

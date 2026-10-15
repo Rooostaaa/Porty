@@ -3,7 +3,7 @@ extends Node3D
 ## Circulation à sens unique du plan de la baie (habillage : calée sur `truck_served`, aucune simulation ici).
 ## Camions : sortie du tunnel ouest → autoroute → voie d'entrée → file / aire d'attente → gate d'entrée → voie des camions
 ## → arrêt devant le bloc qui le sert → le conteneur descend de l'engin sur la remorque → bout de la boucle → gate de sortie
-## → autoroute → tunnel est. Ils n'apparaissent et ne disparaissent que sous les collines-tunnels, hors écran.
+## → autoroute → tunnel est. Ils n'apparaissent et ne disparaissent que dans l'ombre des routes sous les arbres (lot F2).
 ## Engins (côté mer) : grue → tablier → bloc réel → bord du parc → camion. Train (T3) et navette du tracteur entre le parc
 ## RTG et la gare, personnel, voitures civiles.
 
@@ -46,6 +46,42 @@ var loads_done := 0             # camions chargés (tests)
 ## Point du monde visible à l'écran ? (réglé par le diorama ; depuis E-Flux, le train ne s'en sert plus : il est découpé à la
 ## bouche du tunnel).
 var on_screen: Callable
+## Lot F2 (F-D6) : la case est-elle debout et en service (Diorama.ready_bid) ? Rien ne roule sans le bâtiment qui le crée ;
+## un bâtiment en chantier ne sert pas encore.
+var ready_fn: Callable
+
+
+func _ready_k(key: String) -> bool:
+	return not ready_fn.is_valid() or bool(ready_fn.call(key))
+
+
+## Lot F2 : la partie repart de la friche — camions, file et engins de l'ancienne partie disparaissent (les voitures de
+## l'autoroute restent : l'autoroute existe dès le départ).
+func reset() -> void:
+	for t in queue:
+		if is_instance_valid(t):
+			t.queue_free()
+	queue.clear()
+	for tk in trucks:
+		if is_instance_valid(tk.node):
+			(tk.node as Node).queue_free()
+	trucks.clear()
+	for v in vehicles:
+		if is_instance_valid(v.node):
+			(v.node as Node).queue_free()
+	vehicles.clear()
+	_vehicle_kind = ""
+
+
+## Places de l'aire d'attente qu'on voit : celles des parkings debout (un parking en chantier ne reçoit pas encore de camion).
+func _parking_slots(sim: PortSim) -> int:
+	var n := sim.parking_slots
+	for bid in ["parking1", "parking2"]:
+		if sim.built.has(bid) and not _ready_k(bid):
+			for e in sim.db.building_by_id.get(bid, {}).get("effects", []):
+				if String(e.type) == "parking":
+					n -= int(e.amount)
+	return maxi(0, n)
 
 
 func _seen(p: Vector3) -> bool:
@@ -173,7 +209,7 @@ func exit_route(from: Vector3) -> Array:
 
 func on_truck_served(sim: PortSim) -> void:
 	# en vitesse accélérée la gate sert plusieurs camions par image : on n'en montre qu'un par OUT_GAP
-	if _out_cool > 0.0 or trucks.size() >= MAX_LEAVING:
+	if _out_cool > 0.0 or trucks.size() >= MAX_LEAVING or not _ready_k("gate0"):
 		return
 	var stop_x := _pick_stop()
 	if is_nan(stop_x):
@@ -248,11 +284,11 @@ func _spawn_queue_truck(sim: PortSim) -> void:
 func sync(sim: PortSim, delta: float) -> void:
 	_bob += delta
 	_out_cool = maxf(0.0, _out_cool - delta)
-	_lot_slots = sim.parking_slots
+	_lot_slots = _parking_slots(sim)
 	_tier = sim.tier
-	_gate2 = sim.built.has("gate2")
+	_gate2 = sim.built.has("gate2") and _ready_k("gate2")
 	# file de camions = camions en attente dans la simulation (plafonné visuellement)
-	var want := mini(max_queue(), sim.trucks_waiting())
+	var want := mini(max_queue(), sim.trucks_waiting()) if _ready_k("gate0") else 0      # pas de camion sans gate (F2)
 	while queue.size() < want:
 		_spawn_queue_truck(sim)
 	# camions en trop : ils repartent vers le tunnel est par la voie de sortie (jamais effacés à l'écran)
@@ -314,7 +350,7 @@ func _sync_trucks(sim: PortSim, delta: float) -> void:
 			"out":
 				var spd := HIGHWAY_SPEED if n.position.z > Layout.HIGHWAY_Z0 - 1.0 else SPEED
 				if _drive(n, tk.route, spd, delta):
-					n.queue_free()          # sous la colline-tunnel est, hors écran
+					n.queue_free()          # dans l'ombre de la route sous les arbres, à l'est (lot F2)
 					continue
 		keep.append(tk)
 	trucks = keep
@@ -460,7 +496,7 @@ func _sync_cars(delta: float) -> void:
 	var x_min: float = Layout.HIGHWAY_ENDS[0]
 	var x_max: float = Layout.HIGHWAY_ENDS[1]
 	if cars.is_empty():
-		for i in 7:
+		for i in 5:      # (lot F2 : trafic léger)
 			var east := i % 2 == 0
 			var n := Assets.instance("car_a" if i % 3 != 0 else "car_b")
 			n.rotation.y = 0.0 if east else PI
@@ -479,7 +515,7 @@ func _sync_cars(delta: float) -> void:
 ## Engins du parc : grue → tablier → bloc réel, et bloc → bord du parc → camion quand un camion attend.
 func _sync_vehicles(sim: PortSim, delta: float) -> void:
 	var kind := "forklift" if sim.tier == 1 else ("reach_stacker" if sim.tier == 2 or not sim.built.has("rtg") else "straddle")
-	var count := clampi(sim.agents("yard_ops") + (1 if sim.managers.yard_ops else 0), 1, 7)
+	var count := clampi(sim.agents("yard_ops") + (1 if sim.managers.yard_ops else 0), 1, 7) if _ready_k("yard0") else 0
 	if kind != _vehicle_kind:
 		for v in vehicles:
 			(v.node as Node3D).queue_free()
@@ -608,7 +644,7 @@ func train_at_quay() -> bool:
 
 
 func _sync_train(sim: PortSim, delta: float) -> void:
-	if not sim.built.has("rail"):
+	if not sim.built.has("rail") or not _ready_k("rail"):
 		if train != null:        # nouvelle concession : le terminal rail n'existe plus, le train ne doit pas rester figé sur la voie
 			train.queue_free()
 			train = null
@@ -681,7 +717,7 @@ func crossing_clear() -> bool:
 
 
 func _sync_shuttle(sim: PortSim, delta: float) -> void:
-	if not sim.built.has("rail") or not sim.built.has(Layout.RECLAIM_BUILDING):
+	if not sim.built.has("rail") or not sim.built.has(Layout.RECLAIM_BUILDING) or not _ready_k("rail") or not _ready_k(Layout.RECLAIM_BUILDING):
 		if tractor != null:
 			tractor.queue_free()
 			tractor = null

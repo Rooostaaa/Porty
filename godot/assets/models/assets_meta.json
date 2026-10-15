@@ -1625,5 +1625,280 @@
    9.4
   ],
   "anchor_y": 14.99
+ },
+ "boat_dinghy": {
+  "tris": 408,
+  "footprint": [
+   2.57,
+   1.04
+  ],
+  "anchor_y": 1.08
+ },
+ "boat_trawler": {
+  "tris": 1172,
+  "footprint": [
+   5.63,
+   2.2
+  ],
+  "anchor_y": 3.99
+ },
+ "boat_tuna": {
+  "tris": 1240,
+  "footprint": [
+   8.64,
+   2.86
+  ],
+  "anchor_y": 8.21
+ },
+ "pontoon": {
+  "deck_z": 0.45,
+  "module": [
+   6.0,
+   1.6
+  ],
+  "tris": 424,
+  "footprint": [
+   6.0,
+   1.88
+  ],
+  "anchor_y": 1.17
+ },
+ "pontoon_ruin": {
+  "deck_z": 0.45,
+  "module": [
+   6.0,
+   1.6
+  ],
+  "tris": 440,
+  "footprint": [
+   7.43,
+   2.97
+  ],
+  "anchor_y": 1.44
+ },
+ "fish_hall": {
+  "tris": 1256,
+  "footprint": [
+   9.2,
+   7.62
+  ],
+  "anchor_y": 5.86
+ },
+ "ice_plant": {
+  "chute_end": [
+   2.45,
+   0.55,
+   -4.45
+  ],
+  "tris": 776,
+  "footprint": [
+   5.42,
+   7.58
+  ],
+  "anchor_y": 4.63
+ },
+ "odette_hut": {
+  "tris": 1120,
+  "footprint": [
+   6.71,
+   4.45
+  ],
+  "anchor_y": 4.3
+ },
+ "jetty_ruin": {
+  "deck_z": 0.25,
+  "span_x": [
+   -12.2,
+   12.2
+  ],
+  "collapsed_x": [
+   -3.0,
+   3.0
+  ],
+  "tris": 1596,
+  "footprint": [
+   24.4,
+   6.51
+  ],
+  "anchor_y": 1.75
+ },
+ "fish_van": {
+  "tris": 424,
+  "footprint": [
+   4.11,
+   2.06
+  ],
+  "anchor_y": 2.74
+ },
+ "site_hoarding": {
+  "module": 4.0,
+  "tris": 408,
+  "footprint": [
+   4.5,
+   0.42
+  ],
+  "anchor_y": 2.88
+ },
+ "scaffold": {
+  "module": [
+   4.0,
+   4.0,
+   4.0
+  ],
+  "tris": 504,
+  "footprint": [
+   4.25,
+   4.25
+  ],
+  "anchor_y": 4.48
+ },
+ "site_crane": {
+  "height": 10.0,
+  "jib_length": 9.0,
+  "nodes": {
+   "jib": {
+    "pivot": [
+     0,
+     10.0,
+     0
+    ],
+    "rotate": "rotation.y (fl\u00e8che vers +X local, contre-fl\u00e8che -X)"
+   },
+   "hook": {
+    "parent": "jib",
+    "pos": [
+     6.0,
+     0,
+     0
+    ],
+    "x_range": [
+     1.5,
+     8.5
+    ],
+    "rotate": "aucune : d\u00e9placer position.x (chariot) le long de la fl\u00e8che ; crochet 4,4 u sous la fl\u00e8che"
+   }
+  },
+  "tris": 1160,
+  "footprint": [
+   12.79,
+   2.7
+  ],
+  "anchor_y": 13.32
+ },
+ "excavator": {
+  "nodes": {
+   "turret": {
+    "pivot": [
+     0,
+     0.65,
+     0
+    ],
+    "rotate": "rotation.y (orientation de la tourelle)"
+   },
+   "boom": {
+    "parent": "turret",
+    "pivot": [
+     0.72,
+     0.4,
+     -0.22
+    ],
+    "rotate": "rotation.z (> 0 : l\u00e8ve, < 0 : abaisse)",
+    "range_deg": [
+     -35,
+     25
+    ]
+   },
+   "arm": {
+    "parent": "boom",
+    "pivot": [
+     2.45,
+     0.75,
+     0
+    ],
+    "rotate": "rotation.z (> 0 : le bras s'ouvre vers l'avant)",
+    "range_deg": [
+     -30,
+     60
+    ]
+   }
+  },
+  "tris": 452,
+  "footprint": [
+   5.3,
+   1.76
+  ],
+  "anchor_y": 2.84
+ },
+ "dust_pile": {
+  "tris": 216,
+  "footprint": [
+   4.32,
+   3.29
+  ],
+  "anchor_y": 2.31
+ },
+ "tree_pine": {
+  "tris": 276,
+  "footprint": [
+   4.5,
+   3.55
+  ],
+  "anchor_y": 5.92
+ },
+ "tree_pine_b": {
+  "tris": 296,
+  "footprint": [
+   3.59,
+   2.9
+  ],
+  "anchor_y": 7.27
+ },
+ "tree_oak": {
+  "tris": 372,
+  "footprint": [
+   3.79,
+   3.81
+  ],
+  "anchor_y": 5.02
+ },
+ "forest_block": {
+  "trees": 7,
+  "tris": 988,
+  "footprint": [
+   18.85,
+   18.17
+  ],
+  "anchor_y": 6.71
+ },
+ "forest_road": {
+  "road_width": 6.0,
+  "road_y": [
+   -7.0,
+   7.0
+  ],
+  "vanish_y_godot": -6.0,
+  "tris": 1768,
+  "footprint": [
+   15.64,
+   17.48
+  ],
+  "anchor_y": 7.85
+ },
+ "far_shore": {
+  "lighthouse": [
+   104.0,
+   16.6,
+   14.0
+  ],
+  "span": [
+   260.0,
+   50.0
+  ],
+  "tris": 1068,
+  "footprint": [
+   260.0,
+   68.0
+  ],
+  "anchor_y": 26.86
  }
 }

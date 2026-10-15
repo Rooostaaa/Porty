@@ -18,6 +18,7 @@ signal contracts_changed()
 signal mission_ready(id: String)
 signal feature_unlocked(id: String)          # une fonction de jeu se révèle (data/unlocks.json)
 signal ship_class_first(ship: Ship)          # premier navire d'une nouvelle classe : moment marquant
+signal fish_landed(boat_i: int, amount: float, helped: bool)   # lot F3 : un bateau de pêche a débarqué (vue : caisses, « +X $ »)
 
 const NCARGO := 5
 const NZONE := 4
@@ -26,6 +27,11 @@ const DEPTS := ["harbor", "berths", "customs", "cranes", "yard_ops", "gate"]
 var db: DataDB
 var rng := RandomNumberGenerator.new()
 var mods := Modifiers.new()
+## Lot F3 — la pêche de l'anse (acte 0, puis revenu passif). Pendant l'acte 0 (`fishing.act0`), le port à conteneurs est
+## fermé : `step` n'avance que la pêche et `time` (l'horloge du port, depuis l'entrée au T1) ne tourne pas.
+var fishing: Fishing
+var _fish_earn_cb: Callable
+var _fish_land_cb: Callable
 
 # --- état du joueur ---
 var time: float = 0.0
@@ -117,6 +123,8 @@ var last_income: Dictionary = {}       # source -> montant sur la dernière minu
 func _init(data: DataDB = null, seed_value: int = -1) -> void:
 	db = data if data != null else DataDB.new()
 	rng.seed = seed_value if seed_value >= 0 else int(db.cfg("seed", 1))
+	_fish_earn_cb = func(a: float) -> void: _earn(a, "fish")
+	_fish_land_cb = func(i: int, a: float, h: bool) -> void: fish_landed.emit(i, a, h)
 	reset()
 	_spawn_initial()
 
@@ -211,6 +219,7 @@ func reset() -> void:
 	_second_timer = 0.0
 	_analysis_timer = 0.0
 	_cache.clear()
+	fishing = Fishing.new(db, int(rng.seed % 1000003))
 	rebuild_infra()
 	_refresh_analysis()
 
@@ -646,6 +655,12 @@ func inspect_fraction(c: int) -> float:
 func step(dt: float) -> void:
 	if dt <= 0.0:
 		return
+	# lot F3 : pendant l'acte 0, seule la pêche tourne (le port est fermé, son horloge arrêtée)
+	if fishing.act0:
+		_live_t += dt
+		fishing.step(dt, _fish_earn_cb, _fish_land_cb)
+		_buckets(dt)
+		return
 	time += dt
 	_live_t += dt
 	invalidate()
@@ -658,6 +673,7 @@ func step(dt: float) -> void:
 	_inspect(dt)
 	_gate(dt)
 	_fees_and_costs(dt)
+	fishing.step(dt, _fish_earn_cb, _fish_land_cb)      # lot F3 : revenu passif de la pêche (bateaux qui vivent à l'écran)
 	_buckets(dt)
 	_second_timer += dt
 	if _second_timer >= 1.0:
@@ -1447,7 +1463,12 @@ func _sum(a: PackedFloat64Array) -> float:
 
 ## Revenu net sur la dernière minute (fenêtre glissante).
 func income_per_min() -> float:
-	return _sum(income_buckets) * 60.0 / clampf(time, 1.0, 60.0)
+	return _sum(income_buckets) * 60.0 / clampf(clock(), 1.0, 60.0)
+
+
+## Lot F3 : secondes simulées depuis la partie neuve, acte 0 compris (`time` ne compte que le port, depuis l'entrée au T1).
+func clock() -> float:
+	return time + fishing.act0_time
 
 
 ## Revenu net **réel** par seconde (fenêtre glissante d'une minute) : comme `income_per_min`, mais la fenêtre ne compte que le
@@ -1459,7 +1480,7 @@ func real_income_rate() -> float:
 
 ## Secondes de revenu réellement mesurées dans les seaux (au plus 60).
 func real_income_window() -> float:
-	return minf(60.0, minf(time, _live_t))
+	return minf(60.0, minf(clock(), _live_t))
 
 
 func evp_per_min() -> float:
@@ -1997,7 +2018,7 @@ func building_state(bid: String) -> String:
 
 
 func build(bid: String) -> bool:
-	if building_state(bid) != "available":
+	if building_state(bid) != "available" or fishing.act0:      # (lot F3 : rien ne se bâtit au port pendant l'acte 0)
 		return false
 	var b: Dictionary = db.building_by_id[bid]
 	if money < float(b.cost):
@@ -2044,6 +2065,59 @@ func tier_progress() -> float:
 	return tot / float(chk.size())
 
 
+# --- lot F3 : l'acte 0 « La Crique » (la pêche de l'anse) -------------------------
+
+## Partie neuve jouée (départ de l'interface, bot) : l'acte 0 commence — 0 $, le port à conteneurs est fermé.
+func begin_act0() -> void:
+	fishing = Fishing.new(db, int(rng.seed % 1000003))
+	fishing.act0 = true
+	money = 0.0
+
+
+## Nouvelle concession : la pêche est reprise telle quelle ; le port reste fermé le temps de la séquence du T1 (la bascule
+## se joue tout de suite, sans condition d'argent).
+func hold_port() -> void:
+	fishing.act0 = true
+	fishing.replay = true
+
+
+## Bascule vers le T1 possible : les cinq achats sont faits et l'argent a atteint le seuil (ou nouvelle concession).
+func act0_ready() -> bool:
+	if not fishing.act0 or not fishing.done_all():
+		return false
+	return fishing.replay or money >= float(fishing.cfg.get("switch_money", 0.0))
+
+
+## Fin de l'acte 0 : le port ouvre (l'horloge du port démarre ; la pêche devient passive).
+func open_port() -> void:
+	if not fishing.act0:
+		return
+	fishing.act0 = false
+	fishing.replay = false
+	invalidate()
+	_refresh_analysis()
+
+
+## Achat suivant de l'acte 0 (carte AMÉLIORER de la pêche).
+func buy_fish() -> bool:
+	if not fishing.act0 or fishing.done_all():
+		return false
+	var nb := fishing.next_buy()
+	var c := float(nb.get("cost", 0.0))
+	if money < c:
+		return false
+	money -= c
+	fishing.apply_buy(fishing.level)
+	fishing.level += 1
+	purchased.emit("fish", String(nb.get("id", "")))
+	return true
+
+
+## Toucher un bateau qui rentre : il débarque tout de suite, la vente rapporte plus (acte 0).
+func fish_help(i: int) -> bool:
+	return fishing.help(i)
+
+
 # --- prestige : nouvelle concession ------------------------------------------
 
 ## Points de Renom gagnés si on repart maintenant (racine des EVP traités dans cette concession).
@@ -2072,6 +2146,14 @@ func carry_over(old: PortSim) -> void:
 	for k in old.counters:
 		if not RUN_ONLY_COUNTERS.has(k):
 			lifetime[k] = float(lifetime.get(k, 0.0)) + float(old.counters[k])
+	# lot F3 : la crique reste à toi — la pêche continue (passive), l'acte 0 ne se rejoue pas
+	if old.fishing.level > 0:
+		fishing.migrate_done()
+		fishing.level = old.fishing.level
+		fishing.boats.clear()
+		for i in fishing.level:
+			fishing.apply_buy(i, false)
+		fishing.earned = old.fishing.earned
 	invalidate()
 	_refresh_analysis()
 
@@ -2155,10 +2237,17 @@ func apply_offline(seconds: float) -> Dictionary:
 	var cap := float(db.cfg("offline_max_hours")) * 3600.0
 	var t := clampf(seconds, 0.0, cap)
 	var base := float(db.cfg("offline_base_yield"))
+	if fishing.act0:
+		# lot F3 : pendant l'acte 0, seule la pêche rapporte (sans coup de main), au rendement hors-ligne de base
+		var fg := fishing.rate_estimate() * t * base
+		money += fg
+		fishing.earned += fg
+		return {"seconds": t, "capped": seconds > cap, "yield": base, "money": fg, "evp": 0.0, "managers": 0}
 	var yield_ratio := base + (1.0 - base) * float(managers_count()) / float(DEPTS.size())
 	var flow := sustainable_flow()
 	var gain := income_rate_estimate() * t * yield_ratio
 	var evp := flow * t * yield_ratio
+	gain += fishing.passive_rate() * t      # lot F3 : la pêche tourne seule, absence comprise
 	money += gain
 	add_counter("evp", evp)
 	add_counter("offline_evp", evp)
@@ -2194,6 +2283,8 @@ func to_dict() -> Dictionary:
 		# lot E (champs facultatifs, version inchangée) : la dernière minute de revenu, pour que le revenu affiché et le coût
 		# des aléas restent justes juste après un chargement
 		"income_buckets": Array(income_buckets), "evp_buckets": Array(evp_buckets), "ship_buckets": Array(ship_buckets),
+		# lot F3 (sauvegarde v6) : la pêche de l'anse et l'acte 0 ; absente = partie d'avant F3 (acte 0 fait, pêche passive)
+		"act0": fishing.to_dict(),
 	}
 
 
@@ -2303,6 +2394,11 @@ func from_dict(d: Dictionary) -> void:
 		_upgrade_legacy_save()
 	if not d.has("owners_on"):
 		_upgrade_commerce_save()
+	# lot F3 (v6) : une partie d'avant l'acte 0 se charge avec l'acte 0 fait (cinq achats, pêche passive), sans rien rejouer
+	if d.get("act0") is Dictionary:
+		fishing.from_dict(d.act0)
+	else:
+		fishing.migrate_done()
 	_clamp_licences()
 	rebuild_infra()
 	_bn_last = time          # pas de « temps de goulot » fantôme entre 0 et l'heure de la partie chargée (revue C7 C2)

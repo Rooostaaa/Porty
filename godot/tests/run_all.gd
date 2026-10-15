@@ -27,6 +27,22 @@ func _init() -> void:
 			print("=== %d ok, %d échec(s) ===" % [passes, failures])
 			quit(1 if failures > 0 else 0)
 			return
+	# --part=1|2|3 (lot F1) : un tiers des tests, pour rester sous 5 min par processus ; sans argument, tous
+	var part := 0
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--part="):
+			part = int(a.substr(7))
+	if part == 0 or part == 1:
+		_part1(db)
+	if part == 0 or part == 2:
+		_part2(db)
+	if part == 0 or part == 3:
+		_part3(db)
+	print("=== %d ok, %d échec(s) ===" % [passes, failures])
+	quit(1 if failures > 0 else 0)
+
+
+func _part1(db: DataDB) -> void:
 	test_format()
 	test_progression()
 	test_conservation(db)
@@ -47,6 +63,9 @@ func _init() -> void:
 	test_commerce(db)
 	test_ism_gaps(db)
 	test_lot_b(db)
+
+
+func _part2(db: DataDB) -> void:
 	test_plan_baie(db)
 	test_trajets()
 	test_chapitres(db)
@@ -54,13 +73,16 @@ func _init() -> void:
 	test_revue2_baie(db)
 	test_revue2_rythme(db)
 	test_c7(db)
+
+
+func _part3(db: DataDB) -> void:
 	test_d_monde(db)
 	test_d_ui(db)
 	test_d_eco(db)
 	test_e_confiance(db)
 	test_e_flux(db)
-	print("=== %d ok, %d échec(s) ===" % [passes, failures])
-	quit(1 if failures > 0 else 0)
+	test_f2(db)
+	test_f3(db)
 
 
 func test_format() -> void:
@@ -859,9 +881,9 @@ func test_trajets() -> void:
 		for k in 12:
 			var inb := Layout.sample_path(Layout.ship_path_pilot(k, bi), 1.0)
 			for p in dep:
-				if p.z > -96.0 and p.z < -24.0:      # dans le chenal
+				if p.z > -96.0 and p.z < -36.0:      # dans le chenal et la passe (lot F1, recalé : -24 → -36 ; au bassin, z > -36, l'arrivée coupe la voie de départ sous la règle de la fenêtre « ouest », comme au lot E)
 					for q in inb:
-						if q.z > -96.0 and q.z < -24.0 and Vector2(p.x - q.x, p.z - q.z).length() < 4.0:
+						if q.z > -96.0 and q.z < -36.0 and Vector2(p.x - q.x, p.z - q.z).length() < 4.0:
 							lane_bad.append("croisement mouillage %d / poste %d (%d, %d)" % [k, bi, int(p.x), int(p.z)])
 							break
 					if lane_bad.size() > 3:
@@ -1236,16 +1258,17 @@ func test_revue2_baie(_db: DataDB) -> void:
 				var pts := Layout.sample_path(path, 1.0)
 				for i in range(1, pts.size()):
 					var c := Vector2(pts[i].x, pts[i].z)
-					# la coque suit le trajet : étrave et poupe sur la polyligne (corde de part et d'autre du point)
-					var ia := i          # (l'étrave s'arrête à l'entrée du bassin : au-delà, le remorqueur fait pivoter le navire)
-					while ia < mini(i + roundi(hs.x), pts.size() - 1) and pts[ia + 1].z < -26.0:
-						ia += 1
-					var ib := i
-					while ib > maxi(i - roundi(hs.x), 0) and pts[ib - 1].z < -26.0:
-						ib -= 1
+					# la coque suit le trajet : étrave et poupe sur la polyligne (corde de part et d'autre du point) ; (lot F1,
+					# recalé) centre de la coque au milieu de la corde, comme ShipView.hull_center depuis E-Flux, et corde
+					# entière : plus de pivot au bassin, le navire y tourne en avançant (avant : centre sur le point du trajet,
+					# étrave arrêtée à l'entrée du bassin)
+					var ia := mini(i + roundi(hs.x), pts.size() - 1)
+					var ib := maxi(i - roundi(hs.x), 0)
 					var d := Vector2(pts[ia].x - pts[ib].x, pts[ia].z - pts[ib].z)
 					if d.length() < 0.01 or c.y < -100.0 or c.y > -36.0:
-						continue          # hors du chenal et de la passe (le large ; le bassin, où le remorqueur fait pivoter le navire)
+						continue          # hors du chenal et de la passe (le large ; le bassin)
+					var w := clampf(float(mini(i, pts.size() - 1 - i)) / hs.x, 0.0, 1.0)
+					c = c.lerp((Vector2(pts[ia].x, pts[ia].z) + Vector2(pts[ib].x, pts[ib].z)) * 0.5, w)
 					var h := d.normalized()
 					for m in marks:
 						var dd := _hull_dist(m, c, h, hs.x, hs.y)
@@ -2101,9 +2124,12 @@ func test_e_flux(_db: DataDB) -> void:
 	for g in Layout.GROUNDS:
 		if String(g.cond) == "t2" and String(g.type) == "road_x" and float(g.r[2]) == float(Layout.ROAD_X[0]) and float(g.r[1]) >= 60.0:
 			street_ok = true
+	# (lot F2, recalé : plus de colline-tunnel — la voie ferrée entre sous les arbres, et la rame se perd dans l'ombre de la
+	# route forestière à la bouche RAIL_TUNNEL_X)
 	var hill_ok := false
-	for p in Layout.PROPS:
-		if String(p.m) == "hill" and absf(float(p.p[0]) - Layout.RAIL_TUNNEL_X) < 4.0 and absf(float(p.p[2]) - Layout.RAIL_Z) < 3.0:
+	for fr in Layout.FOREST_ROADS:
+		var vp: Vector3 = fr.vanish
+		if absf(vp.x - Layout.RAIL_TUNNEL_X) < 4.0 and absf(vp.z - Layout.RAIL_Z) < 3.0:
 			hill_ok = true
 	var signs := Layout.PROPS.filter(func(p: Dictionary) -> bool: return String(p.cond) == "rail" and String(p.m) == "sign").size()
 	var marks := 0
@@ -2111,7 +2137,7 @@ func test_e_flux(_db: DataDB) -> void:
 		if String(it.m) == "crosswalk" and absf((it.p as Vector3).x - float(Layout.RAIL_SHUTTLE.x)) < 3.0:
 			marks += 1
 	check(tap_min >= 10.0 and street_ok and hill_ok and signs >= 2 and marks >= 2,
-		"E12 : touchers Douane / barrières / Gate à %s u au plus près ; rue des bureaux derrière la tête de file ; bouche du tunnel sous la colline ; passage à niveau signalé (%d panneaux, %d marquages)" % [
+		"E12 : touchers Douane / barrières / Gate à %s u au plus près ; rue des bureaux derrière la tête de file ; bouche du tunnel sous les arbres ; passage à niveau signalé (%d panneaux, %d marquages)" % [
 		Fmt.num(tap_min), signs, marks])
 	# mineurs : GNL à ≥ 4 u du bout du poste 4, IMO à ≥ 4 u du parc RTG ; bureau de pilotage avec un toit ; zone 8 réduite à la
 	# voie et aux parkings, discrète ; crique : rien d'autre que la cale et son bateau à moins de 4 u de la cale
@@ -2289,3 +2315,382 @@ func _ef_sim(A: Dictionary, B: Dictionary, sa0: float, sb0: float, sa_end: float
 			force_t[k] = maxf(0.0, float(force_t[k]) - dt)
 		t += dt
 	return [gmin, t]
+
+
+## Distance d'un point à un polygone (0 s'il est dedans).
+func _poly_dist(p: Vector2, poly: PackedVector2Array) -> float:
+	if Geometry2D.is_point_in_polygon(p, poly):
+		return 0.0
+	var best := INF
+	for i in poly.size():
+		best = minf(best, Geometry2D.get_closest_point_to_segment(p, poly[i], poly[(i + 1) % poly.size()]).distance_to(p))
+	return best
+
+
+## Lot F2 — le golfe et le départ de rien : plan et données (la scène — départ, chantiers, trafic — est contrôlée par
+## ui_smoke, `_f2_checks`).
+func test_f2(db: DataDB) -> void:
+	print("[lot F2 : golfe, forêt, départ de rien, chantiers, intro]")
+	# 1. golfe : la rive d'en face au nord, des deux côtés de l'entrée (les sorties nord passent entre les deux) ; les rives du
+	# golfe loin de toutes les voies des navires (arrivée, mouillage jusqu'à 42 places, départs, sorties, barges)
+	var fs: Array = Layout.FAR_SHORES
+	var west := 0
+	var east := 0
+	var north := true
+	var mouth := Vector2(-INF, INF)
+	for f in fs:
+		var p: Vector3 = f.p
+		north = north and p.z <= -250.0
+		if p.x < 0.0:
+			west += 1
+			mouth.x = maxf(mouth.x, p.x + 130.0)
+		else:
+			east += 1
+			mouth.y = minf(mouth.y, p.x - 130.0)
+	var exits_in_mouth := true
+	for p in Layout.EXIT_NORTH:
+		exits_in_mouth = exits_in_mouth and (p as Vector3).x > mouth.x + 20.0 and (p as Vector3).x < mouth.y - 20.0
+	var pts: Array[Vector3] = [Layout.SPAWN, Layout.EXIT]
+	pts.append_array(Layout.EXIT_NORTH)
+	pts.append_array(Layout.DEPART_EAST)
+	pts.append_array(Layout.EAST_APPROACH_E)
+	for k in 42:
+		pts.append(Layout.anchor_pos(k))
+	for k in 12:
+		pts.append_array(Layout.sample_path(Layout.ship_path_arrive(k), 4.0))
+		pts.append_array(Layout.sample_path(Layout.ship_path_leave(Layout.anchor_pos(k)), 4.0))
+	for bi in 4:
+		pts.append_array(Layout.sample_path(Layout.ship_path_depart(bi, 8.0, 3), 4.0))
+	for i in Layout.RECLAIM_BARGE_X0.size():
+		pts.append(Vector3(float(Layout.RECLAIM_BARGE_X0[i]), 0, Layout.RECLAIM_BARGE_LANE_Z))
+	var near_ship := INF
+	for p in pts:
+		for poly in Layout.gulf_polys():
+			near_ship = minf(near_ship, _poly_dist(Vector2(p.x, p.z), poly))
+	check(west == 1 and east == 1 and north and exits_in_mouth and near_ship >= 40.0,
+		"F2 golfe : rive d'en face au nord des deux côtés (entrée x %d…%d, sorties nord dedans) ; rives du golfe à %d u au plus près des voies des navires (≥ 40)" % [
+		int(mouth.x), int(mouth.y), int(near_ship)])
+	# 2. plus de collines-tunnels ; l'autoroute (ses deux bouts), la rue du village et la voie ferrée entrent sous les arbres,
+	# et c'est là que le trafic se perd
+	var hills_on_ends := 0
+	for p in Layout.PROPS:
+		if String(p.m) == "hill":
+			var hp := Vector2(float(p.p[0]), float(p.p[2]))
+			for e in [Vector2(Layout.HIGHWAY_ENDS[0], 141.0), Vector2(Layout.HIGHWAY_ENDS[1], 141.0), Vector2(Layout.RAIL_TUNNEL_X, Layout.RAIL_Z)]:
+				if hp.distance_to(e) < 14.0:
+					hills_on_ends += 1
+	var ends_ok := 0
+	for x_end in Layout.HIGHWAY_ENDS:
+		for fr in Layout.FOREST_ROADS:
+			var vp: Vector3 = fr.vanish
+			if absf(vp.x - float(x_end)) < 0.5 and vp.z > Layout.HIGHWAY_Z0 and vp.z < Layout.HIGHWAY_Z1:
+				ends_ok += 1
+	var rail_ok := Layout.FOREST_ROADS.any(func(fr: Dictionary) -> bool: return absf((fr.vanish as Vector3).x - Layout.RAIL_TUNNEL_X) < 0.5 and absf((fr.vanish as Vector3).z - Layout.RAIL_Z) < 0.5)
+	check(hills_on_ends == 0 and ends_ok == 2 and rail_ok, "F2 : plus de colline-tunnel ; autoroute (deux bouts) et voie ferrée sous les arbres, le trafic s'y perd (%d bouts)" % ends_ok)
+	# 3. forêt dense : sur la terre (hors du port : bande au sud de l'autoroute et terres du golfe), jamais au bord de l'eau ni
+	# sur l'autoroute ; budget raisonnable pour un téléphone (≤ 450 blocs de ≈ 1 000 triangles, en carrés de 120 u)
+	var forest := Layout.forest()
+	var f_bad: Array[String] = []
+	var coast := PackedVector2Array(Layout.COAST)
+	for it in forest:
+		var p: Vector3 = it.p
+		var p2 := Vector2(p.x, p.z)
+		if not Layout._land_ring(p2, 8.5) or (Geometry2D.is_point_in_polygon(p2, coast) and not Layout.FOREST_STRIP.has_point(p2)) \
+				or Rect2(-140, 133, 334, 16).has_point(p2):
+			f_bad.append("(%d, %d)" % [int(p.x), int(p.z)])
+	# (lot F3, recalé : ≤ 700 blocs au lieu de 450 — la forêt profonde a des blocs ×1 au lieu de ×2,2, donc plus serrés ; au zoom
+	# le plus large, triangles dessinés mesurés identiques à ±2 % (LOD du modèle, carrés de 120 u ; carrés profonds sans ombre))
+	check(forest.size() >= 120 and forest.size() <= 700 and f_bad.is_empty(),
+		"F2 forêt : %d blocs, tous sur la terre hors du port, loin de l'eau et de l'autoroute (%s)" % [forest.size(), str(f_bad.slice(0, 4))])
+	# 4. la caméra ne montre jamais le bord du monde : au zoom le plus large, aux quatre coins des bornes, à chaque palier,
+	# l'écran (portrait) reste dans le monde habillé (forêt, rives, eau)
+	var rig := CameraRig.new()
+	var edge_bad: Array[String] = []
+	var s35 := sin(deg_to_rad(35.0))
+	var r_dir := Vector2(0.7071, -0.7071)
+	var u_dir := Vector2(-0.7071, -0.7071)
+	var widest := 0.0
+	for t in [1, 2, 3]:
+		rig.set_tier_bounds(t)
+		var z: float = rig.zoom_max
+		widest = maxf(widest, z)
+		var hr := z * 0.5
+		var hu := z * CameraRig.REF_H / CameraRig.REF_W * 0.5 / s35
+		var b: Rect2 = rig.bounds
+		for c in [b.position, Vector2(b.end.x, b.position.y), b.end, Vector2(b.position.x, b.end.y)]:
+			for sr in [-1.0, 1.0]:
+				for su in [-1.0, 1.0]:
+					var q: Vector2 = c + r_dir * hr * sr + u_dir * hu * su
+					if not Layout.FOREST_AREA.has_point(q) or q.x < -410.0 or q.x > 490.0 or q.y < -450.0 or q.y > 450.0:
+						edge_bad.append("T%d (%d, %d)" % [t, int(q.x), int(q.y)])
+	rig.free()
+	check(edge_bad.is_empty() and widest <= CameraRig.ZOOM_MAX, "F2 : zoom le plus large %d, aux quatre coins des bornes l'écran reste dans le monde habillé (%s)" % [int(widest), str(edge_bad.slice(0, 3))])
+	# 5. départ de rien : quatre pièces dans l'ordre (quai → grue → parc → gate), chacune ses éléments (« grp »), son chantier
+	# de 3 à 6 s et son état d'avant (estacade ruinée sur l'eau devant le vieux quai, friche du parc sur la terre)
+	var ids: Array = Layout.STARTER.map(func(st: Dictionary) -> String: return String(st.id))
+	var grps := {}
+	for p in Layout.PROPS:
+		if p.has("grp"):
+			grps[String(p.grp)] = true
+	for g in Layout.GROUNDS:
+		if g.has("grp"):
+			grps[String(g.grp)] = true
+	var grp_ok := grps.keys().all(func(k: String) -> bool: return ids.has(k)) and grps.has("quay0") and grps.has("yard0") and grps.has("gate0")
+	var dur_ok := Layout.STARTER.all(func(st: Dictionary) -> bool: return float(st.dur) >= 3.0 and float(st.dur) <= 6.0)
+	var jetty := Layout.starter_before("quay0").filter(func(it: Dictionary) -> bool: return String(it.m) == "jetty_ruin")
+	var jetty_ok := jetty.size() == 1 and (jetty[0].p as Vector3).z < Layout.SEA_EDGE_Z and (jetty[0].p as Vector3).x > -36.0 and (jetty[0].p as Vector3).x < -12.0
+	var yard_ok := Layout.starter_before("yard0").all(func(it: Dictionary) -> bool: return Layout.on_land(Vector2((it.p as Vector3).x, (it.p as Vector3).z), false))
+	check(ids == ["quay0", "crane0", "yard0", "gate0"] and grp_ok and dur_ok and jetty_ok and yard_ok,
+		"F2 départ : %s dans l'ordre, chantiers de 3 à 6 s, estacade ruinée devant le vieux quai, friche du parc sur la terre (groupes %s)" % [str(ids), str(grps.keys())])
+	# 6. chantiers de chaque case : 3 s (petite) à 6 s (quais, grande case) ; état d'avant (rochers, broussailles) sur les cases
+	# à terre, dans leur empreinte, sur la terre ; rien sur l'eau, un quai ou le terre-plein
+	var site_bad: Array[String] = []
+	for bid in Layout.LOTS:
+		var sp := Layout.site_spec(bid)
+		var d := float(sp.get("dur", 0.0))
+		if d < 3.0 or d > 6.0 or ((bid.begins_with("berth") or bid == "quay_ext") and d != 6.0):
+			site_bad.append("%s %s s" % [bid, Fmt.num(d)])
+		var bs := Layout.before_state(bid)
+		var l: Dictionary = Layout.LOTS[bid]
+		var wet: bool = bool(l.get("water", false)) or l.has("on") or bool(l.get("portal", false)) or bid.begins_with("berth") or bid == "quay_ext" \
+			or bid == "gate2" or bool(Layout.zone_by_id(int(l.zone)).get("reclaim", false))
+		if wet != bs.is_empty():
+			site_bad.append("%s état d'avant %d" % [bid, bs.size()])
+		for it in bs:
+			var ip: Vector3 = it.p
+			if not Layout.lot_rect(bid).has_point(Vector2(ip.x, ip.z)) or not Layout.on_land(Vector2(ip.x, ip.z), true):
+				site_bad.append("%s hors case" % bid)
+				break
+	var small := float(Layout.site_spec("customs1").dur)
+	check(site_bad.is_empty() and small <= 3.6, "F2 chantiers : 3 s (douane %s s) à 6 s (quais), état d'avant sur les cases à terre seulement (%s)" % [Fmt.num(small), str(site_bad.slice(0, 4))])
+	# 7. premier navire du T1 : il naît dans le chenal (voie d'entrée) et va droit au poste n°1, toujours sur l'eau
+	var fp := Layout.first_ship_path(0)
+	var field := Terrain.distance_field(Layout.land_polys(false))
+	var fp_land := 0
+	for p in Layout.sample_path(fp, 1.5):
+		if Terrain.field_at(field, Vector2(p.x, p.z)) < 2.5:
+			fp_land += 1
+	check(fp.size() > 4 and fp[0].distance_to(Layout.channel_lane(Layout.FIRST_SHIP_LANE, 1)) < 0.01 and fp[-1].distance_to(Vector3(Layout.berth_center(0), 0, Layout.APPROACH_Z)) < 0.01 and fp_land == 0,
+		"F2 : premier navire — du chenal (%d, %d) à la voie d'approche du poste n°1, jamais à moins de 2,5 u de la terre (%d)" % [int(fp[0].x), int(fp[0].z), fp_land])
+	# 8. intro : trois cartes de la narratrice (palier 0, « La Crique ») — la lettre du notaire, la crique et les voisins, le
+	# vieux quai à rebâtir ; ton de l'univers (Odette, golfe d'Ambre), lisibles (≤ 280 caractères)
+	var cards: Array = db.tier_def(0).get("intro", [])
+	var all_txt := ""
+	var long := 0
+	for c in cards:
+		all_txt += String(c.title) + " " + String(c.text) + " "
+		if String(c.text).length() > 280:
+			long += 1
+	check(cards.size() == 3 and all_txt.contains("Odette") and all_txt.contains("golfe d'Ambre") and all_txt.contains("notaire") and long == 0
+		and String(db.tier_def(0).name) == "La Crique" and not String(db.tier_def(1).story).contains("rouillée"),
+		"F2 intro : 3 cartes (%s), Odette et le golfe d'Ambre, palier 0 « La Crique »" % str(cards.map(func(c: Dictionary) -> String: return String(c.title))))
+
+
+## Lot F3 — acte 0 « La Crique » : la pêche (module de la simulation), les achats, le coup de main, la bascule, le revenu
+## passif, la sauvegarde v6 et sa migration, la nouvelle concession, les trajets des bateaux, la forêt profonde, le tutoriel.
+func test_f3(db: DataDB) -> void:
+	print("[lot F3 — acte 0 « La Crique »]")
+	# 1. PortSim.new : port ouvert, pas de pêche (tests et parties d'avant F3 ; une partie neuve jouée appelle begin_act0)
+	var s0 := PortSim.new(db, 7)
+	check(not s0.fishing.act0 and s0.fishing.level == 0 and s0.fishing.passive_rate() == 0.0, "F3 : PortSim.new — port ouvert, pas de pêche")
+	# 2. acte 0 : 0 $, port fermé — seule la pêche tourne (horloge du port, navires, aléas, révélations, compteurs figés)
+	var s := PortSim.new(db, 7)
+	var ships0 := s.ships.size()
+	var st0: Array = s.ships.map(func(sh: Ship) -> int: return sh.state)
+	s.begin_act0()
+	var money_ok := s.money == 0.0
+	var build_blocked := not s.build("quay_ext")
+	var first := s.buy_fish()
+	for i in 600:
+		s.step(0.25)
+	var frozen := s.time == 0.0 and s.ships.size() == ships0 and s.ships.map(func(sh: Ship) -> int: return sh.state) == st0 \
+		and s.active_event.is_empty() and s.features.is_empty() and s.counter("evp") == 0.0 and s.missions_claimed.is_empty()
+	check(money_ok and build_blocked and first and frozen and s.money > 0.0 and s.fishing.landings >= 4 and s.fishing.clock >= 149.0 \
+		and s.real_income_rate() > 0.0,
+		"F3 acte 0 : 0 $, rien ne se bâtit au port, ponton gratuit ; 150 s de pêche, port figé (horloge %s), %d débarques, %s, revenu affiché %s/s" % [
+		str(s.time), s.fishing.landings, Fmt.money(s.money), Fmt.num(s.real_income_rate())])
+	# 3. achats dans l'ordre, au prix des données, 5 au plus ; coup de main seulement sur un bateau qui rentre ou débarque
+	var buys: Array = db.cfg("fishing").buys
+	var costs_ok := buys.size() == 5 and float(buys[0].cost) == 0.0
+	for i in range(1, buys.size()):
+		costs_ok = costs_ok and float(buys[i].cost) > float(buys[i - 1].cost)
+	var lv0 := s.fishing.level
+	s.money = 0.0
+	var poor := not s.buy_fish()
+	s.money = 1.0e4
+	var n_ok := 0
+	for k in 8:
+		if s.buy_fish():
+			n_ok += 1
+	var helpable := 0
+	var not_helpable := 0
+	for i in s.fishing.boats.size():
+		var ph := int(s.fishing.boats[i].phase)
+		if ph == Fishing.Phase.BACK or ph == Fishing.Phase.LAND:
+			helpable += 1 if s.fishing.can_help(i) else 0
+		elif s.fishing.can_help(i):
+			not_helpable += 1
+	check(costs_ok and lv0 == 1 and poor and n_ok == 4 and s.fishing.level == 5 and s.fishing.boat_count("dinghy") == 4 \
+		and s.fishing.boat_count("trawler") == 2 and s.fishing.boat_count("tuna") == 1 and not_helpable == 0,
+		"F3 achats : 5 au plus (%d de plus après le ponton), dans l'ordre, au prix des données ; 4 barques, 2 chalutiers, 1 thonier ; coup de main jamais au large" % n_ok)
+	# coup de main : la débarque se fait tout de suite et rapporte plus (même tirage, même bateau)
+	var a := PortSim.new(db, 9)
+	a.begin_act0()
+	a.buy_fish()
+	var b := PortSim.new(db, 9)
+	b.begin_act0()
+	b.buy_fish()
+	var got := [0.0, 0.0]
+	var at := [-1.0, -1.0]
+	a.fish_landed.connect(func(i: int, amt: float, _h: bool) -> void:
+		if i == 0 and at[0] < 0.0:
+			at[0] = a.fishing.clock
+			got[0] = amt)
+	b.fish_landed.connect(func(i: int, amt: float, _h: bool) -> void:
+		if i == 0 and at[1] < 0.0:
+			at[1] = b.fishing.clock
+			got[1] = amt)
+	var helped := false
+	for k in 400:
+		a.step(0.25)
+		b.step(0.25)
+		if not helped and int(b.fishing.boats[0].phase) == Fishing.Phase.LAND:
+			helped = b.fish_help(0)
+	check(helped and at[0] > 0.0 and at[1] > 0.0 and at[1] < at[0] - 2.0 and got[1] > got[0] * 1.05,
+		"F3 coup de main : débarque à %s s au lieu de %s s, vente %s au lieu de %s" % [Fmt.num(at[1]), Fmt.num(at[0]), Fmt.money(got[1]), Fmt.money(got[0])])
+	# 4. bascule : pas avant les 5 achats et le seuil d'argent ; ensuite le port ouvre, la pêche devient passive (revenu fixe)
+	var c := PortSim.new(db, 3)
+	c.begin_act0()
+	c.money = 1.0e3
+	var early := c.act0_ready()
+	for k in 5:
+		c.buy_fish()
+	c.money = 10.0
+	var poor2 := c.act0_ready()
+	c.money = float(db.cfg("fishing").switch_money)
+	var ready := c.act0_ready()
+	c.open_port()
+	var m0 := c.money
+	var f0 := c.fishing.earned
+	for k in 241:
+		c.step(0.25)
+	var passive := c.fishing.earned - f0
+	check(not early and not poor2 and ready and not c.fishing.act0 and c.time >= 59.9 and absf(passive - 60.25 * c.fishing.passive_rate()) < 0.5 \
+		and c.fishing.passive_rate() == float(db.cfg("fishing").passive) and c.last_income.has("fish") and Info.SOURCE_NAMES.has("fish") \
+		and not c.fish_help(0),
+		"F3 bascule : jamais avant les 5 achats et %s ; port ouvert, horloge %s ; pêche passive %s en 60 s (%s/s), dans les recettes (Gestion › Stats), plus de coup de main" % [
+		Fmt.money(float(db.cfg("fishing").switch_money)), Fmt.num(c.time), Fmt.money(passive), Fmt.num(c.fishing.passive_rate())])
+	# 5. le bot joue l'acte 0 en 3 à 5 min sur les 4 graines de la sonde ; sans aucun coup de main, il tient aussi en ≈ 5 min
+	var durs: Array[String] = []
+	var dur_ok := true
+	for sd in [1, 2, 3, 4]:
+		var bs := PortSim.new(db, sd)
+		bs.begin_act0()
+		var bot := Bot.new(bs)
+		var d := bot.run_act0()
+		var bs2 := PortSim.new(db, sd)
+		bs2.begin_act0()
+		var bot2 := Bot.new(bs2)
+		bot2.use_manual = false
+		var d2 := bot2.run_act0()
+		durs.append("g%d %s / %s" % [sd, Fmt.duration(d), Fmt.duration(d2)])
+		dur_ok = dur_ok and d >= 180.0 and d <= 300.0 and d2 <= 330.0 and not bs.fishing.act0 and bs.money >= 300.0
+	check(dur_ok, "F3 durée de l'acte 0 (bot / sans coup de main) : %s" % ", ".join(durs))
+	# 6. sauvegarde v6 : aller-retour en plein acte 0 (achats, bateaux, horloges, tirage) ; partie d'avant F3 = acte 0 fait
+	var sv := PortSim.new(db, 5)
+	sv.begin_act0()
+	sv.buy_fish()
+	for k in 200:
+		sv.step(0.25)
+	sv.money += 100.0
+	sv.buy_fish()
+	sv.buy_fish()
+	for k in 37:
+		sv.step(0.25)
+	var dd: Dictionary = JSON.parse_string(JSON.stringify({"sim": sv.to_dict()})).sim
+	var sl := PortSim.new(db)
+	sl.from_dict(dd)
+	var same := sl.fishing.act0 and sl.fishing.level == 3 and sl.fishing.boats.size() == sv.fishing.boats.size() \
+		and is_equal_approx(sl.fishing.clock, sv.fishing.clock) and sl.time == 0.0
+	for k in 120:
+		sv.step(0.25)
+		sl.step(0.25)
+	same = same and is_equal_approx(sl.money, sv.money) and sl.fishing.landings == sv.fishing.landings
+	var vre := RegEx.create_from_string("const VERSION := (\\d+)").search(FileAccess.get_file_as_string("res://autoload/save.gd"))
+	var vmap := {"VERSION": int(vre.get_string(1)) if vre != null else 0}
+	var old_d := s0.to_dict()
+	old_d.erase("act0")
+	var mg := PortSim.new(db)
+	mg.from_dict(old_d)
+	check(int(vmap.get("VERSION", 0)) == 6 and dd.has("act0") and same and not mg.fishing.act0 and mg.fishing.level == 5 \
+		and mg.fishing.boats.size() == 7 and mg.fishing.passive_rate() > 0.0 and not mg.act0_ready(),
+		"F3 sauvegarde v6 : aller-retour en plein acte 0 (niveau %d, %d bateaux, même suite), partie d'avant F3 chargée acte 0 fait, pêche passive" % [sl.fishing.level, sl.fishing.boats.size()])
+	# 7. nouvelle concession : la pêche continue (passive), l'acte 0 ne se rejoue pas
+	var fin := PortSim.new(db, 2)
+	fin.fishing.migrate_done()
+	fin.tier = 3
+	fin.finished = true
+	fin.counters["evp"] = 2.6e6
+	var nc := PortSim.new(db, 4)
+	nc.carry_over(fin)
+	check(nc.fishing.level == 5 and not nc.fishing.act0 and nc.fishing.passive_rate() > 0.0, "F3 nouvelle concession : la pêche est reprise (passive), pas d'acte 0")
+	# 8. trajets des bateaux : jamais à terre, jamais sur un ponton ni le quai, loin du chenal et du mouillage des cargos ; vitesse
+	# de croisière lente (aucun sprint), glissement latéral à la place
+	var bad: Array[String] = []
+	var spd_max := 0.0
+	var spd_at := ""
+	var beam := {"dinghy": 0.52, "trawler": 1.1, "tuna": 1.43}
+	var rects: Array[Rect2] = []
+	for id in Layout.ANSE_PONTOONS:
+		for pd in Layout.anse_pontoons(id):
+			rects.append(Layout.pontoon_rect(pd))
+	var min_anchor := INF
+	var min_chan := INF
+	for cls in Layout.FISH_BERTHS:
+		var bd: Dictionary = db.cfg("fishing").boats[cls]
+		for slot in (Layout.FISH_BERTHS[cls] as Array).size():
+			var po: Array = Layout.fish_path_out(cls, slot).pts
+			var lead := Vector2((po[-1] as Vector3).x - (po[-2] as Vector3).x, (po[-1] as Vector3).z - (po[-2] as Vector3).z).normalized()
+			var kinds := {"out": Layout.fish_path_out(cls, slot), "back": Layout.fish_path_back(cls, slot, Layout.fish_ground(cls, slot), lead),
+				"arrivée": Layout.fish_path_back(cls, slot, Layout.fish_sea_entry(cls))}
+			for kn in kinds:
+				var wp := Layout.fish_weigh(kinds[kn])
+				var dur := float(bd.out if kn == "out" else bd.back)
+				var v := float(wp.len) / dur
+				var vpk := v * (1.0 / (1.0 - minf(0.25, Layout.FISH_RAMP_S / dur)))
+				if vpk > spd_max:
+					spd_max = vpk
+					spd_at = "%s %s %d" % [cls, kn, slot]
+				for p in Layout.sample_path(kinds[kn].pts, 0.8):
+					var p2 := Vector2(p.x, p.z)
+					if Layout.any_land(p2):
+						bad.append("%s %s %d à terre (%d, %d)" % [cls, kn, slot, int(p.x), int(p.z)])
+					for r in rects:
+						if r.grow(float(beam[cls]) - 0.05).has_point(p2):
+							bad.append("%s %s %d sur un ponton (%d, %d)" % [cls, kn, slot, int(p.x), int(p.z)])
+					for an in Layout.ANCHORS:
+						min_anchor = minf(min_anchor, p2.distance_to(Vector2(an.x, an.z)))
+					for ch in Layout.CHANNEL:
+						min_chan = minf(min_chan, p2.distance_to(Vector2(ch.x, ch.z)))
+					min_anchor = minf(min_anchor, p2.distance_to(Vector2(Layout.SPAWN.x, Layout.SPAWN.z)))
+	check(bad.is_empty() and min_anchor >= 40.0 and min_chan >= 60.0 and spd_max <= 6.0,
+		"F3 trajets des bateaux : ni terre ni ponton (%s), ≥ %d u du mouillage et de l'arrivée des cargos, ≥ %d u du chenal, vitesse au plus %s u/s (%s)" % [
+		str(bad.slice(0, 3)), int(min_anchor), int(min_chan), Fmt.num(spd_max), spd_at])
+	# 9. forêt profonde ramenée à ≈ 1,3 × les arbres du village (hauteur du plus grand pin d'un bloc / plus grand arbre du village)
+	var deep_s := 0.0
+	var n_deep := 0
+	for it in Layout.forest():
+		if bool(it.get("deep", false)):
+			deep_s = maxf(deep_s, float(it.s))
+			n_deep += 1
+	var ratio := Assets.aabb("forest_block").size.y * deep_s / maxf(0.01, Assets.aabb("tree").size.y * 1.3)
+	check(n_deep >= 150 and ratio <= 1.45, "F3 forêt profonde : %d blocs, échelle au plus ×%s, pins au plus %s × le plus grand arbre du village (avant ×3,2)" % [n_deep, Fmt.num(deep_s), Fmt.num(ratio)])
+	# 10. tutoriel : trois étapes de l'acte 0 en tête, la suite inchangée (une progression enregistrée avant F3 se retrouve)
+	var steps: Array = DataDB.load_json("res://data/tutorial.json")
+	var ids: Array = steps.map(func(x: Dictionary) -> String: return String(x.id))
+	var tre := RegEx.create_from_string("const REV5_ORDER := \\[([^\\]]*)\\]").search(FileAccess.get_file_as_string("res://scripts/ui/tutorial.gd"))
+	var tsrc := {"REV5_ORDER": JSON.parse_string("[" + tre.get_string(1) + "]") if tre != null else []}
+	var sre := RegEx.create_from_string("const TUTO_REV := (\\d+)").search(FileAccess.get_file_as_string("res://autoload/settings.gd"))
+	var setc := {"TUTO_REV": int(sre.get_string(1)) if sre != null else 0}
+	check(ids.slice(0, 4) == ["a0_pontoon", "a0_boat", "a0_hall", "welcome"] and ids.slice(3) == tsrc.REV5_ORDER and int(setc.TUTO_REV) == 6,
+		"F3 tutoriel : %s en tête, puis la liste d'avant (version 6)" % str(ids.slice(0, 3)))

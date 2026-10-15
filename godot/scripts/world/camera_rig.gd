@@ -22,6 +22,7 @@ var zoom := ZOOM_START        # largeur visible (unités monde)
 var zoom_goal := ZOOM_START
 var zoom_min := 28.0
 var zoom_max := 120.0
+const ZOOM_MAX := 130.0       # zoom le plus large (lot F2 : bornes du monde habillé)
 var bounds := Rect2(-60, -80, 80, 140)   # x, z, largeur, profondeur
 ## Coupé quand un écran s'ouvre. S'il l'est en plein glissement, le relâchement n'arrivera jamais jusqu'ici :
 ## on oublie le geste en cours, sinon la caméra resterait « accrochée » au curseur à la fermeture de l'écran.
@@ -62,8 +63,11 @@ func _ready() -> void:
 func set_tier_bounds(tier: int) -> void:
 	var lx: Array = Layout.LAND_X.get(tier, Layout.LAND_X[1])
 	# le port s'étend avec le palier ; l'arrière-pays (village, autoroute) reste accessible dès le départ
-	bounds = Rect2(-130.0, -90.0, float(lx[1]) + 60.0 + 130.0, 250.0)
-	zoom_max = clampf(bounds.size.x * 0.9, 90.0, 190.0)
+	# lot F2 : 60 u de plus vers le large (la rive d'en face paraît en haut de l'écran au zoom le plus large) ; au zoom le plus
+	# large, aux quatre coins des bornes, on voit au plus x −320…400, z −340…350 : rives du golfe, forêt (Layout.FOREST_AREA),
+	# rive d'en face et eau couvrent tout ce rectangle — jamais le bord du monde (zoom 190 avant)
+	bounds = Rect2(-130.0, -150.0, float(lx[1]) + 60.0 + 130.0, 310.0)
+	zoom_max = clampf(bounds.size.x * 0.75, 90.0, ZOOM_MAX)
 
 
 ## Verrouillée par une capture avec --look : les recentrages du jeu (premier navire d'une classe, tutoriel) sont ignorés.

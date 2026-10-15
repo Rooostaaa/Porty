@@ -152,6 +152,22 @@ func _init() -> void:
 		for a in OS.get_cmdline_user_args():
 			if a.begins_with("--bot-save="):
 				bot.save_horizon = float(a.substr(11))
+		# lot F3 : le bot joue l'acte 0 (pêche), puis tout se mesure depuis l'entrée au T1 (l'horloge du port, `sim.time`,
+		# ne tourne pas pendant l'acte 0) ; durée sans coup de main sur une partie à part, même graine (--no-act0 : base F2)
+		var a0_line := ""
+		if not OS.get_cmdline_user_args().has("--no-act0"):
+			sim.begin_act0()
+			var a0 := bot.run_act0()
+			var m_t1 := sim.money
+			var sim2 := PortSim.new(db, sd)
+			sim2.begin_act0()
+			var bot2 := Bot.new(sim2)
+			bot2.use_manual = false
+			var a0n := bot2.run_act0()
+			a0_line = "     acte 0 : %s (sans coup de main %s) · achats %s · %d débarques, %d coups de main · argent à l'entrée du T1 %s · revenu de fin %s/s, passif %s/s" % [
+				Fmt.duration(a0), Fmt.duration(a0n), " / ".join(bot.act0_buys.map(func(x: float) -> String: return Fmt.duration(x))),
+				sim.fishing.landings, sim.fishing.helps, Fmt.money(m_t1), Fmt.num(bot.act0_end_rate), Fmt.num(sim.fishing.passive_rate())]
+			print("g%d %s" % [sd, a0_line.strip_edges()])
 		var keys := {}               # goulot -> secondes, par palier
 		var excess := {}             # palier -> secondes où demande > 1,5 × capacité
 		var alert_t := {}            # palier -> secondes où la carte Goulot est en alerte (rouge)
@@ -394,6 +410,8 @@ func _init() -> void:
 			Fmt.num(float(max_ratio.get("T2", 0.0))), Fmt.num(float(max_ratio.get("T3", 0.0))), roundi(100.0 * (1.0 - float(worst_drop.get("T3", 1.0)))),
 			_dur(float(gaps.get("T1", 0.0))), _dur(float(gaps.get("T2", 0.0))), _dur(float(gaps.get("T3", 0.0))),
 			_dur(t3b[0] if t3b.size() > 0 else INF), _dur(t3b[3] if t3b.size() > 3 else INF), str(lic_at)])
+		if a0_line != "":
+			table.append(a0_line)
 		var first_buy := INF
 		if not bot.purchases.is_empty():
 			first_buy = float(bot.purchases[0].t)

@@ -260,8 +260,39 @@ func _do(o: Dictionary) -> void:
 		_bought(o.kind, o.id)
 
 
+## Lot F3 — acte 0 « La Crique » : achète les cinq achats de la pêche dès qu'il peut et aide chaque bateau qui rentre
+## (`use_manual`) ; à la bascule, ouvre le port. Renvoie la durée de l'acte 0 (s). Garde-fou : `max_s`.
+var act0_buys: Array[float] = []        # instants (horloge de la pêche) des achats de l'acte 0
+
+
+func run_act0(max_s: float = 1200.0) -> float:
+	var tick := float(sim.db.cfg("tick"))
+	var acc := 0.0
+	while sim.fishing.act0 and sim.fishing.act0_time < max_s:
+		sim.step(tick)
+		acc += tick
+		if acc >= 1.0:
+			acc -= 1.0
+			if sim.act0_ready():
+				break
+			if sim.money >= sim.fishing.next_cost() and sim.buy_fish():
+				act0_buys.append(sim.fishing.act0_time)
+			if use_manual:
+				for i in sim.fishing.boats.size():
+					sim.fish_help(i)
+	var d := sim.fishing.act0_time
+	act0_end_rate = sim.fishing.rate_estimate()
+	sim.open_port()
+	return d
+
+
+var act0_end_rate := 0.0                 # revenu estimé de la pêche à la fin de l'acte 0 ($/s, sans coup de main)
+
+
 ## Fait tourner la simulation `seconds` secondes avec une décision par seconde.
 func run(seconds: float, stop_when_finished: bool = true) -> void:
+	if sim.fishing.act0:
+		run_act0()
 	var tick := float(sim.db.cfg("tick"))
 	var acc := 0.0
 	var end := sim.time + seconds

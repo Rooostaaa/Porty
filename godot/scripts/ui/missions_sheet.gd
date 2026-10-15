@@ -67,7 +67,7 @@ func _claim(id: String) -> void:
 func refresh() -> void:
 	var s := sim()
 	if ",".join(s.missions_claimed) != _sig:
-		rebuild()
+		request_rebuild()
 		return
 	for r in rows:
 		var p := Objectives.mission_progress(s, r.m)

@@ -15,13 +15,13 @@ const AUDIO_CFG := "user://audio.cfg"
 const BUS_SFX := "Sons"
 const BUS_AMB := "Ambiance"
 ## Sons d'ambiance (bus « Ambiance ») ; tous les autres vont sur « Sons ».
-const AMBIENT := ["ship_horn", "clank", "truck_honk", "gull"]
+const AMBIENT := ["ship_horn", "clank", "truck_honk", "gull", "works"]
 ## Priorité : 3 = jamais volé ; un son ne prend que la voix d'un son de priorité inférieure ou égale.
 const PRIORITY := {
 	"ship_horn": 3, "tier": 3, "tier2": 3, "tier3": 3, "finale": 3, "prestige": 3,
 	"milestone": 2, "build": 2, "hire": 2, "boost": 2, "chest": 2, "horn": 2, "bad": 2, "bell": 2,
 	"buy": 1, "coin": 1, "click": 1,
-	"clank": 0, "truck_honk": 0, "gull": 0,
+	"clank": 0, "truck_honk": 0, "gull": 0, "works": 0,
 }
 
 var _streams: Dictionary = {}
@@ -65,6 +65,8 @@ func _ready() -> void:
 	_streams["clank"] = _clank()
 	_streams["truck_honk"] = _tone([[420.0, 0.12], [0.0, 0.05], [420.0, 0.18]], 0.12, "square")
 	_streams["gull"] = _gull()
+	# lot F2 : chantier (marteau sur la tôle, moteur d'engin au ralenti)
+	_streams["works"] = _mix([_clank_data(), _tone_data([[98.0, 0.09], [0.0, 0.05], [110.0, 0.09], [0.0, 0.05], [98.0, 0.14]], 0.16, "square")])
 	# mer en boucle, très basse
 	_sea_player = AudioStreamPlayer.new()
 	_sea_player.stream = _sea()
