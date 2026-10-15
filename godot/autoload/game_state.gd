@@ -52,7 +52,9 @@ func prestige() -> bool:
 func credit_offline(seconds: float) -> void:
 	if sim == null:
 		return
-	offline_applied.emit(sim.apply_offline(seconds))
+	var rep := sim.apply_offline(seconds)
+	if not rep.is_empty():          # (lot G1 : avant Marcel, le monde se fige — rien à dire)
+		offline_applied.emit(rep)
 
 
 func load_from(d: Dictionary) -> void:

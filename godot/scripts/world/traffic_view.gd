@@ -209,7 +209,7 @@ func exit_route(from: Vector3) -> Array:
 
 func on_truck_served(sim: PortSim) -> void:
 	# en vitesse accélérée la gate sert plusieurs camions par image : on n'en montre qu'un par OUT_GAP
-	if _out_cool > 0.0 or trucks.size() >= MAX_LEAVING or not _ready_k("gate0"):
+	if _out_cool > 0.0 or trucks.size() >= MAX_LEAVING or not _ready_k("track"):
 		return
 	var stop_x := _pick_stop()
 	if is_nan(stop_x):
@@ -288,7 +288,7 @@ func sync(sim: PortSim, delta: float) -> void:
 	_tier = sim.tier
 	_gate2 = sim.built.has("gate2") and _ready_k("gate2")
 	# file de camions = camions en attente dans la simulation (plafonné visuellement)
-	var want := mini(max_queue(), sim.trucks_waiting()) if _ready_k("gate0") else 0      # pas de camion sans gate (F2)
+	var want := mini(max_queue(), sim.trucks_waiting()) if _ready_k("track") else 0      # pas de camion sans gate (F2)
 	while queue.size() < want:
 		_spawn_queue_truck(sim)
 	# camions en trop : ils repartent vers le tunnel est par la voie de sortie (jamais effacés à l'écran)
@@ -437,6 +437,12 @@ func kick_barriers() -> void:
 	_barrier_kick = 0.9
 
 
+## Lot G2 : un camion laissé passer d'un toucher — la barrière se lève, il charge et part (montré par on_truck_served).
+func barrier_kick_on_pass() -> bool:
+	_barrier_kick = 1.6
+	return true
+
+
 ## Barrières : la barrière d'entrée se lève quand un camion la franchit, celle de sortie de même.
 func _sync_barriers(delta: float) -> void:
 	_barrier_kick = maxf(0.0, _barrier_kick - delta)
@@ -447,14 +453,19 @@ func _sync_barriers(delta: float) -> void:
 		var gz := Layout.GATE_IN_Z if lane == "in" else Layout.GATE_OUT_Z
 		# milieu du bras (la barrière pivote à un bord de la route ; lot D : deux voies de sortie avec gate2)
 		var arm_x := b.position.x + 1.9 * b.scale.x * cos(b.rotation.y)
+		if lane == "both":          # lot G2 : la barrière à bascule en travers des deux voies (bras « arm »)
+			gz = b.position.z
+			arm_x = b.position.x
 		var open := _barrier_kick > 0.0
 		for tk in trucks:
 			var p: Vector3 = (tk.node as Node3D).position
-			var on_lane := (lane == "in" and String(tk.phase) == "in") or (lane == "out" and String(tk.phase) == "out")
-			if on_lane and absf(p.z - gz) < 4.5 and absf(p.x - arm_x) < 2.6:
+			var on_lane := lane == "both" or (lane == "in" and String(tk.phase) == "in") or (lane == "out" and String(tk.phase) == "out")
+			if on_lane and absf(p.z - gz) < 4.5 and absf(p.x - arm_x) < (3.6 if lane == "both" else 2.6):
 				open = true
 				break
-		b.rotation.z = lerp_angle(b.rotation.z, deg_to_rad(80.0) if open else 0.0, 1.0 - exp(-delta * 8.0))
+		var arm := Assets.part(b, "arm") if lane == "both" else null
+		var tgt := b if arm == null else arm
+		tgt.rotation.z = lerp_angle(tgt.rotation.z, deg_to_rad(80.0) if open else 0.0, 1.0 - exp(-delta * 8.0))
 
 
 ## Ajoute un personnage qui fait l'aller-retour entre a et b (pas de pathfinding : segment droit, demi-tour instantané).
@@ -515,7 +526,7 @@ func _sync_cars(delta: float) -> void:
 ## Engins du parc : grue → tablier → bloc réel, et bloc → bord du parc → camion quand un camion attend.
 func _sync_vehicles(sim: PortSim, delta: float) -> void:
 	var kind := "forklift" if sim.tier == 1 else ("reach_stacker" if sim.tier == 2 or not sim.built.has("rtg") else "straddle")
-	var count := clampi(sim.agents("yard_ops") + (1 if sim.managers.yard_ops else 0), 1, 7) if _ready_k("yard0") else 0
+	var count := clampi(sim.agents("yard_ops") + (1 if sim.managers.yard_ops else 0), 1, 7) if _ready_k("yard") else 0
 	if kind != _vehicle_kind:
 		for v in vehicles:
 			(v.node as Node3D).queue_free()

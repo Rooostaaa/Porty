@@ -35,9 +35,9 @@ func _ready() -> void:
 	# caméra cadre son poste dans la moitié haute de l'écran (lot D-UI)
 	var d := focus_dept
 	if Hud.fishing_cards(sim()):
-		# lot F3 : acte 0 — les achats de la pêche ; la caméra cadre l'anse au-dessus de la feuille
+		# lot F3/G1 : la Crique — les cartes de la pêche ; la caméra cadre l'anse au-dessus de la feuille
 		if Hud.main != null:
-			Hud.main.frame_point(Vector3(-114.0, 0.0, 46.0))
+			Hud.main.frame_point(Vector3(-122.0, 0.0, 44.0))
 		return
 	if d == "":
 		var gd := String(sim().shown_analysis().get("dept", ""))
@@ -75,9 +75,9 @@ func _update_mult() -> void:
 	mult_btn.text = "MAX" if m < 0 else "×%d" % m
 
 
-## Ordre de présentation des services (chapitres du palier 1) : la grue, le poste de la capitainerie (deux services), le parc,
-## la gate, puis la douane.
-const CARD_ORDER := ["cranes", "harbor", "berths", "yard_ops", "gate", "customs"]
+## Ordre de présentation des services (lot G2 : l'ordre du processus) : Arrivées · Accostage · Déchargement · Douane ·
+## Stockage · Sortie camions.
+const CARD_ORDER := ["harbor", "berths", "cranes", "customs", "yard_ops", "gate"]
 
 
 ## Cartes du chapitre en cours (services révélés) plus **une** carte grisée « à venir » avec sa condition.
@@ -91,15 +91,62 @@ func build() -> void:
 	if tab == 0:
 		help("upg_depts", "Le département qui limite le flux porte la pastille rouge GOULOT. Touche « i » pour voir les étapes et le « pourquoi ». Garde le doigt sur AMÉLIORER pour acheter en rafale.")
 		var next_locked := _next_locked_dept(s)
+		# lot G2 : le prochain bâtiment en tête de liste (un seul achat à la fois tant que le terre-plein se bâtit)
+		if s.g2:
+			var nb := Zones.next_building(s)
+			if nb != "":
+				_building_card(s, nb)
 		for d in CARD_ORDER:
 			if not s.feature("dept_" + d) and d != next_locked:
 				continue
 			_dept_card(d)
+		# lot G1 : après la Concession, les cartes de la Crique restantes, en bas, sous un titre
+		if s.fishing.places > 0 and not s.fishing.act0 and not s.fishing.maxed():
+			var title := UI.label("La Crique", 36, UI.MUTED)
+			title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			content.add_child(title)
+			_fish_cards(s)
 	else:
 		help("upg_lic", "Les licences augmentent la valeur de chaque EVP traité. Chaque palier du port relève leur niveau maximal.")
 		for ci in PortSim.NCARGO:
 			if s.feature("licences") or ci == 0:
 				_cargo_card(ci)
+
+
+## Lot G2 — la carte du prochain bâtiment (CONSTRUIRE), en tête d'AMÉLIORER.
+func _building_card(s: PortSim, bid: String) -> void:
+	var b: Dictionary = s.db.building_by_id[bid]
+	var c := UI.card()
+	content.add_child(c)
+	var row := UI.hbox(20)
+	c.add_child(row)
+	row.add_child(UI.icon_disc(Info.building_icon(b), UI.VIOLET, 110))
+	var mid := UI.vbox(6)
+	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(mid)
+	mid.add_child(UI.label(String(b.name), 40, UI.VIOLET))
+	mid.add_child(UI.wrap_label(String(b.desc), 28, UI.TEXT))
+	var buy := UI.button("", UI.MONEY, 30, 120)
+	buy.custom_minimum_size.x = 230
+	buy.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	buy.pressed.connect(func() -> void:
+		if Hud.main != null:
+			Hud.main.build_from_world(bid)
+		else:
+			sim().build(bid)
+		request_rebuild())
+	row.add_child(buy)
+	cards.append({"build": bid, "root": c, "buy": buy})
+
+
+func _refresh_building_cards(s: PortSim) -> void:
+	for c in cards:
+		if not c.has("build"):
+			continue
+		var cost := float(s.db.building_by_id[String(c.build)].cost)
+		var b: Button = c.buy
+		b.disabled = cost > s.money or s.building_state(String(c.build)) != "available"
+		b.text = "CONSTRUIRE\n%s" % Fmt.money(cost) if not b.disabled else "Il manque\n%s" % Fmt.money(maxf(0.0, cost - s.money))
 
 
 ## Le prochain service à se révéler (ordre de data/unlocks.json), "" si tout est révélé.
@@ -320,6 +367,8 @@ func refresh() -> void:
 	if Hud.fishing_cards(s):
 		_refresh_fishing(s)
 		return
+	_refresh_fishing(s)      # (lot G1 : les cartes de la Crique restantes, en bas)
+	_refresh_building_cards(s)      # (lot G2 : le prochain bâtiment, en tête)
 	var best_secs := INF
 	var best_card: Dictionary = {}
 	for c in cards:
@@ -369,7 +418,7 @@ func refresh() -> void:
 			if bool(pb.good) and float(pb.secs) < best_secs:
 				best_secs = float(pb.secs)
 				best_card = c
-		else:
+		elif c.has("cargo"):
 			var ci: int = c.cargo
 			var cid: String = s.db.cargo[ci].id
 			var b2: Button = c.buy
@@ -533,96 +582,161 @@ func _card_features(s: PortSim) -> int:
 	for id in s.features:
 		if String(id).begins_with("dept_") or id == "licences":
 			n += 1
-	# lot F3 : acte 0 (cartes de la pêche, une par achat fait, plus la suivante) ou bascule (les cartes du port)
+	# lot F3/G1 : la Crique (ses cartes changent avec les bâtiments et la Concession) ou la bascule (les cartes du port)
 	if Hud.fishing_cards(s):
-		n += 1000 + 10 * s.fishing.level
+		n += 1000
+	n += 10 * s.fishing.built.size() + (100 if s.fishing.concession_available() else 0) + (5 if s.fishing.maxed() else 0) \
+		+ (3 if s.fishing.places > 0 else 0)
+	if s.g2:
+		n += 1000 * s.built.size()          # lot G2 : un bâtiment construit change la carte de tête
 	return n
 
 
-# --- lot F3 : l'acte 0 « La Crique » — les achats de la pêche, sur les mêmes cartes (pas d'écran nouveau) ---------------
+# --- lot F3/G1 : chapitre 1 « La Crique » — les cartes de la pêche, sur les mêmes cartes (pas d'écran nouveau) ---------------
+# Pendant la Crique : [la Concession dès la marina] · le prochain bâtiment · Places au ponton · Services à quai (×1/×10/max,
+# maintien). Après la Concession : un titre « La Crique » et les cartes restantes en bas de la liste, jusqu'à leur maximum.
 
 const FISH_COLOR := Color("#2E9BB5")
 
 
-## Cartes de la pêche : les achats faits (✓), l'achat suivant (bouton), et un seul « à venir » grisé.
 func _build_fishing(s: PortSim) -> void:
 	if tab != 0:
 		help("upg_lic0", "Les licences de cargaison viendront avec le port à conteneurs, de l'autre côté du cap.")
 		return
-	help("upg_fish", "La crique d'Odette : chaque place louée rapporte un loyer, chaque débarque se vend sur le ponton. Touche une barque qui rentre pour l'aider à débarquer : sa vente rapporte plus.")
-	var buys := s.fishing.buys()
-	for i in buys.size():
-		if i > s.fishing.level + 1:
-			break
-		_fish_card(s, i, buys[i])
+	help("upg_fish", "La crique d'Odette : chaque bateau rentré paie sa place et les services du quai. Touche-le pour encaisser, ou confie ça à Marcel. Une place de plus = une barque de plus.")
+	_fish_cards(s)
 
 
-func _fish_card(s: PortSim, i: int, b: Dictionary) -> void:
+## Cartes de la Crique (pendant, puis après la Concession sous un titre).
+func _fish_cards(s: PortSim) -> void:
+	var f := s.fishing
+	if f.places <= 0:
+		_fish_card(s, "places")
+		return
+	if f.concession_available():
+		_fish_card(s, "concession")
+	var nb := f.next_building()
+	if not nb.is_empty():
+		_fish_card(s, String(nb.id))
+	if f.places < f.places_max():
+		_fish_card(s, "places")
+	if f.services < f.services_max():
+		_fish_card(s, "services")
+
+
+func _fish_card(s: PortSim, id: String) -> void:
+	var f := s.fishing
 	var c := UI.card()
 	content.add_child(c)
 	var row := UI.hbox(20)
 	c.add_child(row)
-	row.add_child(UI.icon_disc(String(b.get("icon", "ship")), FISH_COLOR, 110))
+	var def: Dictionary = f.cfg.get(id, {}) if id == "places" or id == "services" else f.building_def(id)
+	var left := UI.vbox(8)
+	left.add_child(UI.icon_disc(String(def.get("icon", "ship")), UI.AMBER if id == "concession" else FISH_COLOR, 110))
+	var lv: Control = null
+	if id == "places" or id == "services":
+		lv = UI.badge("0")
+		lv.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		left.add_child(lv)
+	row.add_child(left)
 	var mid := UI.vbox(6)
 	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(mid)
-	mid.add_child(UI.label(String(b.name), 40, UI.VIOLET))
-	var eff := UI.wrap_label(String(b.get("text", "")), 28, UI.TEXT)
+	mid.add_child(UI.label(String(def.get("name", id)), 40, UI.VIOLET))
+	var eff := UI.wrap_label(String(def.get("text", "")), 28, UI.TEXT)
 	mid.add_child(eff)
 	var pay := UI.wrap_label("", 26, UI.MONEY)
 	mid.add_child(pay)
-	var buy := UI.button("", UI.MONEY, 30, 120)
+	var buy := UI.button("", UI.AMBER if id == "concession" else UI.MONEY, 30, 120)
 	buy.custom_minimum_size.x = 230
 	buy.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	buy.pressed.connect(_buy_fish)
+	if id == "places" or id == "services":
+		var h := HoldRepeat.attach(buy, _buy_fish.bind(id, false), func(_n: int) -> bool: return _buy_fish(id, true))
+		h.burst_ended.connect(func(_count: int) -> void: refresh())
+	else:
+		buy.pressed.connect(_buy_fish.bind(id, false))
 	row.add_child(buy)
-	cards.append({"fish": i, "root": c, "buy": buy, "eff": eff, "pay": pay})
+	cards.append({"fish": id, "root": c, "buy": buy, "eff": eff, "pay": pay, "lv": lv.get_child(0) if lv != null else null})
 
 
 func _refresh_fishing(s: PortSim) -> void:
+	var f := s.fishing
+	var n_want: int = MULTS[mult_index]
 	for c in cards:
 		if not c.has("fish"):
 			continue
-		var i: int = c.fish
+		var id: String = c.fish
 		var b: Button = c.buy
-		var root: Control = c.root
 		var pay: Label = c.pay
-		var cost := float(s.fishing.buys()[i].get("cost", 0.0))
-		if i < s.fishing.level:
-			root.modulate = Color.WHITE
-			b.text = "✓ FAIT"
-			b.disabled = true
-			pay.text = ""
-		elif i == s.fishing.level:
-			root.modulate = Color.WHITE
-			b.disabled = cost > s.money
-			if b.disabled:
-				b.text = "Il manque\n%s" % Fmt.money(cost - s.money)
-			else:
-				b.text = ("RÉPARER\ngratuit" if cost <= 0.0 else "CONSTRUIRE\n%s" % Fmt.money(cost))
-			pay.text = "Revenu de la pêche : %s/s" % Fmt.num(s.fishing.rate_estimate()) if s.fishing.level > 0 else ""
-		else:
-			root.modulate = Color(1, 1, 1, 0.55)
-			b.text = "À venir"
-			b.disabled = true
-			pay.text = "Après : %s" % String(s.fishing.buys()[i - 1].name)
+		var cost := 0.0
+		var n := 1
+		match id:
+			"places":
+				n = maxi(1, mini(f.places_max() - f.places, f.places_affordable(s.money) if n_want < 0 else n_want)) if f.places > 0 else 1
+				cost = f.places_cost(n)
+				(c.lv as Label).text = str(f.places)
+				if f.places <= 0:
+					b.text = "RÉPARER\ngratuit"
+					pay.text = ""
+				else:
+					b.text = "AMÉLIORER ×%d\n%s" % [n, Fmt.money(cost)]
+					pay.text = "%d barques · niv. %d/%d · revenu de la pêche %s/s" % [f.boat_count("dinghy"), f.places, f.places_max(), Fmt.num(f.rate_estimate())]
+			"services":
+				n = maxi(1, mini(f.services_max() - f.services, f.services_affordable(s.money) if n_want < 0 else n_want))
+				cost = f.services_cost(n)
+				(c.lv as Label).text = str(f.services)
+				var nl := f.named_level(f.services + 1)
+				b.text = ("CONSTRUIRE\n%s" if not nl.is_empty() and n == 1 else "AMÉLIORER ×%d\n%s" % [n, "%s"]) % Fmt.money(cost)
+				var nxt := ""
+				for k in range(f.services + 1, f.services_max() + 1):
+					if not f.named_level(k).is_empty():
+						nxt = "niv. %d : %s" % [k, String(f.named_level(k).name)]
+						break
+				pay.text = "Escale ×%s · niv. %d/%d%s" % [Fmt.num(f.ticket()), f.services, f.services_max(), (" · " + nxt) if nxt != "" else ""]
+				if not nl.is_empty():
+					(c.eff as Label).text = "%s — %s" % [String(nl.name), String(nl.get("text", ""))]
+			_:
+				cost = float(f.building_def(id).get("cost", 0.0))
+				b.text = ("SIGNER\n%s" if id == "concession" else "CONSTRUIRE\n%s") % Fmt.money(cost)
+				pay.text = "La Crique est à toi : de l'autre côté du cap, le port à conteneurs." if id == "concession" else ""
+		b.disabled = cost > s.money
+		if b.disabled:
+			b.text = "Il manque\n%s" % Fmt.money(cost - s.money)
 
 
-func _buy_fish() -> void:
+func _buy_fish(id: String, quiet: bool = false) -> bool:
 	var s := sim()
-	var i := s.fishing.level
-	if not s.buy_fish():
-		Sfx.play("bad")
-		return
-	Sfx.play("buy")
+	var f := s.fishing
+	var n: int = MULTS[mult_index]
+	var ok := false
+	match id:
+		"places":
+			ok = s.buy_fish_places(1 if f.places <= 0 else n)
+		"services":
+			ok = s.buy_fish_services(n)
+		_:
+			ok = s.buy_fish_building(id)
+	if not ok:
+		if not quiet:
+			Sfx.play("bad")
+		return false
+	_burst_n += 1
+	if id == "concession":
+		Sfx.play("milestone")
+	elif not quiet or _burst_n % 3 == 0:
+		Sfx.play("buy", 0.0, mini(12, int(_burst_n / 3)) if quiet else 0)
 	if Hud.main != null:
 		Hud.main.flash_money()
-		var spec := Layout.anse_site_spec(String(s.fishing.buys()[i].id))
-		if not spec.is_empty():
-			var r: Rect2 = spec.focus
+		var r := Hud.main.diorama.fishing_view.focus_of(id) if Hud.main.diorama != null else Rect2()
+		if r.has_area() and not quiet:
 			Hud.main.frame_point(Vector3(r.get_center().x, 0, r.get_center().y))
-	var card := _card_for("fish", i)
+	var card := _card_for("fish", id)
 	if not card.is_empty():
-		Fx.pop(card.root, 1.04)
-		Fx.reward(card.buy, "✓", UI.MONEY)
-	request_rebuild()
+		Fx.pop(card.root, 1.02 if quiet else 1.04)
+		if not quiet:
+			Fx.reward(card.buy, "✓" if id != "places" and id != "services" else "Niv. %d" % (f.places if id == "places" else f.services), UI.MONEY)
+	if id == "places" or id == "services":
+		refresh()
+	else:
+		request_rebuild()
+	return true

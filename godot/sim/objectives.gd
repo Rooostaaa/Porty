@@ -158,6 +158,9 @@ static func mission_progress(sim: PortSim, m: Dictionary) -> float:
 		return float(sim.levels.get(m.level, 0))
 	if m.has("building"):
 		return 1.0 if sim.built.has(String(m.building)) else 0.0
+	if m.has("fish"):           # lot G1 : un bâtiment de la Crique (la Concession du terre-plein) ; une partie sans Crique (tests,
+		# parties d'avant F3) l'a d'office
+		return 1.0 if sim.fishing.has(String(m.fish)) else 0.0
 	return sim.counter_total(String(m.counter))
 
 
@@ -190,6 +193,8 @@ static func visible_missions(sim: PortSim) -> Array[Dictionary]:
 	for m in sim.db.missions:
 		if sim.missions_claimed.has(m.id):
 			continue
+		if m.has("fish") and sim.fishing.places == 0 and not sim.fishing.act0:
+			continue        # lot G1 : une partie sans Crique (tests, parties d'avant F3) n'a pas la mission de la Concession
 		out.append(m)
 		if out.size() >= n:
 			return out

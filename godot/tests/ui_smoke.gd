@@ -38,8 +38,9 @@ func _wait(n: int = 3) -> void:
 
 
 func _ready() -> void:
-	# (lot F3, recalé : garde-fou en temps réel, 280 s — il comptait le temps de jeu, accéléré ×4–6 par les contrôles F2/F3)
-	get_tree().create_timer(280.0, true, false, true).timeout.connect(func() -> void:
+	# (lot F3, recalé : garde-fou en temps réel, 280 s — il comptait le temps de jeu, accéléré ×4–6 par les contrôles F2/F3 ;
+	# lot G1 : 400 s, la Crique jouée à l'interface dure ≈ 70 s de plus)
+	get_tree().create_timer(400.0, true, false, true).timeout.connect(func() -> void:
 		printerr("  ÉCHEC délai dépassé")
 		get_tree().quit(2))
 	_run.call_deferred()
@@ -300,7 +301,7 @@ func _run() -> void:
 	hud._refresh_strip(s)
 	var am0 := s.amber
 	hud._on_strip_mission(0)
-	check(s.missions_claimed.has("m1") and s.amber > am0, "mission réclamée depuis le bandeau")
+	check((s.missions_claimed.has("m1") or s.missions_claimed.has("c0")) and s.amber > am0, "mission réclamée depuis le bandeau (%s)" % str(s.missions_claimed))      # (lot G1 : « c0 » en tête)
 	hud.strip_folded = true
 	hud._refresh_strip(s)
 	check(not (hud.strip_items[0].btn as Button).visible, "bandeau replié")
@@ -2484,7 +2485,7 @@ func _f2_checks(hud: Hud) -> void:
 	await _wait(24)
 	var anse_ruin := 0
 	for c in dio.fishing_view._static.get_children():
-		if not c.is_queued_for_deletion() and String(c.get_meta("before", "")) == "fish_pontoon":
+		if not c.is_queued_for_deletion() and String(c.get_meta("before", "")) == "fish_places_1":
 			anse_ruin += 1
 	check(not t1_before and not hud.intro_active() and hud.intro_shown == 3 and bool(st.get("intro_seen")) and not dio.t1_works_active()
 		and s.fishing.act0 and s.money == 0.0 and not bool(sim_r.get("paused")) and hud.top_box.visible and anse_ruin == 1 and dio.fishing_view.boats.is_empty(),
@@ -2492,11 +2493,24 @@ func _f2_checks(hud: Hud) -> void:
 		hud.intro_shown, s.fishing.act0, hud.top_box.visible, anse_ruin])
 	# lot F3 — l'acte 0 « La Crique » (tutoriel, cartes, bateaux, coup de main, achats, camionnette)
 	await _f3_act0(hud, s)
-	# 3. la bascule (lot F3) : l'argent atteint le seuil — le caboteur de Corsaire & Fils (l'escale initiale) naît au large,
-	# hors champ, la narratrice parle ; un toucher, la cérémonie « Palier 1 — Le Vieux Quai », puis la séquence de chantiers
-	s.money = maxf(s.money, float(s.fishing.cfg.get("switch_money", 300.0)) + 10.0)
+	# 3. la bascule (lot G1) : la Concession signée — d'abord les nuages se dissolvent (3,5 s, caméra encore bornée), puis les
+	# bornes s'élargissent et le caboteur de Corsaire & Fils (l'escale initiale) naît au large, hors champ, la narratrice parle ;
+	# un toucher, la cérémonie « Palier 1 — Le Vieux Quai », puis la séquence de chantiers
+	s.money += float(s.fishing.concession_def().cost)
+	s.buy_fish_building("concession")
 	var spawn_seen := -1
 	var fid := -1
+	for k in 6:
+		await get_tree().process_frame
+		_f3_track(hud)
+	var dissolving := dio.clouds != null and is_instance_valid(dio.clouds) and dio.clouds.dissolving and not hud.story_active() and dio.first_view == null
+	var guard0 := Time.get_ticks_msec()
+	while ((dio.clouds != null and is_instance_valid(dio.clouds)) or not hud.story_active()) and Time.get_ticks_msec() - guard0 < 8000:
+		await get_tree().process_frame
+		_f3_track(hud)
+	var no_clouds := dio.clouds == null or not is_instance_valid(dio.clouds)
+	var widened := not dio.rig.crique and dio.rig.bounds != Layout.CRIQUE_BOUNDS
+	check(dissolving and no_clouds and widened and s.fishing.act0, "G1 Concession : les nuages se dissolvent d'abord (%s), puis disparaissent (%s) et les bornes de la caméra s'élargissent (%s), port encore fermé" % [dissolving, no_clouds, widened])
 	for k in 6:
 		await get_tree().process_frame
 		_f3_track(hud)
@@ -2615,8 +2629,8 @@ func _f2_checks(hud: Hud) -> void:
 	for v in dio.fishing_view.boats:
 		if (v.node as Node3D).visible:
 			vis_boats += 1
-	check(fish_after == 0 and s.fishing.passive_rate() > 0.0 and dio.fishing_view.helpable().is_empty() and vis_boats >= 3 and Hud.worthwhile_count(s) >= 0 and not Hud.fishing_cards(s),
-		"F3 après l'acte 0 : pêche passive (%s/s), plus de carte de la pêche (%d) ni de coup de main, %d bateaux vivent dans l'anse" % [Fmt.num(s.fishing.passive_rate()), fish_after, vis_boats])
+	check(fish_after >= 2 and s.fishing.rate_estimate() > 0.0 and dio.fishing_view.collectable().is_empty() and vis_boats >= 3 and Hud.worthwhile_count(s) >= 0 and not Hud.fishing_cards(s) 		and dio.clouds == null and not dio.rig.crique,
+		"G1 après la Concession : la pêche continue (%s/s, Marcel encaisse), les cartes de la Crique restantes en bas d'AMÉLIORER (%d), %d bateaux vivent dans l'anse, plus de nuages" % [Fmt.num(s.fishing.rate_estimate()), fish_after, vis_boats])
 	# 5. chantier d'un achat : palissade et engin, bâtiment caché puis monté, état d'avant effacé ; deux chantiers en même temps
 	s.money = 1.0e7
 	var par0 := dio.sites.max_parallel
@@ -2718,26 +2732,24 @@ func _f2_checks(hud: Hud) -> void:
 	# port fermé) ; une partie d'avant F3 (sans « act0 ») se charge acte 0 fait, pêche passive, sans départ ni chantier
 	var a0 := PortSim.new(s.db, 11)
 	a0.begin_act0()
-	a0.buy_fish()
+	a0.buy_fish_places(1)
 	for k in 120:
 		a0.step(0.25)
 	a0.money += 25.0
-	a0.buy_fish()
+	a0.buy_fish_places(1)
 	var d0: Dictionary = JSON.parse_string(JSON.stringify(a0.to_dict()))
 	var intro0 := hud.intro_shown
 	gs.call("load_from", d0)
 	await _wait(4)
 	var ls: PortSim = gs.get("sim")
-	var resumed := hud.start_flow and not hud.intro_active() and hud.intro_shown == intro0 and ls.fishing.act0 and ls.fishing.level == 2 \
-		and not dio.t1_works_active() and dio.sites.sites.is_empty() and dio._any_pending() and dio.fishing_view.boats.size() == 4
+	var resumed := hud.start_flow and not hud.intro_active() and hud.intro_shown == intro0 and ls.fishing.act0 and ls.fishing.places == 2 		and not dio.t1_works_active() and dio.sites.sites.is_empty() and dio._any_pending() and dio.fishing_view.boats.size() == 3 		and dio.clouds_on() and dio.rig.crique
 	var t1d := PortSim.new(s.db, 12).to_dict()
 	t1d.erase("act0")
 	gs.call("load_from", t1d)
 	await _wait(4)
 	var l2: PortSim = gs.get("sim")
-	check(resumed and not hud.start_flow and not l2.fishing.act0 and l2.fishing.level == 5 and dio.sites.sites.is_empty() and not dio.start_flow_active() \
-		and dio.fishing_view.boats.size() == 7,
-		"F3 sauvegarde v6 : partie de l'acte 0 rechargée dans l'anse (%s : sans intro ni chantier rejoué, port fermé) ; partie d'avant F3 chargée acte 0 fait, pêche passive (%d bateaux), sans départ" % [
+	check(resumed and not hud.start_flow and not l2.fishing.act0 and l2.fishing.maxed() and dio.sites.sites.is_empty() and not dio.start_flow_active() 		and dio.fishing_view.boats.size() == 12 and dio.clouds == null and not dio.rig.crique,
+		"G1 sauvegarde v7 : partie de la Crique rechargée dans l'anse (%s : sans intro ni chantier rejoué, port fermé, nuages posés) ; partie d'avant F3 chargée Crique finie (%d bateaux, 20 voiliers), sans nuages ni départ" % [
 		resumed, dio.fishing_view.boats.size()])
 	gs.set("auto_start", false)
 	Engine.time_scale = 1.0
@@ -2801,13 +2813,17 @@ func _f3_observe(fv: FishingView, obs: Dictionary, rects: Array, delta: float) -
 		obs.van_seen = true
 
 
-## L'acte 0 joué par l'interface : tutoriel « répare le ponton » sur AMÉLIORER, la carte de la pêche, le chantier ; les bateaux
-## qui arrivent du large et suivent leur boucle (jamais à terre, jamais sur un ponton, aucun sprint, aucune rotation sur
-## place) ; toucher une barque qui rentre (coup de main, « +X $ », tutoriel suivant) ; les cinq achats ; la camionnette.
+## La Crique jouée par l'interface (lot G1) : tutoriel « répare le ponton » sur AMÉLIORER, les cartes de la Crique (Places,
+## Services, le prochain bâtiment), le chantier ; les bateaux qui arrivent du large et suivent leur boucle (jamais à terre, jamais
+## sur un ouvrage, aucun sprint, aucune rotation sur place) ; la bulle « Loyer » sur un bateau rentré, toucher = encaisser
+## (pièces, « +X $ », tutoriel suivant) ; un bateau qu'on ne touche pas passe au rouge puis repart sans payer ; Marcel se
+## présente (RESPONSABLES), embauché : plus aucune bulle, Heures sup ; l'annonce (caboteur au large, narratrice, MISSIONS) ;
+## la camionnette ; les nuages et les bornes de la caméra.
 func _f3_act0(hud: Hud, s: PortSim) -> void:
 	var dio := hud.diorama
 	var fv := dio.fishing_view
 	var tu := hud.tutorial
+	var f := s.fishing
 	fv.speed_seen = {}          # (vitesses mesurées par la vue : celles des contrôles précédents, simulation pas à pas, ne comptent pas)
 	tu.idx = 0
 	tu.active = true
@@ -2815,6 +2831,33 @@ func _f3_act0(hud: Hud, s: PortSim) -> void:
 	tu._refresh_card(true)
 	await _wait(3)
 	_f3_track(hud)
+	# les nuages sont posés, la caméra bornée à l'anse ; au zoom le plus large, depuis chaque coin des bornes, les coins de l'écran
+	# tombent dans le monde habillé et au moins deux sur quatre sous les nuages
+	var rg := dio.rig
+	var clouds_on := dio.clouds_on() and dio.clouds.bank_count >= 100 and dio.clouds.sheet_tris >= 1000 and rg.crique and rg.bounds == Layout.CRIQUE_BOUNDS and rg.zoom_max <= Layout.CRIQUE_ZOOM_MAX
+	var vsz := hud.get_viewport_rect().size
+	var cam0 := [rg.target, rg.goal, rg.zoom, rg.zoom_goal]
+	var edge_bad := 0
+	var under := 0
+	for c in [rg.bounds.position, Vector2(rg.bounds.end.x, rg.bounds.position.y), rg.bounds.end, Vector2(rg.bounds.position.x, rg.bounds.end.y)]:
+		rg.target = Vector3(c.x, 0, c.y)
+		rg.zoom = rg.zoom_max
+		rg._apply()
+		var n_under := 0
+		for sp in [Vector2.ZERO, Vector2(vsz.x, 0), Vector2(0, vsz.y), vsz]:
+			var g := rg.screen_to_ground(sp)
+			if not Layout.CLOUD_COVER.has_point(Vector2(g.x, g.z)):
+				edge_bad += 1
+			if not Layout.in_cloud_hole(Vector2(g.x, g.z)):
+				n_under += 1
+		under = mini(under, n_under) if under > 0 else n_under
+	rg.target = cam0[0]
+	rg.goal = cam0[1]
+	rg.zoom = float(cam0[2])
+	rg.zoom_goal = float(cam0[3])
+	check(clouds_on and edge_bad == 0 and under >= 2 and s.fishing.act0,
+		"G1 nuages : %d bancs posés et une nappe continue dessous, caméra bornée à l'anse (zoom ≤ %d) ; au zoom le plus large, coins de l'écran dans le monde habillé (%d hors), au moins deux sous les nuages (%d)" % [
+		dio.clouds.bank_count if dio.clouds != null else 0, int(rg.zoom_max), edge_bad, under])
 	var t_pont := tu.idx == _tuto_index("a0_pontoon") and tu._card.visible and String(tu.steps[tu.idx].get("target", "")) == "ctl:upgrade"
 	hud.open_upgrades("")
 	await _wait(4)
@@ -2822,61 +2865,142 @@ func _f3_act0(hud: Hud, s: PortSim) -> void:
 	var up: UpgradesSheet = hud.sheet_layer.get_child(0)
 	var fish_cards := up.cards.filter(func(c: Dictionary) -> bool: return c.has("fish")).size()
 	var dept_cards := up.cards.filter(func(c: Dictionary) -> bool: return c.has("dept")).size()
-	var c0 := up._card_for("fish", 0)
+	var c0 := up._card_for("fish", "places")
 	var free_txt := (c0.buy as Button).text if not c0.is_empty() else ""
-	var badge := hud.upgrade_badge.visible or true      # (la pastille est sous la feuille ; contrôlée par worthwhile_count)
 	var worth := Hud.worthwhile_count(s)
-	up._buy_fish()
+	up._buy_fish("places")
 	await _wait(3)
-	var site_on := dio.sites.active("fish_pontoon")
+	var site_on := dio.sites.active("fish_places_1")
+	up.rebuild()
+	await _wait(2)
+	var cards2 := up.cards.filter(func(c: Dictionary) -> bool: return c.has("fish")).map(func(c: Dictionary) -> String: return String(c.fish))
 	up.close()
 	await _wait(3)
 	tu._refresh_card(false)
-	check(t_pont and fish_cards == 2 and dept_cards == 0 and free_txt.begins_with("RÉPARER") and worth == 1 and badge and s.fishing.level == 1 and site_on \
-		and s.money == 0.0 and tu.idx == _tuto_index("a0_boat"),
-		"F3 acte 0 : tutoriel « répare le ponton » sur AMÉLIORER (%s), cartes de la pêche (%d, %d de service, « %s »), ponton réparé (chantier %s), étape suivante « barque » (%d)" % [
-		t_pont, fish_cards, dept_cards, free_txt.replace("\n", " "), site_on, tu.idx])
-	# bateaux : ils arrivent du large et suivent leur boucle (temps ×6)
-	var rects: Array = []
-	for id in Layout.ANSE_PONTOONS:
-		for pd in Layout.anse_pontoons(id):
-			rects.append(Layout.pontoon_rect(pd))
+	check(t_pont and fish_cards == 1 and dept_cards == 0 and free_txt.begins_with("RÉPARER") and worth == 1 and f.places == 1 and site_on \
+		and s.money == 0.0 and tu.idx == _tuto_index("a0_rent") and cards2 == ["trawler", "places", "services"],
+		"G1 Crique : tutoriel « répare le ponton » sur AMÉLIORER (%s), une carte (%d, %d de service, « %s »), ponton réparé (chantier %s), puis les cartes %s ; étape suivante « loyer » (%d)" % [
+		t_pont, fish_cards, dept_cards, free_txt.replace("\n", " "), site_on, str(cards2), tu.idx])
+	# bateaux : ils arrivent du large et suivent leur boucle (temps ×6) ; le premier rentré attend son loyer (bulle « Loyer »)
+	var rects: Array = Layout.anse_obstacles()
 	var obs := {"land": 0, "pontoon": 0, "pivot": 0, "frames": 0, "last": {}, "max_vis": 0, "van_off": 0, "van_seen": false}
 	Engine.time_scale = 6.0
 	var target := -1
 	var guard := Time.get_ticks_msec()
 	var vr := Rect2(Vector2.ZERO, hud.get_viewport_rect().size)
+	var bubble := false
 	while target < 0 and Time.get_ticks_msec() - guard < 20000:
 		await get_tree().process_frame
 		_f3_track(hud)
 		_f3_observe(fv, obs, rects, get_process_delta_time())
-		for i in fv.helpable():
+		for i in fv.collectable():
 			if vr.grow(-40.0).has_point(dio.to_screen(fv.boat_pos(i))):
 				target = i
+				bubble = hud.overlay.frame_rects.has("fish_rent_%d" % i)
 				break
-	# toucher la barque qui rentre : elle débarque tout de suite, « +X $ » ; le tutoriel passe à l'étape suivante
-	var helps0 := s.fishing.helps
+	# toucher le bateau rentré : son loyer est encaissé, pièces vers le compteur, « +X $ » ; le tutoriel passe à l'étape suivante
+	var rents0 := f.rents_manual
 	var pops0 := hud.fish_popups
+	var money0 := s.money
 	var tp := tu._target(tu.steps[tu.idx]) if tu.idx < tu.steps.size() else {}
 	if target >= 0:
 		dio._on_tapped(fv.boat_pos(target), Vector2.ZERO)
+	await _wait(3)
+	_f3_track(hud)
+	tu._refresh_card(false)
+	check(target >= 0 and bubble and not tp.is_empty() and f.rents_manual == rents0 + 1 and dio.fish_rents_shown >= 1 and hud.fish_popups > pops0 \
+		and s.money > money0 and tu.idx > _tuto_index("a0_rent"),
+		"G1 loyer à la main : bulle « Loyer » sur le bateau rentré (%s), repère du tutoriel (%s), toucher = encaissé (%d, +%s), « +X $ » (%d), tutoriel suivant (%d)" % [
+		bubble, not tp.is_empty(), f.rents_manual - rents0, Fmt.money(s.money - money0), hud.fish_popups - pops0, tu.idx])
+	# un bateau qu'on ne touche pas : sa bulle passe au rouge, puis il repart sans payer
+	var lost0 := f.rents_lost
+	var red := false
 	guard = Time.get_ticks_msec()
-	while hud.fish_popups <= pops0 and Time.get_ticks_msec() - guard < 10000:
+	while f.rents_lost == lost0 and Time.get_ticks_msec() - guard < 20000:
 		await get_tree().process_frame
 		_f3_track(hud)
 		_f3_observe(fv, obs, rects, get_process_delta_time())
-	tu._refresh_card(false)
-	check(target >= 0 and not tp.is_empty() and s.fishing.helps == helps0 + 1 and dio.fish_helps_shown >= 1 and hud.fish_popups > pops0 and tu.idx > _tuto_index("a0_boat"),
-		"F3 coup de main : repère du tutoriel sur la barque (%s), toucher la barque qui rentre l'aide à débarquer (%d), « +X $ » (%d), tutoriel suivant (%d)" % [
-		not tp.is_empty(), s.fishing.helps - helps0, hud.fish_popups - pops0, tu.idx])
-	# les quatre autres achats (la criée amène la route et la camionnette du mareyeur) ; la bascule n'est pas encore possible
+		for i in fv.collectable():
+			if f.wait_left(i) < float(f.cfg.rent_warn):
+				red = true
+	check(f.rents_lost > lost0 and red, "G1 bateau non touché : bulle rouge avant le départ (%s), reparti sans payer (%d)" % [red, f.rents_lost - lost0])
+	# Places 2 et la criée (chantiers : la place nouvelle, la criée et sa route) ; Marcel se présente après les loyers à la main ;
+	# RESPONSABLES apparaît, sa feuille montre Marcel seul, embauché : plus aucune bulle, Heures sup révélées
 	var st0 := dio.sites.started
-	s.money = 0.0
-	for k in 4:
-		s.money += s.fishing.next_cost()
-		s.buy_fish()
+	s.money += f.places_cost() + f.services_cost()
+	s.buy_fish_places(1)
+	s.buy_fish_services(1)
 	await _wait(2)
 	var sites_n := dio.sites.started - st0
+	f.rents_manual = int(f.cfg.marcel.after_rents) - 1
+	guard = Time.get_ticks_msec()
+	while not f.marcel_offered and Time.get_ticks_msec() - guard < 20000:
+		await get_tree().process_frame
+		_f3_track(hud)
+		_f3_observe(fv, obs, rects, get_process_delta_time())
+		for i in fv.collectable():
+			dio._on_tapped(fv.boat_pos(i), Vector2.ZERO)
+	await _wait(3)
+	hud._refresh(s)
+	tu._refresh_card(false)
+	var btn_on := hud.manage_btn.visible and (hud.manage_btn.get_meta("label") as Label).text == "RESPONSABLES" and hud.mgr_pill.visible
+	var t_marcel := tu.idx == _tuto_index("a0_marcel")
+	hud._on_manage_btn()
+	await _wait(4)
+	var ms: ManageSheet = hud.sheet_layer.get_child(0)
+	var marcel_rows := ms.rows.filter(func(r: Dictionary) -> bool: return r.has("marcel")).size()
+	var dept_rows := ms.rows.filter(func(r: Dictionary) -> bool: return r.has("dept")).size()
+	var tabs_n := ms.tabs.size() if "tabs" in ms else 1
+	s.money += f.marcel_cost()
+	ms._hire("marcel", false)
+	await _wait(3)
+	ms.close()
+	await _wait(3)
+	hud._refresh(s)
+	var boost_off := not s.feature("boost") and not hud.boost_btn.visible      # (lot G1-d : rien de visible avant le port)
+	check(sites_n == 2 and f.marcel_offered and btn_on and t_marcel and marcel_rows == 1 and dept_rows == 0 and tabs_n <= 1 and f.marcel \
+		and fv.collectable().is_empty() and boost_off and dio.fishing_view.marcel_node != null,
+		"G1 Marcel : chantiers de la place et de la criée (%d), il se présente (%s), RESPONSABLES et sa pastille (%s), tutoriel (%s), sa fiche seule (%d, %d de service, %d onglet), embauché : plus de bulle, Heures sup cachées (%s)" % [
+		sites_n, f.marcel_offered, btn_on, t_marcel, marcel_rows, dept_rows, tabs_n, boost_off])
+	# l'annonce du port (8ᵉ minute, criée faite) : le caboteur traverse au large, la narratrice, MISSIONS et la mission en bandeau
+	f.clock = maxf(f.clock, float(f.cfg.announce_at))
+	f.last_reveal = -1.0e9
+	guard = Time.get_ticks_msec()
+	while not f.announced and Time.get_ticks_msec() - guard < 5000:
+		await get_tree().process_frame
+	await _wait(4)
+	var story := hud.story_active()
+	var pass_on := fv.passing_active()
+	var pass_vis := false
+	var pass_hole := 0
+	var pass_n := 0
+	for k in 240:
+		await get_tree().process_frame
+		if fv.passing_active():
+			var pp := fv.passing.position
+			pass_n += 1
+			if Layout.in_cloud_hole(Vector2(pp.x, pp.z)):
+				pass_hole += 1
+			if vr.has_point(dio.to_screen(pp)):
+				pass_vis = true
+		if pass_vis and pass_n > 30:
+			break
+	if hud.story_active():
+		(hud.story_layer as Button).pressed.emit()
+	await _wait(2)
+	hud._refresh(s)
+	var strip := s.feature("missions") and hud.chest_btn.is_visible_in_tree()
+	var first_m: Dictionary = Objectives.visible_missions(s)[0]
+	check(f.announced and story and pass_on and pass_vis and pass_hole >= 1 and strip and String(first_m.id) == "c0" and not hud.story_active(),
+		"G1 annonce : caboteur au large (%s, à l'écran %s, dans le trou des nuages %d/%d), narratrice (%s), MISSIONS (%s), mission « %s » en tête" % [
+		pass_on, pass_vis, pass_hole, pass_n, story, strip, String(first_m.text)])
+	# les bâtiments jusqu'à la marina (la camionnette part avec la criée) ; la Concession n'est pas encore signée
+	st0 = dio.sites.started
+	for bid in ["trawler", "pier", "marina"]:
+		s.money += float(f.building_def(bid).cost)
+		s.buy_fish_building(bid)
+	await _wait(2)
+	var sites_b := dio.sites.started - st0
 	guard = Time.get_ticks_msec()
 	var t_obs := dio._t
 	while (dio._t - t_obs < 40.0 or fv.van_trips < 1) and Time.get_ticks_msec() - guard < 25000 and not s.act0_ready():
@@ -2887,7 +3011,15 @@ func _f3_act0(hud: Hud, s: PortSim) -> void:
 	var spd := 0.0
 	for k in fv.speed_seen:
 		spd = maxf(spd, float(fv.speed_seen[k]))
-	check(s.fishing.level == 5 and sites_n == 4 and int(obs.land) == 0 and int(obs.pontoon) == 0 and int(obs.pivot) == 0 and spd <= 6.5 \
-		and int(obs.max_vis) >= 5 and fv.van_trips >= 1 and bool(obs.van_seen) and int(obs.van_off) == 0,
-		"F3 l'anse vivante : 5 achats (%d chantiers), jusqu'à %d bateaux à l'écran, à terre %d, sur un ponton %d, rotation sur place %d, vitesse au plus %s u/s ; camionnette partie %d fois, hors de sa route %d" % [
-		sites_n, int(obs.max_vis), int(obs.land), int(obs.pontoon), int(obs.pivot), Fmt.num(spd), fv.van_trips, int(obs.van_off)])
+	hud.open_upgrades("")
+	await _wait(4)
+	var up2: UpgradesSheet = hud.sheet_layer.get_child(0)
+	var conc_card := not up2._card_for("fish", "concession").is_empty()
+	var conc_txt := (up2._card_for("fish", "concession").buy as Button).text if conc_card else ""
+	up2.close()
+	await _wait(2)
+	check(sites_b == 3 and f.sails() == 6 and fv.sailboats.size() == 6 and f.concession_available() and conc_card and not s.act0_ready() \
+		and int(obs.land) == 0 and int(obs.pontoon) == 0 and int(obs.pivot) == 0 and spd <= 6.5 \
+		and int(obs.max_vis) >= 4 and fv.van_trips >= 1 and bool(obs.van_seen) and int(obs.van_off) == 0,
+		"G1 l'anse vivante : chalutiers, jetée, marina (%d chantiers, %d voiliers), la Concession en tête d'AMÉLIORER (« %s ») ; jusqu'à %d bateaux à l'écran, à terre %d, sur un ouvrage %d, rotation sur place %d, vitesse au plus %s u/s ; camionnette partie %d fois, hors de sa route %d" % [
+		sites_b, fv.sailboats.size(), conc_txt.replace("\n", " "), int(obs.max_vis), int(obs.land), int(obs.pontoon), int(obs.pivot), Fmt.num(spd), fv.van_trips, int(obs.van_off)])

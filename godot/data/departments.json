@@ -1,7 +1,7 @@
 [
   {
-    "id": "harbor", "name": "Capitainerie", "icon": "harbor",
-    "desc": "Pilotes, rade et accostage : les navires arrivent plus vite à quai.",
+    "id": "harbor", "name": "Arrivées", "icon": "harbor",
+    "desc": "Pilotes et rade : les navires qui attendent au large arrivent plus vite à quai.",
     "stat": "pilot_speed", "stat_label": "Pilotage", "unit": "s", "base": 1.0,
     "cost": 100, "growth": 1.15,
     "manager": {"name": "Capitaine Mathilde Roche", "title": "Capitaine de port", "cost": 1200, "amber": 8, "tier": 1,
@@ -20,12 +20,12 @@
     ]
   },
   {
-    "id": "berths", "name": "Quais", "icon": "berth",
-    "desc": "Lamaneurs et tablier : amarrage plus rapide, plus de place au pied des grues.",
+    "id": "berths", "name": "Accostage", "icon": "berth",
+    "desc": "Lamaneurs et tablier : les navires accostent et s'amarrent plus vite, plus de place au pied des grues.",
     "stat": "moor_speed", "stat_label": "Amarrage", "unit": "s", "base": 1.0,
     "cost": 120, "growth": 1.15,
-    "manager": {"name": "Léon « Gros-Bras » Barbier", "title": "Chef de quai", "cost": 2500, "amber": 10, "tier": 1,
-                "perk": "Amarrage ×2, tablier agrandi"},
+    "manager": {"name": "Léon « Gros-Bras » Barbier", "title": "Chef de quai", "cost": 50, "legacy_cost": 2500, "amber": 10, "tier": 1, "gesture": "berth",
+                "perk": "Accoste les navires à ta place, même quand tu es parti ; amarrage ×2, tablier agrandi"},
     "agent": "docker",
     "stages": [
       {"lv": 1, "name": "Quai rafistolé", "text": "Des bollards rouillés et deux lamaneurs."},
@@ -41,11 +41,11 @@
   },
   {
     "id": "customs", "name": "Douane", "icon": "customs",
-    "desc": "Finance la capacité d'inspection de l'État. Formalités plus courtes, lots inspectés plus vite.",
+    "desc": "Le tampon de la douane : formalités plus courtes, conteneurs dédouanés plus vite.",
     "stat": "inspect_rate", "stat_label": "Inspection", "unit": "EVP/min", "base": 3.0,
     "cost": 120, "growth": 1.15,
-    "manager": {"name": "Inspecteur Paul Delmas", "title": "Chef du bureau des douanes", "cost": 400000, "amber": 15, "tier": 2,
-                "perk": "Inspection et formalités ×2"},
+    "manager": {"name": "Inspecteur Paul Delmas", "title": "Douanier en chef", "cost": 60, "legacy_cost": 400000, "legacy_tier": 2, "amber": 15, "tier": 1, "gesture": "stamp",
+                "perk": "Tamponne les conteneurs à ta place, même quand tu es parti ; douane ×2"},
     "agent": "douanier",
     "stages": [
       {"lv": 1, "name": "Un douanier et un tampon", "text": "Les papiers passent de main en main."},
@@ -60,8 +60,8 @@
     ]
   },
   {
-    "id": "cranes", "name": "Portiques", "icon": "crane",
-    "desc": "Grutiers et grues : vitesse de déchargement par grue.",
+    "id": "cranes", "name": "Déchargement", "icon": "crane",
+    "desc": "Grutiers et grues : les navires se vident plus vite.",
     "stat": "crane_rate", "stat_label": "Déchargement / grue", "unit": "EVP/min", "base": 3.0,
     "cost": 80, "growth": 1.15,
     "manager": {"name": "Yasmine Okafor", "title": "Cheffe des grutiers", "cost": 450, "amber": 6, "tier": 1,
@@ -80,8 +80,8 @@
     ]
   },
   {
-    "id": "yard_ops", "name": "Parc et manutention", "icon": "yard",
-    "desc": "Engins qui emportent les conteneurs du quai vers le parc.",
+    "id": "yard_ops", "name": "Stockage", "icon": "yard",
+    "desc": "Engins qui rangent les conteneurs du quai au parc, et empilent plus haut.",
     "stat": "transfer_rate", "stat_label": "Transfert", "unit": "EVP/min", "base": 4.5,
     "cost": 100, "growth": 1.15,
     "manager": {"name": "Nadia Benali", "title": "Cheffe de cour", "cost": 250000, "amber": 15, "tier": 2,
@@ -100,12 +100,12 @@
     ]
   },
   {
-    "id": "gate", "name": "Gate", "icon": "gate",
-    "desc": "Agents de porte et dispatcheurs : camions servis plus vite.",
+    "id": "gate", "name": "Sortie camions", "icon": "gate",
+    "desc": "Agents de la barrière et dispatcheurs : les camions chargent et repartent plus vite.",
     "stat": "gate_rate", "stat_label": "Sortie", "unit": "EVP/min", "base": 5.5,
     "cost": 100, "growth": 1.15,
-    "manager": {"name": "Tonio Ferrer", "title": "Chef de gate", "cost": 900000, "amber": 15, "tier": 2,
-                "perk": "Gate ×2"},
+    "manager": {"name": "Tonio Ferrer", "title": "Chef de la sortie", "cost": 80, "legacy_cost": 900000, "legacy_tier": 2, "amber": 15, "tier": 1, "gesture": "pass",
+                "perk": "Laisse passer et encaisse les camions à ta place, même quand tu es parti ; sortie ×2"},
     "agent": "agent de porte",
     "stages": [
       {"lv": 1, "name": "Une barrière et un cahier", "text": "Un agent note chaque camion à la main."},

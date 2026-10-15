@@ -17,6 +17,8 @@ var _shown: PackedInt32Array = PackedInt32Array([-1, -1, -1, -1])
 var _empty_share := -1.0
 var _pending_n := 0
 var _apron_shown := -1
+var platform_mode := false            # lot G2 : la plateforme du terre-plein (avant le parc de stockage)
+const PENDING_ORANGE := Color(1.0, 0.45, 0.12)
 
 
 func _ready() -> void:
@@ -32,9 +34,12 @@ func _ready() -> void:
 
 func rebuild(sim: PortSim) -> void:
 	zone_slots = [[], [], [], []]
+	platform_mode = sim.g2 and not sim.built.has("yard")
 	for b in Layout.BLOCKS:
 		if String(b.b) != "" and not sim.built.has(b.b):
 			continue
+		if String(b.b) == "" and not sim.built.has("platform"):
+			continue          # lot G2 : la friche (pas encore de plateforme)
 		var layer: Array = []
 		for k in int(b.tiers):
 			for i in int(b.bays):
@@ -48,7 +53,10 @@ func rebuild(sim: PortSim) -> void:
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.use_custom_data = true
-		mm.mesh = Assets.mesh("flatrack" if z == 3 else ("reefer40" if z == 1 else "container40"))
+		var mname := "flatrack" if z == 3 else ("reefer40" if z == 1 else "container40")
+		if z == 0 and platform_mode and Assets.exists("container_ok"):
+			mname = "container_ok"      # lot G2 : sur la plateforme, des conteneurs de 20' à étiquette (verte : dédouané)
+		mm.mesh = Assets.mesh(mname)
 		mm.instance_count = arr.size()
 		mm.visible_instance_count = 0
 		for i in arr.size():
@@ -79,6 +87,8 @@ func rebuild(sim: PortSim) -> void:
 
 
 func _slot_color(sim: PortSim, zone: int, i: int, empty_share: float) -> Color:
+	if zone == 0 and platform_mode:
+		return Color(1, 1, 1)
 	if zone == 1:
 		return Color(1, 1, 1)
 	if zone == 3:
@@ -128,6 +138,10 @@ func sync(sim: PortSim, delta: float) -> void:
 			if i < 0:
 				break
 			var base := _slot_color(sim, 0, i, _empty_share)
+			if platform_mode:
+				# lot G2 : en attente du tampon — orange (container_wait), dédouané — blanc à étiquette verte (container_ok)
+				mm0.set_instance_custom_data(i, PENDING_ORANGE if k < np else base)
+				continue
 			mm0.set_instance_custom_data(i, base.lerp(Color(1.4, 1.4, 1.4), 0.6) if (k < np and on) else base)
 		_pending_n = np
 	# tablier

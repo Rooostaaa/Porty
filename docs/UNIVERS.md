@@ -15,20 +15,28 @@ Ports d'origine fictifs : Nordhaven, Sakura Bay, Port Aurore, Cap Zéphyr, Rio V
 - **Odette** : la grand-tante, pêcheuse, disparue. Sa lettre passe par le notaire : « Fais-en quelque chose de bien. Et nourris
   les goélands. » Sa cabane (`odette_hut`) reste au bord de l'anse, à côté de son ponton.
 - **L'anse des pêcheurs** : à l'ouest du cap, entre le cap et la rive ouest du golfe (plage ouest). Les voisins y ont leurs
-  barques. C'est le lieu de l'**acte 0** (palier 0 « La Crique », lot F3) : on répare le ponton d'Odette et on loue ses places
-  aux barques du village (loyer + vente des caisses sur le ponton), un deuxième ponton, la **criée** (vente aux enchères :
-  chaque débarque rapporte deux fois plus ; le mareyeur vient en camionnette par la route du village), le **quai des
-  chalutiers** le long du cap, la **fabrique de glace** (un thonier vient du large). Geste du joueur : toucher une barque qui
-  rentre pour l'aider à débarquer. Ensuite la pêche tourne toute seule : un petit revenu de fond, et l'anse vit à tous les
-  paliers (barques, chalutiers, thonier, camionnette).
-- **Corsaire & Fils** déclenche le passage aux conteneurs : un de leurs caboteurs passe au large, cherche un quai ; « de l'autre
-  côté du cap, il y a la vieille estacade ».
+  barques. C'est le lieu du **chapitre 1 « La Crique »** (lot G1, 15 à 20 min) : on répare le ponton d'Odette, les barques du
+  village louent ses places et **paient leur loyer à chaque retour** ; au début on l'encaisse à la main (toucher le bateau ; s'il
+  attend trop, il repart sans payer), puis **Marcel**, patron pêcheur en ciré jaune, s'en charge (premier responsable du jeu, et
+  l'objectif de la première session : avant lui, le monde se fige quand on part). On agrandit : des **places au ponton** (une
+  barque par place, le ponton s'allonge), des **services à quai** (criée au niveau 1 — le mareyeur vient en camionnette —, pompe
+  à carburant, aire de lavage, fabrique de glace : l'escale coûte plus cher), le **quai des chalutiers** (deux chalutiers, ×3),
+  la **grande jetée** (le thonier du large, ×10), la **marina** et ses deux extensions (6, 12, 20 voiliers qui paient leur
+  anneau sans qu'on y touche). Tout au maximum, la pêche plafonne (≈ 4,2 $/s) et continue pour toujours ; on peut revenir la voir.
+- **Les nuages** : pendant la Crique, tout le reste du golfe est sous des bancs de nuages épais et opaques (la friche, le bassin, le
+  village, le large au-delà du passage des caboteurs). Ils se dissolvent à la signature de la Concession.
+- **Corsaire & Fils** annonce le port : à la 8ᵉ minute, un de leurs caboteurs passe au large, cherche un quai, « et il
+  repassera » ; la première mission du jeu, « Signer la Concession du terre-plein », désigne l'achat (500 $, dès la marina : de loin l'achat
+  le plus cher de la Crique).
+- **La Concession du terre-plein** : l'acte de l'État qui livre la friche d'Odette, de l'autre côté du cap. Sa signature lève les
+  nuages, la caméra passe le cap, et les chantiers du vieux quai commencent (chapitre 2, lot G2).
 - **La narratrice** : Capitaine Mathilde Roche. Elle tenait la capitainerie « du temps où il y avait un quai ». Elle lit la
   lettre, présente les voisins, puis lance les chantiers.
-- **Le départ** (lots F2, F3) : trois cartes d'intro (`tiers.json`, palier 0 : la lettre, l'anse, « répare le ponton »),
-  l'acte 0 dans l'anse (3 à 5 min), puis la bascule : le caboteur de Corsaire & Fils au large, la cérémonie « Palier 1 — Le
-  Vieux Quai », et la friche se bâtit sous nos yeux en une douzaine de secondes (le vieux quai et sa capitainerie, la grue
-  mobile, le parc et son hangar, la route et la gate, chantiers qui se chevauchent). Le caboteur entre au port.
+- **Le départ** (lots F2, F3, G1) : trois cartes d'intro (`tiers.json`, palier 0 : la lettre, l'anse, « répare le ponton »),
+  la Crique dans l'anse (15 à 20 min, 12 à 17 pour un joueur pressé), l'annonce du port à la 8ᵉ minute, puis la bascule à la
+  Concession : les nuages se dissolvent, le caboteur de Corsaire & Fils revient du large, la cérémonie « Palier 1 — Le Vieux
+  Quai », et la friche se bâtit sous nos yeux en une douzaine de secondes (le vieux quai et sa capitainerie, la grue mobile, le
+  parc et son hangar, la route et la gate, chantiers qui se chevauchent). Le caboteur entre au port.
 
 ## La vie d'un navire (fil rouge)
 1. **Rade** (Capitainerie) — le navire annonce son escale et attend. Patience limitée. 😊 → 😐 → 😠 → départ furieux.
@@ -70,6 +78,7 @@ Le joueur ne corrompt, ne juge, ne saisit jamais. Il finance la capacité d'insp
 ## Responsables (automatisent un département)
 | Responsable | Département | Palier |
 |---|---|---|
+| Marcel, patron pêcheur | La Crique (loyers de la pêche) | T0 |
 | Capitaine Mathilde Roche | Capitainerie | T1 |
 | Léon « Gros-Bras » Barbier | Quais | T1 |
 | Yasmine Okafor | Portiques | T1 |
@@ -82,7 +91,7 @@ Le joueur ne corrompt, ne juge, ne saisit jamais. Il finance la capacité d'insp
 ## Paliers
 | Palier | Nom | Récit |
 |---|---|---|
-| T0 | La Crique | l'anse des pêcheurs, à l'ouest du cap : ponton d'Odette, barques des voisins, criée, chalutiers, thonier ; la pêche tourne ensuite toute seule (acte 0, lot F3) |
+| T0 | La Crique | l'anse des pêcheurs sous un ciel bouché partout ailleurs : loyers à la main puis Marcel, places, services, chalutiers, jetée, marina ; la Concession du terre-plein lève les nuages (chapitre 1, lot G1) |
 | T1 | Le Vieux Quai | rebâtir la friche derrière le cap : vieux quai, grue mobile, parc en gravier, gate ; douane en cabane |
 | T2 | Port régional | quai 2, premier portique STS, parc bitumé, gate, frigo |
 | T3 | Terminal national | quais 3–4, scanner, zone IMO, rail, contrats nationaux |
@@ -96,7 +105,7 @@ Plan coté : `docs/PLAN_COTE.md`. Dix quartiers (l'anse des pêcheurs depuis le 
 
 | Quartier | Où | Sol | Repère | Ambiance |
 |---|---|---|---|---|
-| **Anse des pêcheurs** | à l'ouest du cap (lot F3) | plage, pontons de bois | criée rayée bleu et blanc, cabane d'Odette | barques, chalutiers, caisses de poisson, camionnette du mareyeur |
+| **Anse des pêcheurs** | à l'ouest du cap (lots F3, G1) | plage, ponton de bois, jetée de béton, pontons flottants | criée rayée bleu et blanc, cabane d'Odette, Marcel en ciré jaune | barques, chalutiers, thonier, voiliers, caisses de poisson, camionnette du mareyeur |
 | **Vieux port** | crique derrière le cap | planches, gravier beige | phare rouge et blanc, grue mobile | mouettes, cordages (les bateaux de pêche sont dans l'anse) |
 | **La Porte** | entre le parc et la route | béton clair, bandes jaunes et noires | barrières, portique scanner | bips, moteurs au ralenti |
 | **Colline du port** | butte derrière le vieux port | herbe vive | tour de contrôle (T2) | calme, drapeaux |

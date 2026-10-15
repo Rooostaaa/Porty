@@ -1,24 +1,35 @@
 class_name Fishing
 extends RefCounted
-## Lot F3 — la pêche de l'anse des pêcheurs. Acte 0 « La Crique » : cinq achats (ponton, deuxième ponton, criée, quai des
-## chalutiers, fabrique de glace) ; les bateaux du village louent les places, sortent en mer, rentrent et débarquent ; revenu
-## = loyer des places + vente des caisses (×2 à la criée). Après l'acte 0 : un revenu fixe et passif, les bateaux continuent
-## de vivre à l'écran. Module léger possédé et sauvegardé par PortSim (clé « act0 », sauvegarde v6) ; données dans
-## `config.json` › `fishing`. Les durées des phases sont fixes (aucun achat ne les change) : la vue suit chaque bateau à
-## vitesse constante (croisière lente, pas de sprint).
+## Lot G1 — la pêche de l'anse des pêcheurs, chapitre 1 « La Crique » (cadrage `docs/CADRAGE_DEBUT.md` § 5), puis revenu de fond.
+## Deux cartes à niveaux (`places` 0–8 : une barque par place ; `services` 0–10 : le ticket d'escale, avec des paliers nommés qui
+## bâtissent la criée, la pompe, le lavage, la glace), des bâtiments (`built` : quai des chalutiers, grande jetée, marina et ses
+## deux extensions, la Concession du terre-plein) et un responsable, Marcel. **Argent = loyer par escale** : un bateau rentré paie
+## `valeur(classe) × ticket` ; sans Marcel, le joueur l'encaisse à la main (bulle), sinon le bateau attend `rent_wait` s et
+## repart sans payer ; avec Marcel, tout est encaissé. La marina paie un loyer continu par voilier. Plafond R₀ : tout au maximum.
+## Module léger possédé et sauvegardé par PortSim (clé « act0 », sauvegarde v7) ; données dans `config.json` › `fishing`.
+## Les durées des phases sont fixes (croisière lente, pas de sprint) : la vue suit chaque bateau à vitesse constante.
 
-enum Phase { OUT, FISH, BACK, LAND }
+enum Phase { OUT, FISH, BACK, LAND, WAIT }
 
 var cfg: Dictionary = {}
-var act0 := false            # acte 0 en cours : le port à conteneurs est fermé (PortSim.time ne tourne pas)
+var act0 := false            # la Crique en cours : le port à conteneurs est fermé (PortSim.time ne tourne pas)
 var replay := false          # nouvelle concession : port fermé le temps de la séquence du T1, bascule sans condition
-var level := 0               # achats faits (0 à 5)
-var boats: Array[Dictionary] = []    # {cls, slot, phase, t (s restantes), dur (s de la phase), helped}
-var clock := 0.0             # horloge de la pêche (s) : acte 0 et après
-var act0_time := 0.0         # durée de l'acte 0 jouée (s)
+var places := 0              # niveau Places au ponton (0 = ponton pas réparé)
+var services := 0            # niveau Services à quai
+var built: Array[String] = []        # bâtiments faits (ids de cfg.buildings, Concession comprise)
+var marcel := false          # Marcel embauché : il encaisse tout
+var marcel_offered := false  # Marcel s'est présenté (après `marcel.after_rents` loyers encaissés à la main)
+var rents_manual := 0        # loyers encaissés à la main
+var rents_lost := 0          # bateaux repartis sans payer
+var announced := false       # annonce du port (8ᵉ minute) faite
+var last_reveal := -1.0e9    # horloge de la dernière nouveauté (Marcel, annonce) : jamais deux à moins de `reveal_gap` s
+var boats: Array[Dictionary] = []    # {cls, slot, phase, t (s restantes), dur (s de la phase), paid, amount}
+var clock := 0.0             # horloge de la pêche (s) : Crique et après
+var act0_time := 0.0         # durée de la Crique jouée (s)
 var landings := 0
-var helps := 0               # coups de main donnés (toucher une barque qui rentre)
-var earned := 0.0            # recettes de la pêche (acte 0 et passif)
+var earned := 0.0            # recettes de la pêche (Crique et après)
+var events: Array[String] = []       # événements à relever par PortSim (« marcel_offer », « announce », « rent_lost »)
+var restarted := false       # chargement d'une sauvegarde v6 en cours d'acte 0 : la Crique recommence (PortSim remet l'argent à 0)
 var rng := RandomNumberGenerator.new()
 
 
@@ -28,184 +39,148 @@ func _init(db: DataDB = null, seed_value: int = 1) -> void:
 	rng.seed = seed_value * 7919 + 104729      # tirage à part : le port garde sa suite de nombres (sonde)
 
 
-func buys() -> Array:
-	return cfg.get("buys", [])
+# --- cartes --------------------------------------------------------------------------------------------------------
+
+func places_max() -> int:
+	return int(cfg.get("places", {}).get("max", 8))
 
 
-func buy_count() -> int:
-	return buys().size()
+func services_max() -> int:
+	return int(cfg.get("services", {}).get("max", 10))
 
 
-## Achat suivant de l'acte 0 ({} quand les cinq sont faits).
-func next_buy() -> Dictionary:
-	var b := buys()
-	return b[level] if level < b.size() else {}
+## Coût du niveau suivant de Places (0 $ pour la réparation du ponton = niveau 1 ; INF au maximum).
+func places_cost(n: int = 1) -> float:
+	if places >= places_max():
+		return INF
+	if places == 0:
+		return 0.0
+	var p: Dictionary = cfg.get("places", {})
+	return Progression.bulk_cost(float(p.get("cost", 15.0)), float(p.get("growth", 1.3)), places - 1, mini(n, places_max() - places))
 
 
-func next_cost() -> float:
-	var nb := next_buy()
-	return float(nb.get("cost", INF)) if not nb.is_empty() else INF
+## Niveaux de Places achetables d'un coup avec `money` (au moins 1 si le prochain est abordable).
+func places_affordable(money: float) -> int:
+	if places >= places_max():
+		return 0
+	if places == 0:
+		return 1
+	var p: Dictionary = cfg.get("places", {})
+	return mini(places_max() - places, Progression.max_affordable(float(p.get("cost", 15.0)), float(p.get("growth", 1.3)), places - 1, money))
 
 
-func done_all() -> bool:
-	return level >= buy_count() and buy_count() > 0
+## Palier nommé d'un niveau de Services ({} sinon) : la criée au 1, la pompe au 3, le lavage au 6, la glace au 9.
+func named_level(lv: int) -> Dictionary:
+	return cfg.get("services", {}).get("named", {}).get(str(lv), {})
 
 
-func has_hall() -> bool:
-	var b := buys()
-	for i in mini(level, b.size()):
-		if bool(b[i].get("hall", false)):
-			return true
-	return false
+func _service_level_cost(lv: int) -> float:
+	var sv: Dictionary = cfg.get("services", {})
+	var c := float(sv.get("cost", 10.0)) * pow(float(sv.get("growth", 1.35)), float(lv - 1))
+	if not named_level(lv).is_empty():
+		c *= float(sv.get("named_mult", 3.0))
+	return c
+
+
+## Coût des `n` niveaux suivants de Services (INF au maximum).
+func services_cost(n: int = 1) -> float:
+	if services >= services_max():
+		return INF
+	var c := 0.0
+	for k in mini(n, services_max() - services):
+		c += _service_level_cost(services + 1 + k)
+	return c
+
+
+func services_affordable(money: float) -> int:
+	var n := 0
+	var c := 0.0
+	while services + n < services_max():
+		c += _service_level_cost(services + n + 1)
+		if c > money + 1e-6:
+			break
+		n += 1
+	return n
+
+
+## Ticket d'escale : ce qu'un bateau paie en plus de sa valeur (+15 % par niveau de Services).
+func ticket() -> float:
+	return 1.0 + float(cfg.get("ticket_step", 0.15)) * float(services)
+
+
+func buildings() -> Array:
+	return cfg.get("buildings", [])
+
+
+func building_def(id: String) -> Dictionary:
+	for b in buildings():
+		if String(b.id) == id:
+			return b
+	return {}
+
+
+func has(id: String) -> bool:
+	return built.has(id)
+
+
+## Prochain bâtiment de la liste (hors Concession), {} quand tout est bâti.
+func next_building() -> Dictionary:
+	for b in buildings():
+		if bool(b.get("concession", false)) or built.has(String(b.id)):
+			continue
+		return b
+	return {}
+
+
+func concession_def() -> Dictionary:
+	for b in buildings():
+		if bool(b.get("concession", false)):
+			return b
+	return {}
+
+
+## La Concession est achetable dès la marina (pas besoin du plafond).
+func concession_available() -> bool:
+	var c := concession_def()
+	if c.is_empty() or built.has(String(c.id)):
+		return false
+	var after := String(c.get("after", ""))
+	return after == "" or built.has(after)
+
+
+func concession_done() -> bool:
+	var c := concession_def()
+	return not c.is_empty() and built.has(String(c.id))
+
+
+## Un bâtiment est achetable : le prochain de la liste, ou la Concession dès la marina.
+func can_build(id: String) -> bool:
+	if built.has(id):
+		return false
+	var b := building_def(id)
+	if b.is_empty():
+		return false
+	if bool(b.get("concession", false)):
+		return concession_available()
+	return String(next_building().get("id", "")) == id
+
+
+## Tout au maximum (hors Concession) : le plafond R₀, plus aucune carte de pêche.
+func maxed() -> bool:
+	return places >= places_max() and services >= services_max() and next_building().is_empty()
+
+
+## Voiliers de la marina (revenu passif).
+func sails() -> int:
+	var n := 0
+	for b in buildings():
+		if built.has(String(b.id)):
+			n = maxi(n, int(b.get("sail", 0)))
+	return n
 
 
 func boat_def(cls: String) -> Dictionary:
 	return cfg.get("boats", {}).get(cls, {})
-
-
-## Applique l'achat i : ses bateaux arrivent l'un après l'autre (ils rentrent de la pêche vers leur place).
-func apply_buy(i: int, staggered: bool = true) -> void:
-	var b: Dictionary = buys()[i]
-	var add: Dictionary = b.get("boats", {})
-	var k := 0
-	for cls in add:
-		for n in int(add[cls]):
-			var slot := 0
-			for bt in boats:
-				if String(bt.cls) == String(cls):
-					slot += 1
-			var first := 2.0 + 5.0 * float(k) if staggered else rng.randf_range(0.0, 20.0)
-			boats.append({"cls": String(cls), "slot": slot, "phase": Phase.FISH, "t": first, "dur": maxf(first, 0.1), "helped": false})
-			k += 1
-
-
-## Partie d'avant le lot F3 (ou nouvelle concession) : l'acte 0 est fait, les cinq achats aussi, la pêche est passive.
-func migrate_done() -> void:
-	act0 = false
-	boats.clear()
-	level = buy_count()
-	for i in level:
-		apply_buy(i, false)
-
-
-## Phase suivante du bateau ; renvoie true à la fin d'une débarque.
-func _advance(bt: Dictionary) -> bool:
-	var d := boat_def(String(bt.cls))
-	var ph := int(bt.phase)
-	var landed := false
-	match ph:
-		Phase.OUT:
-			ph = Phase.FISH
-		Phase.FISH:
-			ph = Phase.BACK
-		Phase.BACK:
-			ph = Phase.LAND
-		Phase.LAND:
-			ph = Phase.OUT
-			landed = true
-	bt.phase = ph
-	var dur := float(d.get(["out", "fish", "back", "land"][ph], 5.0))
-	if ph == Phase.LAND and bool(bt.helped):
-		dur = minf(dur, float(cfg.get("help_land", 1.2)))
-	bt.dur = maxf(dur, 0.1)
-	bt.t = float(bt.t) + float(bt.dur)
-	return landed
-
-
-## Montant d'une débarque (acte 0) : valeur du bateau × criée × coup de main × petit aléa de la pêche.
-func landing_value(bt: Dictionary) -> float:
-	var v := float(boat_def(String(bt.cls)).get("value", 0.0))
-	if has_hall():
-		v *= float(cfg.get("hall_mult", 1.0))
-	if bool(bt.helped):
-		v *= float(cfg.get("help_mult", 1.0))
-	var j := float(cfg.get("jitter", 0.0))
-	return v * (1.0 + rng.randf_range(-j, j))
-
-
-## Un pas : chaque bateau avance dans son cycle. Pendant l'acte 0, le loyer des places tombe en continu et chaque débarque
-## est vendue ; ensuite, un revenu fixe (`passive`). `earn` reçoit (montant) ; `landed` reçoit (indice du bateau, montant).
-func step(dt: float, earn: Callable, landed: Callable = Callable()) -> void:
-	if level <= 0:
-		return
-	clock += dt
-	if act0:
-		act0_time += dt
-		var rent := float(cfg.get("rent", 0.0)) * float(boats.size()) * dt
-		if rent > 0.0:
-			earned += rent
-			earn.call(rent)
-	else:
-		var p := passive_rate() * dt
-		if p > 0.0:
-			earned += p
-			earn.call(p)
-	for i in boats.size():
-		var bt: Dictionary = boats[i]
-		bt.t = float(bt.t) - dt
-		var guard := 0
-		while float(bt.t) <= 0.0 and guard < 8:
-			guard += 1
-			var was_helped := bool(bt.helped)
-			if _advance(bt):
-				var amount := landing_value(bt) if act0 else 0.0
-				bt.helped = false
-				landings += 1
-				if amount > 0.0:
-					earned += amount
-					earn.call(amount)
-				if landed.is_valid():
-					landed.call(i, amount, was_helped)
-
-
-## Toucher un bateau qui rentre (ou qui débarque) : il débarque tout de suite et sa vente rapporte plus (acte 0 seulement).
-func can_help(i: int) -> bool:
-	if not act0 or i < 0 or i >= boats.size():
-		return false
-	var bt: Dictionary = boats[i]
-	return not bool(bt.helped) and (int(bt.phase) == Phase.BACK or int(bt.phase) == Phase.LAND)
-
-
-func help(i: int) -> bool:
-	if not can_help(i):
-		return false
-	var bt: Dictionary = boats[i]
-	bt.helped = true
-	helps += 1
-	if int(bt.phase) == Phase.LAND:
-		var hl := float(cfg.get("help_land", 1.2))
-		var done := float(bt.dur) - float(bt.t)
-		bt.t = maxf(0.0, minf(float(bt.t), hl - done))
-		bt.dur = minf(float(bt.dur), hl)
-	return true
-
-
-## Progression (0–1) du bateau i dans sa phase.
-func progress(i: int) -> float:
-	var bt: Dictionary = boats[i]
-	return clampf(1.0 - float(bt.t) / maxf(0.01, float(bt.dur)), 0.0, 1.0)
-
-
-## Revenu fixe de la pêche après l'acte 0 ($/s), proportionnel aux achats faits.
-func passive_rate() -> float:
-	if level <= 0 or buy_count() == 0:
-		return 0.0
-	return float(cfg.get("passive", 0.0)) * float(level) / float(buy_count())
-
-
-## Revenu estimé de l'acte 0 ($/s, sans coup de main) : débarques moyennes sur un cycle + loyer.
-func rate_estimate() -> float:
-	if level <= 0:
-		return 0.0
-	if not act0:
-		return passive_rate()
-	var r := float(cfg.get("rent", 0.0)) * float(boats.size())
-	var hall := float(cfg.get("hall_mult", 1.0)) if has_hall() else 1.0
-	for bt in boats:
-		var d := boat_def(String(bt.cls))
-		var cyc := float(d.get("out", 1)) + float(d.get("fish", 1)) + float(d.get("back", 1)) + float(d.get("land", 1))
-		r += float(d.get("value", 0.0)) * hall / maxf(1.0, cyc)
-	return r
 
 
 func boat_count(cls: String) -> int:
@@ -216,37 +191,290 @@ func boat_count(cls: String) -> int:
 	return n
 
 
+## Ajoute des bateaux (ils rentrent de la pêche vers leur place, l'un après l'autre).
+func _add_boats(add: Dictionary, staggered: bool = true) -> void:
+	var k := 0
+	for cls in add:
+		for n in int(add[cls]):
+			var slot := boat_count(String(cls))
+			var first := 2.0 + 5.0 * float(k) if staggered else rng.randf_range(0.0, 20.0)
+			boats.append({"cls": String(cls), "slot": slot, "phase": Phase.FISH, "t": first, "dur": maxf(first, 0.1), "paid": false, "amount": 0.0})
+			k += 1
+
+
+## Achats (la monnaie est vérifiée par PortSim). Renvoie le nombre de niveaux pris.
+func buy_places(n: int, staggered: bool = true) -> int:
+	n = mini(n, places_max() - places)
+	if n <= 0:
+		return 0
+	var before := places
+	places += n
+	var add := int(cfg.get("places", {}).get("start_boats", 2)) if before == 0 else 0
+	add += n - (1 if before == 0 else 0)
+	_add_boats({"dinghy": add}, staggered)
+	return n
+
+
+func buy_services(n: int) -> int:
+	n = mini(n, services_max() - services)
+	if n <= 0:
+		return 0
+	services += n
+	return n
+
+
+func build(id: String, staggered: bool = true) -> bool:
+	if not can_build(id):
+		return false
+	built.append(id)
+	_add_boats(building_def(id).get("boats", {}), staggered)
+	return true
+
+
+func hire_marcel() -> bool:
+	if marcel or not marcel_offered:
+		return false
+	marcel = true
+	last_reveal = clock
+	# il encaisse tout de suite les loyers en attente
+	for bt in boats:
+		if (int(bt.phase) == Phase.LAND or int(bt.phase) == Phase.WAIT) and not bool(bt.paid):
+			bt.paid = true
+			bt.amount = 0.0
+	return true
+
+
+func marcel_cost() -> float:
+	return float(cfg.get("marcel", {}).get("cost", 40.0))
+
+
+## Partie d'avant le lot G1 au T1 ou au-delà (ou nouvelle concession) : la Crique est finie, tout au maximum, Marcel embauché,
+## Concession signée, la pêche au plafond R₀.
+func migrate_done() -> void:
+	act0 = false
+	replay = false
+	boats.clear()
+	places = 0
+	services = 0
+	built.clear()
+	buy_places(places_max(), false)
+	buy_services(services_max())
+	for b in buildings():
+		built.append(String(b.id))
+		_add_boats(b.get("boats", {}), false)
+	marcel_offered = true
+	marcel = true
+	announced = true
+
+
+# --- cycle des bateaux ----------------------------------------------------------------------------------------------
+
+## Montant du loyer d'un bateau (valeur × ticket × petit aléa, tiré à part du port).
+func rent_of(bt: Dictionary) -> float:
+	var v := float(boat_def(String(bt.cls)).get("value", 0.0)) * ticket()
+	var j := float(cfg.get("jitter", 0.0))
+	return v * (1.0 + rng.randf_range(-j, j))
+
+
+## Phase suivante du bateau ; renvoie true quand il repart (fin de LAND payé, ou de WAIT).
+func _advance(bt: Dictionary) -> bool:
+	var d := boat_def(String(bt.cls))
+	var ph := int(bt.phase)
+	var leaves := false
+	match ph:
+		Phase.OUT:
+			ph = Phase.FISH
+		Phase.FISH:
+			ph = Phase.BACK
+		Phase.BACK:
+			ph = Phase.LAND
+			bt.paid = false
+			bt.amount = rent_of(bt)
+		Phase.LAND:
+			if marcel or bool(bt.paid):
+				ph = Phase.OUT
+				leaves = true
+			else:
+				ph = Phase.WAIT
+		Phase.WAIT:
+			ph = Phase.OUT
+			leaves = true
+	bt.phase = ph
+	var dur := float(cfg.get("rent_wait", 20.0)) if ph == Phase.WAIT else float(d.get(["out", "fish", "back", "land"][ph], 5.0))
+	bt.dur = maxf(dur, 0.1)
+	bt.t = float(bt.t) + float(bt.dur)
+	return leaves
+
+
+## Un pas : chaque bateau avance dans son cycle ; la marina paie en continu. `mult` : Heures sup. `earn` reçoit (montant) ;
+## `landed` reçoit (indice du bateau, montant, encaissé à la main ?). Les loyers encaissés par Marcel tombent à la fin de la
+## débarque ; ceux encaissés à la main tombent au toucher (`collect`).
+func step(dt: float, earn: Callable, landed: Callable = Callable(), mult: float = 1.0) -> void:
+	if places <= 0:
+		return
+	clock += dt
+	if act0:
+		act0_time += dt
+	var sail := float(cfg.get("sail_rent", 0.0)) * float(sails()) * dt * mult
+	if sail > 0.0:
+		earned += sail
+		earn.call(sail)
+	for i in boats.size():
+		var bt: Dictionary = boats[i]
+		bt.t = float(bt.t) - dt
+		var guard := 0
+		while float(bt.t) <= 0.0 and guard < 8:
+			guard += 1
+			var ph0 := int(bt.phase)
+			var paid0 := bool(bt.paid)
+			if _advance(bt):
+				landings += 1
+				var amount := 0.0
+				if ph0 == Phase.LAND and marcel and not paid0:
+					amount = float(bt.amount) * mult
+					bt.paid = true
+					earned += amount
+					earn.call(amount)
+				elif ph0 == Phase.WAIT and not paid0:
+					rents_lost += 1
+					events.append("rent_lost")
+				bt.amount = 0.0
+				if landed.is_valid():
+					landed.call(i, amount, false)
+	# l'annonce du port : à la 8ᵉ minute, la criée faite, à distance de la dernière nouveauté
+	if act0 and not announced and services >= 1 and clock >= float(cfg.get("announce_at", 480.0)) \
+			and clock - last_reveal >= float(cfg.get("reveal_gap", 45.0)):
+		announced = true
+		last_reveal = clock
+		events.append("announce")
+
+
+## Un bateau rentré dont le loyer attend (bulle « Loyer »), tant que Marcel n'est pas là.
+func can_collect(i: int) -> bool:
+	if marcel or i < 0 or i >= boats.size():
+		return false
+	var bt: Dictionary = boats[i]
+	return not bool(bt.paid) and (int(bt.phase) == Phase.LAND or int(bt.phase) == Phase.WAIT)
+
+
+## Toucher un bateau rentré : son loyer est encaissé (montant renvoyé, 0 si rien) ; s'il attendait, il repart tout de suite.
+func collect(i: int, mult: float = 1.0) -> float:
+	if not can_collect(i):
+		return 0.0
+	var bt: Dictionary = boats[i]
+	var amount := float(bt.amount) * mult
+	bt.paid = true
+	bt.amount = 0.0
+	rents_manual += 1
+	earned += amount
+	if int(bt.phase) == Phase.WAIT:
+		bt.t = 0.0      # il repart au pas suivant
+	if not marcel_offered and rents_manual >= int(cfg.get("marcel", {}).get("after_rents", 5)):
+		marcel_offered = true
+		last_reveal = clock
+		events.append("marcel_offer")
+	return amount
+
+
+## Secondes avant qu'un bateau qui attend son loyer reparte sans payer (INF s'il n'attend pas).
+func wait_left(i: int) -> float:
+	if i < 0 or i >= boats.size():
+		return INF
+	var bt: Dictionary = boats[i]
+	return float(bt.t) if int(bt.phase) == Phase.WAIT else INF
+
+
+## Progression (0–1) du bateau i dans sa phase.
+func progress(i: int) -> float:
+	var bt: Dictionary = boats[i]
+	return clampf(1.0 - float(bt.t) / maxf(0.01, float(bt.dur)), 0.0, 1.0)
+
+
+# --- revenus --------------------------------------------------------------------------------------------------------
+
+## Revenu estimé de la pêche ($/s) : loyers moyens sur un cycle (loyers encaissés sans attente) + marina.
+func rate_estimate() -> float:
+	if places <= 0:
+		return 0.0
+	var r := float(cfg.get("sail_rent", 0.0)) * float(sails())
+	var tk := ticket()
+	for bt in boats:
+		var d := boat_def(String(bt.cls))
+		var cyc := float(d.get("out", 1)) + float(d.get("fish", 1)) + float(d.get("back", 1)) + float(d.get("land", 1))
+		r += float(d.get("value", 0.0)) * tk / maxf(1.0, cyc)
+	return r
+
+
+## Revenu hors-ligne ($/s) : Marcel encaisse à son rythme ; sans lui, rien (le monde se fige).
+func offline_rate() -> float:
+	return rate_estimate() if marcel else 0.0
+
+
+## Plafond R₀ : le revenu estimé une fois tout au maximum (pour les cartes et la sonde).
+func cap_rate() -> float:
+	var f := Fishing.new()
+	f.cfg = cfg
+	f.migrate_done()
+	return f.rate_estimate()
+
+
+# --- sauvegarde (v7) -------------------------------------------------------------------------------------------------
+
 func to_dict() -> Dictionary:
 	var bl: Array = []
 	for bt in boats:
-		bl.append({"cls": bt.cls, "slot": bt.slot, "phase": bt.phase, "t": bt.t, "dur": bt.dur, "helped": bt.helped})
-	return {"on": act0, "replay": replay, "level": level, "boats": bl, "clock": clock, "act0_time": act0_time, "landings": landings,
-		"helps": helps, "earned": earned, "rng_state": str(rng.state)}
+		bl.append({"cls": bt.cls, "slot": bt.slot, "phase": bt.phase, "t": bt.t, "dur": bt.dur, "paid": bt.paid, "amount": bt.amount})
+	return {"v": 7, "on": act0, "replay": replay, "places": places, "services": services, "built": built.duplicate(), "marcel": marcel,
+		"marcel_offered": marcel_offered, "rents_manual": rents_manual, "rents_lost": rents_lost, "announced": announced,
+		"last_reveal": last_reveal, "boats": bl, "clock": clock, "act0_time": act0_time, "landings": landings, "earned": earned,
+		"rng_state": str(rng.state)}
 
 
 func from_dict(d: Dictionary) -> void:
+	restarted = false
+	if not d.has("places"):
+		# sauvegarde v6 (lot F3) : en cours d'acte 0, la Crique recommence ; sinon, elle est finie (plafond R₀)
+		if bool(d.get("on", false)) and not bool(d.get("replay", false)):
+			act0 = true
+			replay = false
+			restarted = true
+		else:
+			migrate_done()
+			act0 = bool(d.get("on", false)) and bool(d.get("replay", false))
+			replay = act0
+			act0_time = float(d.get("act0_time", 0.0))
+			clock = float(d.get("clock", 0.0))
+			earned = float(d.get("earned", 0.0))
+			landings = int(d.get("landings", 0))
+		return
 	act0 = bool(d.get("on", false))
 	replay = bool(d.get("replay", false))
-	level =clampi(int(d.get("level", 0)), 0, buy_count())
+	places = clampi(int(d.get("places", 0)), 0, places_max())
+	services = clampi(int(d.get("services", 0)), 0, services_max())
+	built.clear()
+	for b in d.get("built", []):
+		if not building_def(String(b)).is_empty():
+			built.append(String(b))
+	marcel = bool(d.get("marcel", false))
+	marcel_offered = bool(d.get("marcel_offered", false)) or marcel
+	rents_manual = int(d.get("rents_manual", 0))
+	rents_lost = int(d.get("rents_lost", 0))
+	announced = bool(d.get("announced", false))
+	last_reveal = float(d.get("last_reveal", -1.0e9))
 	clock = float(d.get("clock", 0.0))
 	act0_time = float(d.get("act0_time", 0.0))
 	landings = int(d.get("landings", 0))
-	helps = int(d.get("helps", 0))
 	earned = float(d.get("earned", 0.0))
 	if d.has("rng_state"):
 		rng.state = int(String(d.rng_state))
 	boats.clear()
 	for b in d.get("boats", []):
 		if b is Dictionary and cfg.get("boats", {}).has(String(b.get("cls", ""))):
-			boats.append({"cls": String(b.cls), "slot": int(b.get("slot", 0)), "phase": clampi(int(b.get("phase", 0)), 0, 3),
-				"t": float(b.get("t", 1.0)), "dur": maxf(0.1, float(b.get("dur", 1.0))), "helped": bool(b.get("helped", false))})
+			boats.append({"cls": String(b.cls), "slot": int(b.get("slot", 0)), "phase": clampi(int(b.get("phase", 0)), 0, 4),
+				"t": float(b.get("t", 1.0)), "dur": maxf(0.1, float(b.get("dur", 1.0))), "paid": bool(b.get("paid", false)),
+				"amount": float(b.get("amount", 0.0))})
 	# sauvegarde incohérente (bateaux perdus) : on les recrée d'après les achats
-	if boats.is_empty() and level > 0:
-		var keep := act0
-		var lv := level
-		migrate_done()
-		level = lv
-		boats.clear()
-		for i in level:
-			apply_buy(i, false)
-		act0 = keep
+	if boats.is_empty() and places > 0:
+		_add_boats({"dinghy": int(cfg.get("places", {}).get("start_boats", 2)) + places - 1}, false)
+		for id in built:
+			_add_boats(building_def(id).get("boats", {}), false)

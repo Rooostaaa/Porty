@@ -10,11 +10,13 @@ const DEPT_COLOR := {
 const CARGO_ICON := {"std": "box", "reefer": "reefer", "imo": "imo", "oog": "oog", "empty": "box"}
 const CARGO_COLOR := {"std": Color("#E25B4B"), "reefer": Color("#3D8BEB"), "imo": Color("#F0653A"), "oog": Color("#E0A800"), "empty": Color("#A9AFB9")}
 ## Noms courts des services pour les boutons (« AMÉLIORER PARC · 12K $ »).
-const DEPT_SHORT := {"harbor": "CAPITAINERIE", "berths": "QUAIS", "customs": "DOUANE", "cranes": "PORTIQUES", "yard_ops": "PARC", "gate": "GATE"}
+const DEPT_SHORT := {"harbor": "ARRIVÉES", "berths": "ACCOSTAGE", "customs": "DOUANE", "cranes": "DÉCHARGEMENT", "yard_ops": "STOCKAGE", "gate": "SORTIE"}
 ## Noms courts des bâtiments pour les boutons (« QUAI N°2 · 150K $ ») : le même achat porte le même nom partout (lot D-UI).
 ## Lot E : chaque nom court est tiré du nom du bâtiment (`buildings.json`, celui de la pancarte, de Gestion et des zones) —
 ## ses mots, dans l'ordre, sans glyphe exposant (« ᵉ ») ni ancien nom (« RACK FRIGO », « QUAI ALLONGÉ ») ; contrôlé par run_all.
 const BUILDING_SHORT := {
+	"platform": "TERRASSEMENT", "quay1": "QUAI N°1", "hut": "CABANE DE DOUANE", "track": "PISTE ET BARRIÈRE",
+	"crane_mobile": "GRUE MOBILE", "yard": "PARC DE STOCKAGE",
 	"quay_ext": "ALLONGEMENT DU QUAI", "gravel2": "FRICHE", "customs1": "BUREAU DE DOUANE", "supply": "PONTON",
 	"crane2": "DEUXIÈME GRUE", "dredge1": "DRAGAGE DU CHENAL", "gravel3": "EXTENSION DU PARC", "berth2": "QUAI N°2",
 	"repair": "ATELIER DE RÉPARATION", "asphalt": "PARC BITUMÉ", "gate2": "DEUXIÈME VOIE", "parking1": "AIRE D'ATTENTE",
@@ -28,7 +30,7 @@ const BUILDING_SHORT := {
 ## de service) et « services » (part des droits de chaque escale : atelier de réparation, soutage GNL) sont deux recettes
 ## distinctes — « services » n'apparaissait pas du tout.
 const SOURCE_NAMES := {"handling": "Manutention", "dues": "Droits de port", "services": "Services aux escales (atelier, GNL)",
-	"gate": "Gate", "inspection": "Inspections", "reefer": "Prises frigo", "fees": "Services facturés (niveaux)",
+	"gate": "Sortie camions", "inspection": "Douane (tampons)", "reefer": "Prises frigo", "fees": "Services facturés (niveaux)",
 	"contract": "Contrats", "auction": "Enchères", "salaries": "Salaires", "fish": "Pêche de l'anse (loyers, criée)"}
 ## Statistique principale de chaque service (aléas : « Suspendu (brouillard) », jamais « meilleur achat » sous un aléa).
 const STAT_DEPT := {"pilot_speed": "harbor", "moor_speed": "berths", "inspect_rate": "customs", "crane_rate": "cranes",
@@ -89,6 +91,8 @@ static func building_icon(b: Dictionary) -> String:
 static func mission_icon(m: Dictionary) -> String:
 	if m.has("building"):
 		return "manage"
+	if m.has("fish"):
+		return "trophy"
 	if m.has("level"):
 		return String(DEPT_ICON.get(String(m.level), "upgrade"))
 	var c := String(m.get("counter", ""))

@@ -3,13 +3,17 @@ extends Node
 
 const PATH := "user://save.json"
 const BACKUP := "user://save.bak.json"
-const VERSION := 6            # 2 : révélation progressive, gabarits de quai (PortSim._upgrade_legacy_save)
+const VERSION := 8            # 2 : révélation progressive, gabarits de quai (PortSim._upgrade_legacy_save)
                               # 3 : commerce, armateurs démarchés (PortSim._upgrade_commerce_save)
                               # 4 : licences plafonnées par palier, excédent remboursé (PortSim._clamp_licences)
                               # 5 : instants des révélations (« features » : dictionnaire id -> instant ; la liste d'avant se
                               #     charge comme « révélé depuis toujours »), dernière révélation (PortSim.from_dict)
                               # 6 : lot F3 — la pêche de l'anse et l'acte 0 (clé « act0 » de la partie ; absente : acte 0
                               #     fait, cinq achats, pêche passive — PortSim.from_dict, Fishing.migrate_done)
+                              # 7 : lot G1 — la Crique (cartes à niveaux, bâtiments, Marcel, Concession) ; une partie v6 en cours
+                              #     d'acte 0 recommence la Crique, une partie v6 au T1+ se charge Crique finie (Fishing.from_dict)
+                              # 8 : lot G2 — le terre-plein à la main (clé « g2 » : friche, gestes, offres des responsables) ;
+                              #     absente : port complet (six pièces du départ bâties), sauf une partie v7 en pleine Crique
 const AUTOSAVE := 15.0
 const AWAY_MIN := 60.0       # absence (s) à partir de laquelle on crédite du hors-ligne
 

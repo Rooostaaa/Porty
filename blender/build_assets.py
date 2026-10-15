@@ -12,8 +12,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, 'parts'))
 import lib, palette
-import terrain, buildings, equipment, ships, cargo, world, harbour, baie, crique, chantier, foret
-for mod in (lib, palette, terrain, buildings, equipment, ships, cargo, world, harbour, baie, crique, chantier, foret):
+import terrain, buildings, equipment, ships, cargo, world, harbour, baie, crique, chantier, foret, marina, nuages, terreplein
+MODULES = (terrain, buildings, equipment, ships, cargo, world, harbour, baie, crique, chantier, foret, marina, nuages, terreplein)
+for mod in (lib, palette) + MODULES:
     importlib.reload(mod)
 
 BUILDING = 2500
@@ -41,6 +42,12 @@ EXACT = {
     'site_hoarding': PROP, 'scaffold': PROP, 'site_crane': BIG, 'excavator': PROP, 'dust_pile': PROP,
     'tree_pine': PROP, 'tree_pine_b': PROP, 'tree_oak': PROP, 'forest_block': BUILDING, 'forest_road': BUILDING,
     'far_shore': BUILDING,
+    # Lot G (docs/ORDRE_BLENDER_G.md § 2)
+    'fuel_pump': PROP, 'wash_bay': BUILDING, 'pier_long': BUILDING, 'marina_pontoon': PROP, 'sailboat_a': PROP,
+    'sailboat_b': PROP, 'yacht_small': PROP, 'marcel': PROP, 'ship_passing': 1200,
+    'cloud_bank': PROP, 'cloud_puff': 200,
+    'ground_platform': 200, 'quay_small': BUILDING, 'track_dirt': 200, 'track_dirt_turn': 200, 'barrier_post': PROP,
+    'coaster_crane': PROP, 'container_wait': 200, 'container_ok': 200,
 }
 
 
@@ -90,7 +97,7 @@ def main():
             only = set(args[i + 1].split(','))
     os.makedirs(out, exist_ok=True)
     all_assets = {}
-    for mod in (terrain, buildings, equipment, ships, cargo, world, harbour, baie, crique, chantier, foret):
+    for mod in MODULES:
         all_assets.update(mod.ASSETS)
     meta_path = os.path.join(out, 'assets_meta.json')
     meta = {}

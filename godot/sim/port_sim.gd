@@ -18,7 +18,10 @@ signal contracts_changed()
 signal mission_ready(id: String)
 signal feature_unlocked(id: String)          # une fonction de jeu se révèle (data/unlocks.json)
 signal ship_class_first(ship: Ship)          # premier navire d'une nouvelle classe : moment marquant
-signal fish_landed(boat_i: int, amount: float, helped: bool)   # lot F3 : un bateau de pêche a débarqué (vue : caisses, « +X $ »)
+signal fish_landed(boat_i: int, amount: float, manual: bool)   # lot F3/G1 : un bateau de pêche repart (vue : caisses) ; montant encaissé par Marcel
+signal fish_event(kind: String)
+signal manager_offered(dept: String)         # lot G2 : un responsable du port se présente (après 5 gestes)
+signal gesture_done(kind: String, amount: float)   # lot G2 : tampon (« stamp ») ou camion servi (« pass ») d'un toucher              # lot G1 : « marcel_offer », « announce », « rent_lost », « rent_paid »
 
 const NCARGO := 5
 const NZONE := 4
@@ -30,6 +33,19 @@ var mods := Modifiers.new()
 ## Lot F3 — la pêche de l'anse (acte 0, puis revenu passif). Pendant l'acte 0 (`fishing.act0`), le port à conteneurs est
 ## fermé : `step` n'avance que la pêche et `time` (l'horloge du port, depuis l'entrée au T1) ne tourne pas.
 var fishing: Fishing
+## Lot G2 — le Terre-plein. `g2` : la partie joue le processus à la main (partie neuve depuis la Crique, nouvelle concession) :
+## la friche est nue, les six pièces du départ (STARTERS) s'achètent une à une, rien n'avance sans le joueur tant que les
+## responsables des gestes (Léon, Paul, Tonio) ne sont pas embauchés. Faux : port complet (tests, parties d'avant G2), les
+## six pièces sont bâties d'office et les règles d'avant (`legacy` de unlocks.json, prix d'avant des responsables) s'appliquent.
+const STARTERS := ["platform", "quay1", "hut", "track", "crane_mobile", "yard"]
+const GESTURE_OF := {"berths": "berth", "customs": "stamp", "gate": "pass"}
+const OFFER_ORDER := ["berths", "customs", "gate"]
+var g2 := false
+var gestures: Dictionary = {"berth": 0, "stamp": 0, "pass": 0}
+var mgr_offered: Dictionary = {}       # responsable des gestes -> instant où il s'est présenté
+var has_hut := false
+var has_gate := false
+var truck_wait_t := 0.0                # s d'attente du camion en tête (régime manuel, sans Tonio)
 var _fish_earn_cb: Callable
 var _fish_land_cb: Callable
 
@@ -155,6 +171,12 @@ func reset() -> void:
 	for i in NCARGO:
 		licences[i] = 1
 	built.clear()
+	g2 = false
+	for b in STARTERS:          # lot G2 : port complet (les six pièces du départ sont là)
+		built.append(String(b))
+	gestures = {"berth": 0, "stamp": 0, "pass": 0}
+	mgr_offered.clear()
+	truck_wait_t = 0.0
 	policy = 1
 	tariff = 1.0
 	boost_until = -1.0
@@ -166,6 +188,7 @@ func reset() -> void:
 	missions_claimed.clear()
 	mission_flags.clear()
 	features.clear()
+	_legacy_features()
 	last_reveal_t = -1.0e9
 	last_reveal_id = ""
 	last_tier_t = -1.0e9          # lot E : `reset()` complet (palier, alerte de la carte Goulot, fenêtre du revenu réel)
@@ -212,9 +235,7 @@ func reset() -> void:
 	stat_rade_wait = 0.0
 	stat_truck_wait = 0.0
 	stat_berth_busy = 0.0
-	_assist_at.clear()
-	_yard_at = 0.0
-	_gate_at = 0.0
+	truck_wait_t = 0.0
 	_last_full_notice = -100.0
 	_second_timer = 0.0
 	_analysis_timer = 0.0
@@ -236,9 +257,11 @@ static func _zeros(n: int) -> PackedFloat64Array:
 # =====================================================================
 
 func rebuild_infra() -> void:
-	berths = [{"depth": 1, "cranes": [{"factor": 1.0, "kind": "mobile"}], "ship": -1}]
+	# lot G2 : le quai n°1, sa grue et la plateforme sont des bâtiments (quay1, crane_mobile, platform, yard)
+	berths = []
 	yard_cap = _zeros(NZONE)
-	yard_cap[0] = 300.0
+	has_hut = false
+	has_gate = false
 	gate_lanes = 1
 	parking_slots = 0
 	patience_mult = 1.0
@@ -291,6 +314,10 @@ func _apply_effect(e: Dictionary) -> void:
 			patience_mult *= float(e.mult)
 		"ship_fee":
 			ship_fee += float(e.amount)
+		"customs_hut":
+			has_hut = true
+		"gate_open":
+			has_gate = true
 		"time_min":
 			# raccourcit le temps minimal de pilotage / amarrage / formalités (le plancher qui plafonne le débit)
 			var k := String(e.kind)
@@ -311,8 +338,39 @@ func apron_capacity() -> float:
 	return per * berths.size()
 
 
+## Lot G2 : fonctions déjà révélées « depuis toujours » d'un port complet (avant G2, ces services n'étaient pas au registre).
+func _legacy_features() -> void:
+	for f in ["dept_berths", "dept_cranes", "dept_harbor"]:
+		features[f] = true
+
+
+## Lot G2 : la partie joue le processus à la main — la friche nue (aucun bâtiment, aucun navire), rien de révélé.
+func _enter_manual(keep_features: bool = false) -> void:
+	g2 = true
+	built.clear()
+	if not keep_features:
+		features.clear()
+	ships.clear()
+	next_ship_id = 1
+	pending_arrival = {}
+	arrival_accum = 0.0
+	gestures = {"berth": 0, "stamp": 0, "pass": 0}
+	mgr_offered.clear()
+	truck_wait_t = 0.0
+	for c in NCARGO:
+		apron[c] = 0.0
+		yard_pending[c] = 0.0
+		yard_cleared[c] = 0.0
+	truck_queue = 0.0
+	rebuild_infra()
+	invalidate()
+
+
 func rade_places() -> int:
-	return int(db.cfg("rade_places", 4)) + floori(float(levels.harbor) / 10.0) * int(db.cfg("rade_places_per_10_levels", 1))
+	# lot G2 : les Arrivées (la rade) n'apparaissent qu'avec le quai n°2 ; au T1, la rade a d'emblée ce que la Capitainerie lui
+	# donnait avant (`rade_places_g2`), sinon le port perd ses navires et le T2 recule de 2 à 3 min (sonde)
+	var base := int(db.cfg("rade_places_g2", 7)) if g2 else int(db.cfg("rade_places", 4))
+	return base + floori(float(levels.harbor) / 10.0) * int(db.cfg("rade_places_per_10_levels", 1))
 
 
 func pilots() -> int:
@@ -378,8 +436,32 @@ func apron_stock() -> float:
 	return s
 
 
+## (Lot G1 : les Heures sup se comptent sur `clock()`, l'horloge qui tourne aussi pendant la Crique — `time` y est gelé.)
 func boost_active() -> bool:
-	return time < boost_until
+	return clock() < boost_until
+
+
+## Multiplicateur des Heures sup (×2), 1 sinon : les loyers de la pêche le suivent aussi.
+func boost_mult() -> float:
+	return float(db.cfg("boost").mult) if boost_active() else 1.0
+
+
+## Lot G1 : événements de la pêche relevés après chaque pas (Marcel se présente, annonce du port, bateau reparti sans payer).
+func _flush_fish_events() -> void:
+	if fishing.events.is_empty():
+		return
+	var evs := fishing.events.duplicate()
+	fishing.events.clear()
+	for e in evs:
+		var k := String(e)
+		if k == "announce":
+			# l'annonce du port révèle les Missions (la mission « Signer la concession » est la première de la liste)
+			if not features.has("missions"):
+				features["missions"] = true
+				feature_unlocked.emit("missions")      # (la narratrice commente le caboteur : pas de notification en plus)
+		elif k == "marcel_offer":
+			notify.emit("%s se présente : embauche-le (Responsables), il encaissera pour toi." % String(fishing.cfg.get("marcel", {}).get("name", "Marcel")), "info")
+		fish_event.emit(k)
 
 
 # =====================================================================
@@ -632,14 +714,21 @@ func formal_duration() -> float:
 
 func berth_crane_factor(bi: int) -> float:
 	var f := 0.0
+	if bi < 0 or bi >= berths.size():
+		return f
 	for c in berths[bi].cranes:
 		f += float(c.factor)
 	return f
 
 
+## Lot G2 : un poste sans grue décharge avec la grue de bord du navire (lent, aucun niveau ne l'accélère).
+func board_crane(bi: int) -> bool:
+	return bi >= 0 and bi < berths.size() and (berths[bi].cranes as Array).is_empty()
+
+
 func inspect_fraction(c: int) -> float:
 	if not customs_open:
-		return 0.0
+		return 1.0 if g2 else 0.0      # lot G2 : avant le bureau de douane, chaque conteneur attend le tampon de la cabane
 	var f := float(db.cfg("policies")[policy].fraction)
 	if db.cargo[c].id == "imo" and bool(db.cfg("imo_always_inspected", true)):
 		return 1.0
@@ -655,10 +744,11 @@ func inspect_fraction(c: int) -> float:
 func step(dt: float) -> void:
 	if dt <= 0.0:
 		return
-	# lot F3 : pendant l'acte 0, seule la pêche tourne (le port est fermé, son horloge arrêtée)
+	# lot F3/G1 : pendant la Crique, seule la pêche tourne (le port est fermé, son horloge arrêtée)
 	if fishing.act0:
 		_live_t += dt
-		fishing.step(dt, _fish_earn_cb, _fish_land_cb)
+		fishing.step(dt, _fish_earn_cb, _fish_land_cb, boost_mult())
+		_flush_fish_events()
 		_buckets(dt)
 		return
 	time += dt
@@ -673,12 +763,14 @@ func step(dt: float) -> void:
 	_inspect(dt)
 	_gate(dt)
 	_fees_and_costs(dt)
-	fishing.step(dt, _fish_earn_cb, _fish_land_cb)      # lot F3 : revenu passif de la pêche (bateaux qui vivent à l'écran)
+	fishing.step(dt, _fish_earn_cb, _fish_land_cb, boost_mult())      # lot G1 : la pêche continue (loyers par Marcel, marina)
+	_flush_fish_events()
 	_buckets(dt)
 	_second_timer += dt
 	if _second_timer >= 1.0:
 		_second_timer -= 1.0
 		check_unlocks()
+		_check_offers()
 		Objectives.update(self)
 	_analysis_timer += dt
 	if _analysis_timer >= 0.5:
@@ -790,6 +882,8 @@ func waiting_ships() -> int:
 
 
 func _arrivals(dt: float) -> void:
+	if berths.is_empty():
+		return          # lot G2 : pas de navire tant que le quai n°1 n'est pas construit
 	if pending_arrival.is_empty():
 		pending_arrival = _roll_arrival()
 	var need := float(pending_arrival.evp)
@@ -960,9 +1054,10 @@ func _assign_berths() -> void:
 	if busy >= pilots():
 		return
 	var cands: Array[Ship] = []
-	var auto := bool(managers.harbor)
+	# lot G2 : régime manuel — sans Léon (ni Mathilde), aucun accostage automatique : le joueur touche le navire
+	var auto := bool(managers.harbor) or (g2 and bool(managers.berths))
 	for s in ships:
-		if s.state == Ship.State.ANCHORED and (auto or s.priority or s.wait_time >= float(db.cfg("auto_berth_delay"))):
+		if s.state == Ship.State.ANCHORED and (auto or s.priority or (not g2 and s.wait_time >= float(db.cfg("auto_berth_delay")))):
 			cands.append(s)
 	cands.sort_custom(_ship_order)
 	for s in cands:
@@ -981,6 +1076,9 @@ func _assign_berths() -> void:
 		s.mood_at_berth = s.mood()
 		stat_rade_wait = lerpf(stat_rade_wait, s.wait_time, 0.2)
 		busy += 1
+		# lot G2 : un accostage fait à la main compte pour Léon (un geste = un navire accosté, pas un toucher)
+		if g2 and s.priority and not auto:
+			gestures.berth = int(gestures.berth) + 1
 		# accostage « en priorité » demandé par le joueur : le pilote file plus vite
 		var pd := pilot_duration() * time_scale(s.cls)
 		if s.priority and not auto:
@@ -1016,6 +1114,8 @@ func ship_by_id(ship_id: int) -> Ship:
 # --- déchargement -----------------------------------------------------
 
 func berth_unload_rate(bi: int) -> float:
+	if board_crane(bi):
+		return float(db.cfg("manual").get("board_crane_rate", 0.125))
 	return stat("crane_rate") * berth_crane_factor(bi)
 
 
@@ -1026,7 +1126,7 @@ func _unload(dt: float) -> void:
 			continue
 		if apron_capacity() - apron_stock() <= 0.0:
 			return
-		_unload_ship(s, crane * berth_crane_factor(s.berth) * dt)
+		_unload_ship(s, (berth_unload_rate(s.berth) if board_crane(s.berth) else crane * berth_crane_factor(s.berth)) * dt)
 
 
 ## Décharge jusqu'à `want` EVP du navire vers le tablier (borné par le reste du navire et la place disponible).
@@ -1055,68 +1155,105 @@ func _unload_ship(s: Ship, want: float) -> float:
 	return amount
 
 
-# --- gestes manuels du début (les responsables les automatisent) -------------
+# --- gestes manuels (lot G2) : accoster, tamponner, laisser passer et encaisser -------------------------------
+# Les gestes d'avant G2 (coup de main à la grue ×1,2, engin du parc, barrière express) sont retirés (cadrage § 12 Q1) : un
+# responsable remplace le geste. Les fonctions restent (toujours « pas prêtes ») pour les appels anciens.
 
-var _assist_at: Dictionary = {}     # poste -> instant où le prochain coup de main est possible
-
-
-## Le coup de main est possible : un navire est en déchargement à ce poste, la recharge est finie,
-## et le chef des grutiers n'est pas encore embauché (il fait ce geste à ta place).
-func assist_ready(bi: int) -> bool:
-	if managers.cranes or bi < 0 or bi >= berths.size():
-		return false
-	var s := ship_by_id(int(berths[bi].ship))
-	return s != null and s.state == Ship.State.UNLOADING and time >= float(_assist_at.get(bi, 0.0))
+func assist_ready(_bi: int) -> bool:
+	return false
 
 
-## Coup de main sur la grue d'un poste : décharge d'un coup quelques secondes de travail. Renvoie les EVP déchargés.
-func assist_unload(bi: int) -> float:
-	if not assist_ready(bi):
-		return 0.0
-	var m: Dictionary = db.cfg("manual")
-	_assist_at[bi] = time + float(m.assist_cooldown)
-	var s := ship_by_id(int(berths[bi].ship))
-	var moved := _unload_ship(s, stat("crane_rate") * berth_crane_factor(bi) * float(m.assist_seconds))
-	if moved > 0.0:
-		add_counter("assists")
-	return moved
+func assist_unload(_bi: int) -> float:
+	return 0.0
 
 
-var _yard_at := 0.0         # instant où le prochain coup de pouce au parc est possible
-var _gate_at := 0.0         # instant où le prochain passage express à la gate est possible
-
-
-## Toucher l'engin du parc : il range tout de suite quelques secondes de transfert (tant que Nadia Benali n'est pas là).
 func yard_boost_ready() -> bool:
-	return feature("dept_yard_ops") and not managers.yard_ops and time >= _yard_at and apron_stock() > 0.5
+	return false
 
 
 func yard_boost() -> float:
-	if not yard_boost_ready():
-		return 0.0
-	var m: Dictionary = db.cfg("manual")
-	_yard_at = time + float(m.yard_cooldown)
-	var before := apron_stock()
-	_transfer(float(m.yard_seconds))
-	add_counter("yard_boosts")
-	return before - apron_stock()
+	return 0.0
 
 
-## Toucher la barrière : un camion passe tout de suite (quelques secondes de gate d'un coup, tant que Tonio Ferrer n'est pas là).
 func gate_rush_ready() -> bool:
-	return feature("dept_gate") and not managers.gate and time >= _gate_at and truck_queue >= float(db.cfg("truck_evp"))
+	return false
 
 
 func gate_rush() -> float:
-	if not gate_rush_ready():
+	return 0.0
+
+
+## Tamponner : la cabane est là, Paul n'est pas embauché, des conteneurs attendent. Toucher la cabane les dédouane tous.
+func stamp_ready() -> bool:
+	return g2 and has_hut and not managers.customs and pending_total() >= 0.5
+
+
+func stamp() -> float:
+	if not stamp_ready():
 		return 0.0
+	var tot := pending_total()
+	var fee := 0.0
+	for c in NCARGO:
+		var x := yard_pending[c]
+		yard_pending[c] = 0.0
+		yard_cleared[c] += x
+		fee += x * float(db.cfg("inspection_fee")) * float(db.tier_def(tier).get("value_mult", 1.0)) * renown_mult()
+	add_counter("inspected", tot)
+	add_counter("stamps")
+	gestures.stamp = int(gestures.stamp) + 1
+	_earn(fee, "inspection")
+	gesture_done.emit("stamp", tot)
+	return tot
+
+
+## Laisser passer et encaisser : un camion attend à la barrière (piste construite, Tonio pas embauché).
+func pass_ready() -> bool:
+	return g2 and has_gate and not managers.gate and truck_queue >= float(db.cfg("truck_evp")) - 0.001 \
+		and cleared_total() >= float(db.cfg("truck_evp")) - 0.001
+
+
+## Toucher la barrière : le camion charge, paie sa part (pièce vers le compteur) et part. Renvoie le montant payé.
+func pass_truck() -> float:
+	if not pass_ready():
+		return 0.0
+	var lot := float(db.cfg("truck_evp"))
+	truck_queue -= lot
+	truck_wait_t = 0.0
+	var fee := _serve(lot)
+	add_counter("passes")
+	gestures.pass = int(gestures.pass) + 1
+	truck_served.emit(0.0)
+	gesture_done.emit("pass", fee)
+	return fee
+
+
+## Secondes avant que le camion en tête reparte sans rien (INF s'il n'y en a pas, ou si Tonio est là).
+func truck_wait_left() -> float:
+	if not g2 or managers.gate or truck_queue < float(db.cfg("truck_evp")) - 0.001:
+		return INF
+	return maxf(0.0, float(db.cfg("manual").get("truck_wait", 20.0)) - truck_wait_t)
+
+
+## Le responsable d'un geste se présente après `gesture_offers` gestes (5), un à la fois, dans l'ordre accoster → tamponner →
+## laisser passer, jamais à moins de `offer_gap` s (45) d'une autre nouveauté.
+func _check_offers() -> void:
+	if not g2:
+		return
 	var m: Dictionary = db.cfg("manual")
-	_gate_at = time + float(m.gate_cooldown)
-	# EVP réellement sortis par la gate (revue C7 C1 : le solde de la file mêlait les camions servis et ceux arrivés)
-	var before := _sum(delivered)
-	_gate(float(m.gate_seconds))
-	add_counter("gate_rushes")
-	return maxf(0.0, _sum(delivered) - before)
+	var last := last_reveal_t
+	for d in mgr_offered:
+		last = maxf(last, float(mgr_offered[d]))
+	if time - last < float(m.get("offer_gap", 45.0)):
+		return
+	for d in OFFER_ORDER:
+		if mgr_offered.has(d):
+			continue
+		if int(gestures.get(GESTURE_OF[d], 0)) >= int(m.get("gesture_offers", 5)) and not managers[d]:
+			mgr_offered[d] = time
+			last_reveal_t = time
+			manager_offered.emit(d)
+			notify.emit("%s se présente : embauche-le (Responsables), il le fera pour toi." % String(db.dept_by_id[d].manager.name), "info")
+		return
 
 
 func missions_claimable() -> int:
@@ -1130,6 +1267,13 @@ func missions_claimable() -> int:
 ## Une fonction absente du registre est toujours disponible.
 func feature(id: String) -> bool:
 	return features.has(id) or not db.unlock_by_id.has(id)
+
+
+## Lot G2 : condition d'une révélation — celle d'avant G2 (`legacy`) pour un port complet, la nouvelle pour une partie jouée.
+func unlock_when(u: Dictionary) -> Dictionary:
+	if not g2 and u.has("legacy"):
+		return u.legacy
+	return u.get("when", {})
 
 
 func unlock_ok(when: Dictionary) -> bool:
@@ -1162,6 +1306,8 @@ func unlock_ok(when: Dictionary) -> bool:
 	# conditions « used » (le joueur s'est servi d'une fonction révélée) : responsables embauchés, compteur, licence, mission
 	if when.has("hired") and managers_count() < int(when.hired):
 		return false
+	if when.has("hired_port") and managers_count() < int(when.hired_port):
+		return false
 	if when.has("counter") and counter(String(when.counter.id)) < float(when.counter.min):
 		return false
 	if when.has("licence"):
@@ -1187,7 +1333,7 @@ func chapter_goal() -> Dictionary:
 	for u in db.unlocks:
 		if features.has(String(u.id)) or not bool(u.get("opens_chapter", false)):
 			continue
-		var w: Dictionary = u.get("when", {})
+		var w: Dictionary = unlock_when(u)
 		var subs: Array = w.any if w.has("any") else [w]
 		for sub in subs:
 			if (sub as Dictionary).has("level"):
@@ -1206,12 +1352,15 @@ func feature_time(id: String) -> float:
 ## Condition lisible d'une fonction encore cachée (« après 4 escales (2/4) »), pour les cartes verrouillées.
 func unlock_text(id: String) -> String:
 	var u: Dictionary = db.unlock_by_id.get(id, {})
-	var w: Dictionary = u.get("when", {})
+	var w: Dictionary = unlock_when(u)
 	if w.has("any"):
-		for sub in w.any:
-			if (sub as Dictionary).has("level"):
-				w = sub
-				break
+		var pick: Dictionary = {}
+		for k in ["level", "manager", "building"]:      # (lot G2 : un responsable ou un bâtiment, faute de niveau)
+			for sub in w.any:
+				if pick.is_empty() and (sub as Dictionary).has(k):
+					pick = sub
+		if not pick.is_empty():
+			w = pick
 	if w.has("level"):
 		var lw: Dictionary = w.level
 		var dn := String(db.dept_by_id[String(lw.dept)].name)
@@ -1253,7 +1402,7 @@ func check_unlocks() -> void:
 				continue
 			if pass_i == 1 and not _reveal_gap_over():
 				return
-			if unlock_ok(u.get("when", {})):
+			if unlock_ok(unlock_when(u)):
 				pick = id
 				break
 		if pick != "":
@@ -1275,9 +1424,12 @@ func check_unlocks() -> void:
 func _upgrade_legacy_save() -> void:
 	for u in db.unlocks:
 		features[String(u.id)] = true
-	for bid in ["customs1", "quay_ext"]:      # insérés en tête, dans l'ordre de la liste des bâtiments
+	for bid in ["customs1", "quay_ext"]:      # insérés après les pièces du départ (lot G2), dans l'ordre de la liste des bâtiments
 		if db.building_by_id.has(bid) and not built.has(bid):
-			built.insert(0, bid)
+			var at := 0
+			while at < built.size() and STARTERS.has(built[at]):
+				at += 1
+			built.insert(at, bid)
 
 
 ## Sauvegarde d'avant le Commerce (version 2) : la Capitainerie faisait venir les navires. Les armateurs déjà présents
@@ -1312,7 +1464,8 @@ func _transfer(dt: float) -> void:
 	var tot := apron_stock()
 	if tot <= 0.0:
 		return
-	var budget := minf(stat("transfer_rate") * dt, tot)
+	# lot G2 : avant le parc de stockage, la plateforme reçoit directement (pas d'engins : rien à ranger)
+	var budget := tot if (g2 and not built.has("yard")) else minf(stat("transfer_rate") * dt, tot)
 	var zone_free := _zeros(NZONE)
 	for z in NZONE:
 		zone_free[z] = maxf(0.0, yard_zone_capacity(z) - yard_stock_zone(z))
@@ -1343,6 +1496,8 @@ func _inspect(dt: float) -> void:
 	var tot := pending_total()
 	if tot <= 0.0:
 		return
+	if g2 and not managers.customs:
+		return          # lot G2 : sans Paul, c'est le joueur qui tamponne (toucher la cabane)
 	var a := minf(stat("inspect_rate") * dt, tot)
 	var fee := 0.0
 	for c in NCARGO:
@@ -1367,6 +1522,8 @@ func cleared_total() -> float:
 
 ## Un camion affiché représente « une seconde de débit de gate » (au moins truck_evp EVP).
 func truck_lot() -> float:
+	if g2 and not managers.gate:
+		return float(db.cfg("truck_evp"))      # lot G2 : à la main, un camion = 2 conteneurs
 	return maxf(float(db.cfg("truck_evp")), stat("gate_rate"))
 
 
@@ -1379,14 +1536,34 @@ func truck_wait_estimate() -> float:
 
 
 func _gate(dt: float) -> void:
+	if not has_gate:
+		truck_queue = 0.0          # lot G2 : pas de camion sans piste ni barrière
+		return
 	var qmax := float(db.cfg("truck_queue_max")) * truck_lot()
 	var ready := cleared_total() - truck_queue
 	if ready > 0.0:
 		truck_queue = minf(truck_queue + minf(ready, ready / float(db.cfg("dwell_target")) * dt), maxf(qmax, truck_queue))
+	if g2 and not managers.gate:
+		# lot G2 : à la main — le camion en tête attend `truck_wait` s qu'on le laisse passer, puis repart sans rien
+		if truck_queue >= float(db.cfg("truck_evp")) - 0.001:
+			truck_wait_t += dt
+			if truck_wait_t >= float(db.cfg("manual").get("truck_wait", 20.0)):
+				truck_queue = maxf(0.0, truck_queue - float(db.cfg("truck_evp")))
+				truck_wait_t = 0.0
+				add_counter("trucks_lost")
+				gesture_done.emit("truck_lost", 0.0)
+		else:
+			truck_wait_t = 0.0
+		return
 	var served := minf(minf(truck_queue, stat("gate_rate") * dt), cleared_total())
 	if served <= 0.0:
 		return
 	truck_queue -= served
+	_serve(served)
+
+
+## Sortie de `served` conteneurs dédouanés (gate ou camion laissé passer) : livrés, part de gate encaissée. Renvoie le montant.
+func _serve(served: float) -> float:
 	var tot := cleared_total()
 	var fee := 0.0
 	for c in NCARGO:
@@ -1401,12 +1578,15 @@ func _gate(dt: float) -> void:
 	truck_visual_accum += served
 	var lot := truck_lot()
 	var n := 0
+	if g2 and not managers.gate:
+		truck_visual_accum = 0.0      # (le camion laissé passer est montré par pass_truck)
 	while truck_visual_accum >= lot and n < 4:
 		truck_visual_accum -= lot
 		n += 1
 		truck_served.emit(truck_wait_estimate())
 	truck_visual_accum = minf(truck_visual_accum, lot)
 	_earn(fee, "gate")
+	return fee
 
 
 func trucks_honking() -> int:
@@ -1443,7 +1623,7 @@ func _buckets(dt: float) -> void:
 	for b in berths:
 		if int(b.ship) != -1:
 			busy += 1.0
-	stat_berth_busy = lerpf(stat_berth_busy, busy / float(berths.size()), dt * 0.05)
+	stat_berth_busy = lerpf(stat_berth_busy, busy / float(maxi(1, berths.size())), dt * 0.05)
 	while bucket_time >= 1.0:
 		bucket_time -= 1.0
 		bucket_index = (bucket_index + 1) % 60
@@ -1626,11 +1806,11 @@ func capacities() -> Dictionary:
 	var berth_cap := 0.0
 	var t_unload_sum := 0.0
 	for bi in berths.size():
-		var tu := avg / maxf(0.0001, crane * berth_crane_factor(bi))
+		var tu := avg / maxf(0.0001, berth_unload_rate(bi))
 		t_unload_sum += tu
 		berth_cap += avg / (tu + t_moor + t_form + (0.0 if pd == INF else pd))
 	caps["berth_cycle"] = berth_cap
-	caps["unload_share"] = t_unload_sum / float(berths.size())
+	caps["unload_share"] = t_unload_sum / float(maxi(1, berths.size()))
 	caps["moor_share"] = t_moor
 	caps["formal_share"] = t_form
 	caps["transfer"] = stat("transfer_rate")
@@ -1662,21 +1842,42 @@ func owner_traffic(oid: String) -> float:
 const HINTS := {
 	"harbor": "Pas assez de navires : démarche des armateurs, signe des lignes ou lance une campagne (Commerce).",
 	"fog": "Brouillard : le pilotage est suspendu, la rade se remplit.",
-	"pilotage": "Les pilotes sont débordés : améliore la Capitainerie.",
-	"cranes": "Les navires attendent la grue : améliore les Portiques.",
-	"berths": "L'amarrage est trop lent : améliore les Quais.",
+	"pilotage": "Les pilotes sont débordés : améliore les Arrivées.",
+	"cranes": "Les navires attendent la grue : améliore le Déchargement.",
+	"berths": "L'amarrage est trop lent : améliore l'Accostage.",
 	"berth_count": "Tous les postes à quai sont occupés : construis un nouveau quai.",
 	"customs": "Les formalités traînent : améliore la Douane.",
-	"inspection": "Les lots attendent l'inspection : améliore la Douane ou assouplis la politique.",
-	"yard_ops": "Le tablier déborde : améliore le Parc et manutention.",
-	"yard_space": "Parc trop petit pour ton débit, même s'il n'est pas plein : agrandis-le (CONSTRUIRE) ou améliore l'empilage (Parc et manutention).",
-	"gate": "Les camions font la queue : améliore la Gate ou construis une aire d'attente.",
+	"inspection": "Les conteneurs attendent le tampon : améliore la Douane.",
+	"yard_ops": "Le quai déborde : améliore le Stockage.",
+	"yard_space": "Parc trop petit pour ton débit, même s'il n'est pas plein : agrandis-le (CONSTRUIRE) ou améliore l'empilage (Stockage).",
+	"gate": "Les camions font la queue : améliore la Sortie camions ou construis une aire d'attente.",
 	"min_time": "Les escales sont au plancher : un remorqueur, des bollards rapides ou un guichet numérique les raccourcissent (CONSTRUIRE).",
 	"tier": "Les quais tournent à plein régime : vise le palier suivant pour de plus gros navires.",
 }
 
+## Lot G2 : conseils de la friche (une pièce du départ à la fois).
+const STARTER_HINTS := {
+	"platform": "La friche est nue : terrasse-la pour poser les conteneurs (AMÉLIORER).",
+	"quay1": "Il faut un quai pour qu'un navire accoste : construis le quai n°1.",
+	"hut": "Les conteneurs posés attendent la douane : construis la cabane de douane.",
+	"track": "Il faut une sortie : une piste et une barrière, et les camions viendront.",
+	"crane_mobile": "La grue de bord est lente : une grue mobile décharge bien plus vite.",
+	"yard": "La plateforme se remplit : un parc de stockage, avec des engins qui rangent.",
+}
+
+
+## Prochaine pièce du départ à construire (régime manuel), "" quand elles sont toutes là.
+func next_starter() -> String:
+	if not g2:
+		return ""
+	for b in STARTERS:
+		if not built.has(b):
+			return String(b)
+	return ""
+
+
 const HINT_DEPT := {
-	"harbor": "", "attract": "", "fog": "harbor", "pilotage": "harbor", "cranes": "cranes", "berths": "berths",
+	"harbor": "", "attract": "", "starter": "", "fog": "harbor", "pilotage": "harbor", "cranes": "cranes", "berths": "berths",
 	"berth_count": "berths", "customs": "customs", "inspection": "customs", "yard_ops": "yard_ops",
 	"yard_space": "yard_ops", "gate": "gate", "tier": "berths", "min_time": "berths",
 }
@@ -1736,6 +1937,8 @@ func alert_reason(a: Dictionary) -> String:
 	# ne voit pas encore)
 	if feature("dept_yard_ops") and yard_fill() >= float(db.cfg("alert_yard_fill", 0.9)):
 		return "yard"
+	if g2 and built.has("platform") and yard_fill() >= float(db.cfg("alert_yard_fill", 0.9)):
+		return "exit"          # lot G2 : la plateforme est pleine — il faut une sortie
 	if feature("dept_gate") and trucks_honking() > 0:
 		return "gate"
 	return ""
@@ -1788,6 +1991,10 @@ func _compute_analysis(exclude_harbor: bool = false) -> Dictionary:
 			key = "cranes" if u >= mo else "berths"
 	var hint: String = HINTS.get(key, "")
 	var bid := ""
+	# lot G2 : tant que les six pièces du départ ne sont pas là, le conseil désigne la suivante
+	var st := next_starter()
+	if st != "":
+		return {"key": "starter", "dept": "", "hint": String(STARTER_HINTS.get(st, "")), "caps": caps, "flow": bv, "building": st}
 	# manque de navires : l'équipement qui en attire (quai plus long, douane, chenal…) passe avant la Capitainerie
 	if key == "harbor":
 		bid = traffic_building()
@@ -1965,12 +2172,25 @@ func buy_licence(ci: int, n: int) -> bool:
 	return true
 
 
+## Lot G2 : prix et palier d'un responsable (ceux d'avant G2, `legacy_cost` / `legacy_tier`, pour un port complet).
+func manager_cost(dept: String) -> float:
+	var m: Dictionary = db.dept_by_id[dept].manager
+	return float(m.get("legacy_cost", m.cost)) if not g2 else float(m.cost)
+
+
+func manager_tier(dept: String) -> int:
+	var m: Dictionary = db.dept_by_id[dept].manager
+	return int(m.get("legacy_tier", m.tier)) if not g2 else int(m.tier)
+
+
 func manager_available(dept: String) -> bool:
-	return int(db.dept_by_id[dept].manager.tier) <= tier
+	return manager_tier(dept) <= tier
 
 
 ## Le responsable d'un service se présente quand ce service atteint le niveau `manager_reveal_level` (10), un par un.
 func manager_revealed(dept: String) -> bool:
+	if g2 and GESTURE_OF.has(dept):
+		return mgr_offered.has(dept)      # lot G2 : il s'est présenté après 5 gestes
 	return feature("managers") and int(levels[dept]) >= int(db.cfg("manager_reveal_level", 10))
 
 
@@ -1983,9 +2203,9 @@ func hire_manager(dept: String, with_amber: bool = false) -> bool:
 			return false
 		amber -= int(m.amber)
 	else:
-		if not manager_available(dept) or money < float(m.cost):
+		if not manager_available(dept) or money < manager_cost(dept):
 			return false
-		money -= float(m.cost)
+		money -= manager_cost(dept)
 	managers[dept] = true
 	add_counter("managers")
 	purchased.emit("manager", dept)
@@ -2026,6 +2246,8 @@ func build(bid: String) -> bool:
 	money -= float(b.cost)
 	built.append(bid)
 	rebuild_infra()
+	if g2 and bid == "quay1" and ships.is_empty():
+		_spawn_initial()          # lot G2 : le caboteur de Corsaire & Fils se présente en rade
 	add_counter("buildings")
 	purchased.emit("building", bid)
 	notify.emit("Construit : %s" % b.name, "good")
@@ -2065,13 +2287,14 @@ func tier_progress() -> float:
 	return tot / float(chk.size())
 
 
-# --- lot F3 : l'acte 0 « La Crique » (la pêche de l'anse) -------------------------
+# --- lot F3/G1 : chapitre 1 « La Crique » (la pêche de l'anse) -------------------------
 
 ## Partie neuve jouée (départ de l'interface, bot) : l'acte 0 commence — 0 $, le port à conteneurs est fermé.
 func begin_act0() -> void:
 	fishing = Fishing.new(db, int(rng.seed % 1000003))
 	fishing.act0 = true
 	money = 0.0
+	_enter_manual()          # lot G2 : après la Concession, la friche est nue ; le processus se fait à la main
 
 
 ## Nouvelle concession : la pêche est reprise telle quelle ; le port reste fermé le temps de la séquence du T1 (la bascule
@@ -2079,16 +2302,17 @@ func begin_act0() -> void:
 func hold_port() -> void:
 	fishing.act0 = true
 	fishing.replay = true
+	_enter_manual(true)      # lot G2 : la nouvelle concession repart de la friche (les fonctions déjà connues restent)
 
 
-## Bascule vers le T1 possible : les cinq achats sont faits et l'argent a atteint le seuil (ou nouvelle concession).
+## Bascule vers le T1 : la Concession du terre-plein est signée (ou nouvelle concession).
 func act0_ready() -> bool:
-	if not fishing.act0 or not fishing.done_all():
+	if not fishing.act0:
 		return false
-	return fishing.replay or money >= float(fishing.cfg.get("switch_money", 0.0))
+	return fishing.replay or fishing.concession_done()
 
 
-## Fin de l'acte 0 : le port ouvre (l'horloge du port démarre ; la pêche devient passive).
+## Fin de la Crique : le port ouvre (l'horloge du port démarre ; la pêche continue, Marcel encaisse).
 func open_port() -> void:
 	if not fishing.act0:
 		return
@@ -2098,24 +2322,81 @@ func open_port() -> void:
 	_refresh_analysis()
 
 
-## Achat suivant de l'acte 0 (carte AMÉLIORER de la pêche).
-func buy_fish() -> bool:
-	if not fishing.act0 or fishing.done_all():
+## Lot G1 — cartes de la pêche (AMÉLIORER, pendant la Crique et après : elles restent achetables jusqu'à leur maximum).
+func buy_fish_places(n: int = 1) -> bool:
+	if n < 0:
+		n = fishing.places_affordable(money)
+	n = mini(n, fishing.places_max() - fishing.places)
+	if n <= 0:
 		return false
-	var nb := fishing.next_buy()
-	var c := float(nb.get("cost", 0.0))
+	var c := fishing.places_cost(n)
 	if money < c:
 		return false
 	money -= c
-	fishing.apply_buy(fishing.level)
-	fishing.level += 1
-	purchased.emit("fish", String(nb.get("id", "")))
+	fishing.buy_places(n)
+	purchased.emit("fish", "places")
 	return true
 
 
-## Toucher un bateau qui rentre : il débarque tout de suite, la vente rapporte plus (acte 0).
-func fish_help(i: int) -> bool:
-	return fishing.help(i)
+func buy_fish_services(n: int = 1) -> bool:
+	if n < 0:
+		n = fishing.services_affordable(money)
+	n = mini(n, fishing.services_max() - fishing.services)
+	if n <= 0:
+		return false
+	var c := fishing.services_cost(n)
+	if money < c:
+		return false
+	money -= c
+	fishing.buy_services(n)
+	purchased.emit("fish", "services")
+	return true
+
+
+## Bâtiment de la Crique (quai des chalutiers, jetée, marina…) ; la Concession = fin de la Crique (la bascule se joue).
+func buy_fish_building(id: String) -> bool:
+	if not fishing.can_build(id):
+		return false
+	var c := float(fishing.building_def(id).get("cost", 0.0))
+	if money < c:
+		return false
+	money -= c
+	fishing.build(id)
+	purchased.emit("fish", id)
+	if fishing.concession_done() and fishing.act0:
+		notify.emit("Concession signée : la friche est à toi !", "good")
+	return true
+
+
+## Toucher un bateau rentré (sans Marcel) : son loyer est encaissé. Renvoie le montant (0 si rien).
+func fish_collect(i: int) -> float:
+	var a := fishing.collect(i, boost_mult())
+	if a > 0.0:
+		_earn(a, "fish")
+		fish_event.emit("rent_paid")
+		_flush_fish_events()
+	return a
+
+
+func fish_collectable(i: int) -> bool:
+	return fishing.can_collect(i)
+
+
+## Marcel, patron pêcheur : un responsable hors département. (Lot G1-d : il ne révèle plus les Heures sup — ce sera le premier
+## responsable du port, lot G2 ; rien de visible ni d'actif avant le port.)
+func hire_marcel() -> bool:
+	if not fishing.marcel_offered or fishing.marcel:
+		return false
+	var c := fishing.marcel_cost()
+	if money < c:
+		return false
+	money -= c
+	fishing.hire_marcel()
+	add_counter("managers")
+	purchased.emit("manager", "marcel")
+	notify.emit("%s rejoint la Crique !" % String(fishing.cfg.get("marcel", {}).get("name", "Marcel")), "good")
+	_refresh_analysis()
+	return true
 
 
 # --- prestige : nouvelle concession ------------------------------------------
@@ -2146,13 +2427,9 @@ func carry_over(old: PortSim) -> void:
 	for k in old.counters:
 		if not RUN_ONLY_COUNTERS.has(k):
 			lifetime[k] = float(lifetime.get(k, 0.0)) + float(old.counters[k])
-	# lot F3 : la crique reste à toi — la pêche continue (passive), l'acte 0 ne se rejoue pas
-	if old.fishing.level > 0:
+	# lot F3/G1 : la crique reste à toi — la pêche continue au plafond, la Crique ne se rejoue pas
+	if old.fishing.places > 0:
 		fishing.migrate_done()
-		fishing.level = old.fishing.level
-		fishing.boats.clear()
-		for i in fishing.level:
-			fishing.apply_buy(i, false)
 		fishing.earned = old.fishing.earned
 	invalidate()
 	_refresh_analysis()
@@ -2205,14 +2482,14 @@ func set_tariff(t: float) -> void:
 
 
 func boost_ready() -> bool:
-	return time >= boost_ready_at
+	return clock() >= boost_ready_at
 
 
 func start_boost() -> bool:
 	if not boost_ready() or not feature("boost"):
 		return false
 	var b: Dictionary = db.cfg("boost")
-	boost_until = time + float(b.duration)
+	boost_until = clock() + float(b.duration)
 	boost_ready_at = boost_until + float(b.cooldown)
 	invalidate()
 	purchased.emit("boost", "")
@@ -2224,7 +2501,7 @@ func skip_boost_cooldown() -> bool:
 	if boost_ready() or boost_active() or amber < cost:
 		return false
 	amber -= cost
-	boost_ready_at = time
+	boost_ready_at = clock()
 	return true
 
 
@@ -2238,16 +2515,29 @@ func apply_offline(seconds: float) -> Dictionary:
 	var t := clampf(seconds, 0.0, cap)
 	var base := float(db.cfg("offline_base_yield"))
 	if fishing.act0:
-		# lot F3 : pendant l'acte 0, seule la pêche rapporte (sans coup de main), au rendement hors-ligne de base
-		var fg := fishing.rate_estimate() * t * base
+		# lot G1 : pendant la Crique, avant Marcel le monde se fige (rien gagné, rien perdu : rapport vide) ; avec Marcel, la
+		# pêche rapporte à son rythme
+		if not fishing.marcel:
+			return {}
+		var fg := fishing.offline_rate() * t
 		money += fg
 		fishing.earned += fg
-		return {"seconds": t, "capped": seconds > cap, "yield": base, "money": fg, "evp": 0.0, "managers": 0}
+		return {"seconds": t, "capped": seconds > cap, "yield": 1.0, "money": fg, "evp": 0.0, "managers": 1}
+	if g2 and managers_count() == 0:
+		# lot G2 : avant le premier responsable du port, le port se fige (seule Marcel encaisse les loyers de la Crique)
+		var fz := fishing.offline_rate() * t
+		if fz <= 0.0:
+			return {}
+		money += fz
+		fishing.earned += fz
+		return {"seconds": t, "capped": seconds > cap, "yield": 0.0, "money": fz, "evp": 0.0, "managers": 0}
 	var yield_ratio := base + (1.0 - base) * float(managers_count()) / float(DEPTS.size())
 	var flow := sustainable_flow()
 	var gain := income_rate_estimate() * t * yield_ratio
 	var evp := flow * t * yield_ratio
-	gain += fishing.passive_rate() * t      # lot F3 : la pêche tourne seule, absence comprise
+	var fg2 := fishing.offline_rate() * t      # lot G1 : Marcel encaisse pendant l'absence
+	gain += fg2
+	fishing.earned += fg2
 	money += gain
 	add_counter("evp", evp)
 	add_counter("offline_evp", evp)
@@ -2283,13 +2573,23 @@ func to_dict() -> Dictionary:
 		# lot E (champs facultatifs, version inchangée) : la dernière minute de revenu, pour que le revenu affiché et le coût
 		# des aléas restent justes juste après un chargement
 		"income_buckets": Array(income_buckets), "evp_buckets": Array(evp_buckets), "ship_buckets": Array(ship_buckets),
-		# lot F3 (sauvegarde v6) : la pêche de l'anse et l'acte 0 ; absente = partie d'avant F3 (acte 0 fait, pêche passive)
+		# lot F3/G1 (sauvegarde v7) : la pêche de l'anse et la Crique ; absente = partie d'avant F3 (Crique finie)
 		"act0": fishing.to_dict(),
+		# lot G2 (sauvegarde v8) : le régime manuel (friche, gestes, offres des responsables) ; absente = port complet
+		"g2": {"manual": g2, "gestures": gestures.duplicate(), "offered": mgr_offered.duplicate(), "truck_wait_t": truck_wait_t},
 	}
 
 
 func from_dict(d: Dictionary) -> void:
 	reset()
+	# lot G2 : régime manuel (clé « g2 ») ; une partie v7 en pleine Crique (pas de « g2 ») le prend aussi : son port partira de la
+	# friche ; sinon (T1 et au-delà) le port est complet
+	var g2d: Dictionary = d.get("g2", {}) if d.get("g2") is Dictionary else {}
+	var a0: Dictionary = d.get("act0", {}) if d.get("act0") is Dictionary else {}
+	var manual := bool(g2d.get("manual", false)) if not g2d.is_empty() else (bool(a0.get("on", false)) and not bool(a0.get("replay", false)))
+	if manual:
+		g2 = true
+		features.clear()
 	time = float(d.get("time", 0.0))
 	money = float(d.get("money", 0.0))
 	amber = int(d.get("amber", 0))
@@ -2306,9 +2606,20 @@ func from_dict(d: Dictionary) -> void:
 	for i in mini(li.size(), NCARGO):
 		licences[i] = int(li[i])
 	built.clear()
-	for b in d.get("built", []):
-		if db.building_by_id.has(b):
+	if not g2:
+		for b in STARTERS:      # lot G2 : un port complet a ses six pièces du départ (en tête, dans l'ordre de la liste)
 			built.append(String(b))
+	for b in d.get("built", []):
+		if db.building_by_id.has(b) and not built.has(String(b)):
+			built.append(String(b))
+	if not g2d.is_empty():
+		var gg: Dictionary = g2d.get("gestures", {})
+		for k in gestures:
+			gestures[k] = int(gg.get(k, 0))
+		var off: Dictionary = g2d.get("offered", {})
+		for k in off:
+			mgr_offered[String(k)] = float(off[k])
+		truck_wait_t = float(g2d.get("truck_wait_t", 0.0))
 	policy = int(d.get("policy", 1))
 	tariff = float(d.get("tariff", 1.0))
 	boost_until = float(d.get("boost_until", -1.0))
@@ -2394,11 +2705,22 @@ func from_dict(d: Dictionary) -> void:
 		_upgrade_legacy_save()
 	if not d.has("owners_on"):
 		_upgrade_commerce_save()
-	# lot F3 (v6) : une partie d'avant l'acte 0 se charge avec l'acte 0 fait (cinq achats, pêche passive), sans rien rejouer
+	# lot F3 (v6) : une partie d'avant l'acte 0 se charge avec la Crique finie ; lot G1 (v7) : une partie v6 en cours d'acte 0
+	# recommence la Crique (0 $), une partie v6 au T1 ou au-delà se charge Crique finie (plafond R₀, Marcel, Concession)
+	var old_fish := not (d.get("act0") is Dictionary) or not (d.act0 as Dictionary).has("places")
 	if d.get("act0") is Dictionary:
 		fishing.from_dict(d.act0)
 	else:
 		fishing.migrate_done()
+	if fishing.restarted:
+		money = 0.0
+		_enter_manual()
+	elif old_fish:
+		# les Heures sup se comptent sur clock() (= time + act0_time) depuis G1
+		if boost_until > 0.0:
+			boost_until += fishing.act0_time
+		if boost_ready_at > 0.0:
+			boost_ready_at += fishing.act0_time
 	_clamp_licences()
 	rebuild_infra()
 	_bn_last = time          # pas de « temps de goulot » fantôme entre 0 et l'heure de la partie chargée (revue C7 C2)

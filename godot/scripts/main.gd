@@ -69,31 +69,62 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.diorama = diorama
 	layer.add_child(hud)
-	# lot F3 (captures, binaire de l'éditeur seulement) : --act0=N fait les N premiers achats de l'acte 0 (le chantier du dernier
-	# se joue) ; --act0-warm=S fait tourner la pêche S secondes avant le dernier (bateaux en mer, chantiers d'avant finis) ;
-	# --bascule : l'argent de la bascule (elle se joue).
-	if (a.has("act0") or a.has("bascule")) and DebugArgs.allowed() and GameState.sim.fishing.act0:
+	# lot G1 (captures, binaire de l'éditeur seulement) : --places=N --services=N --fish-build=trawler,pier,marina --marcel
+	# --announce --act0-warm=S (la pêche tourne S s avant le dernier achat : bateaux en place, chantiers finis) --rent (un
+	# bateau attend son loyer) --bascule (la Concession est signée : la bascule se joue).
+	if DebugArgs.allowed() and GameState.sim.fishing.act0 and (a.has("places") or a.has("services") or a.has("fish-build") 			or a.has("marcel") or a.has("announce") or a.has("bascule") or a.has("act0-warm") or a.has("rent")):
 		var s := GameState.sim
-		var n := int(a.get("act0", "5"))
+		var f := s.fishing
 		var warm := float(a.get("act0-warm", "0"))
-		for k in n:
-			if k == n - 1 and warm > 0.0:
-				for i in int(warm / 0.25):
-					s.step(0.25)
-				diorama.sites.clear()
-				diorama.fishing_view.rebuild()
-				for v in diorama.fishing_view.boats:
-					v.fresh = false
-					v.fade = 1.0
-			s.money += s.fishing.next_cost()
-			s.buy_fish()
-		if warm > 0.0 and n == 0:
+		var np := int(a.get("places", "1"))
+		s.money += f.places_cost(np) if np > 0 else 0.0
+		s.buy_fish_places(np)
+		var ns := int(a.get("services", "0"))
+		if ns > 0:
+			s.money += f.services_cost(ns)
+			s.buy_fish_services(ns)
+		for bid in String(a.get("fish-build", "")).split(",", false):
+			s.money += float(f.building_def(bid).get("cost", 0.0))
+			s.buy_fish_building(bid)
+		if a.has("marcel"):
+			f.marcel_offered = true
+			if String(a.marcel) != "offer":
+				s.money += f.marcel_cost()
+				s.hire_marcel()
+		if warm > 0.0:
 			for i in int(warm / 0.25):
 				s.step(0.25)
+			diorama.sites.clear()
+			diorama.fishing_view.rebuild()
+			for v in diorama.fishing_view.boats:
+				v.fresh = false
+				v.fade = 1.0
+		if a.has("rent"):
+			var guard := 0
+			while guard < 2000 and diorama.fishing_view.collectable().is_empty():
+				s.step(0.25)
+				guard += 1
+				var any := false
+				for i in f.boats.size():
+					any = any or f.can_collect(i)
+				if any:
+					break
+			for v in diorama.fishing_view.boats:
+				v.fresh = false
+				v.fade = 1.0
+		if a.has("announce"):
+			f.clock = maxf(f.clock, float(f.cfg.get("announce_at", 480.0)))
+			f.last_reveal = -1.0e9
+			s.step(0.25)
 		if a.has("bascule"):
-			s.money = maxf(s.money, float(s.fishing.cfg.get("switch_money", 300.0)) + 20.0)
-		else:
-			s.money = minf(s.money, 120.0)      # (sans --bascule, la bascule ne part pas pendant la capture)
+			for bid in ["trawler", "pier", "marina"]:
+				if not f.has(bid):
+					s.money += float(f.building_def(bid).get("cost", 0.0))
+					s.buy_fish_building(bid)
+			# la Concession une seconde après le départ : les nuages sont posés, on les voit se dissoudre
+			get_tree().create_timer(float(a.get("bascule-delay", "1"))).timeout.connect(func() -> void:
+				s.money += float(f.concession_def().get("cost", 1000.0))
+				s.buy_fish_building(String(f.concession_def().id)))
 	if a.has("open"):
 		await get_tree().create_timer(float(a.get("open-delay", "1"))).timeout
 		match String(a.open):

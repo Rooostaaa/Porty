@@ -75,12 +75,13 @@ func _draw() -> void:
 		useful = Rect2()
 	draw_set_transform(-position)       # coordonnées écran (le contrôle est posé sur le rectangle utile)
 	var top_y := useful.position.y if useful.has_area() else 0.0
-	# lot F3 : pendant l'acte 0 (bascule comprise), le port à conteneurs est fermé : seules la bulle de la pêche (« Touche ! »
-	# sur un bateau qui rentre) et les gains s'affichent
+	# lot F3/G1 : pendant la Crique (bascule comprise), le port à conteneurs est fermé : seules les bulles de loyer de la pêche et
+	# les gains s'affichent ; après, les bulles de loyer restent (tant que Marcel n'est pas là)
 	if sim.fishing.act0:
 		_draw_fishing(top_y)
 		_draw_popups()
 		return
+	_draw_fishing(top_y)
 	# navires (lot F1) : en rade, la bulle d'humeur de l'escale liée ; à quai, le déchargement du navire à l'écran ; furieux
 	for s in sim.ships:
 		if s.state != Ship.State.ANCHORED and s.state != Ship.State.ARRIVING:
@@ -106,29 +107,30 @@ func _draw() -> void:
 			var sp3 := _sp(pv.bubble_point())
 			if sp3.y >= top_y and (not useful.has_area() or useful.grow(10.0).has_point(sp3)):
 				_pill(sp3 + Vector2(0, -10), "Furieux !", UI.BAD, "")
-	# gestes manuels disponibles : « Touche ! » sur le prochain navire à accoster, « Coup de main » sur les grues
-	if not sim.managers.harbor:
+	# gestes manuels disponibles : « Touche ! » sur le prochain navire à accoster (lot G2 : jusqu'à Léon)
+	if not sim.managers.harbor and not (sim.g2 and sim.managers.berths):
 		for s in sim.ships:
 			if s.state == Ship.State.ANCHORED and not s.priority:
 				var v: ShipView = diorama.ship_views.get(s.id)
 				if v != null and _sp(v.bubble_point()).y - 62.0 > top_y:
 					_pill(_sp(v.bubble_point()) + Vector2(0, -62), "Touche pour accoster", UI.AMBER, "", UI.TEXT)
 				break
-	for cv in diorama.crane_views:
-		if sim.assist_ready(cv.berth):
-			var cm := "crane_sts" if cv.kind == "sts" else "crane_mobile"
-			_pill_above(_sp(anchor_point(cm, cv.position)), "Coup de main !", UI.AMBER, "boost", UI.TEXT, "assist")
-			break
-	# gestes optionnels du parc et de la gate (accélérateurs à recharge, remplacés par Nadia Benali et Tonio Ferrer)
-	if sim.yard_boost_ready() and not diorama.traffic.vehicles.is_empty():
-		var vn: Node3D = diorama.traffic.vehicles[0].node
-		var vp := _sp(vn.position + Vector3(0, 4.5, 0))
-		if vp.y > top_y + 30.0:
-			_pill_above(vp, "Touche !", UI.AMBER, "yard", UI.TEXT, "yard_gesture")
-	if sim.gate_rush_ready():
-		var bp2 := _sp(Layout.GATE + Vector3(-3.0, 3.0, 2.0))
+	# lot G2 — tamponner (la cabane), laisser passer et encaisser (la barrière : rouge avant que le camion reparte), et la
+	# plateforme pleine (« il faut une sortie »)
+	if sim.stamp_ready() and diorama.ready_bid("hut"):
+		var hp := _sp(anchor_point("customs_hut", Layout.CUSTOMS_HUT))
+		if hp.y > top_y + 30.0:
+			_pill_above(hp, "Tamponne : %d conteneurs" % roundi(sim.pending_total()), UI.AMBER, "customs", UI.TEXT, "stamp_gesture")
+	if sim.pass_ready() and diorama.ready_bid("track"):
+		var bp2 := _sp(Layout.GATE + Vector3(-1.0, 3.0, 2.0))
+		var left := sim.truck_wait_left()
+		var late := left < float(sim.db.cfg("manual").get("truck_warn", 6.0))
 		if bp2.y > top_y + 30.0:
-			_pill_above(bp2, "Touche la barrière !", UI.AMBER, "gate", UI.TEXT, "gate_gesture")
+			_pill_above(bp2, ("Camion : touche la barrière · %d s" % ceili(left)) if late else "Camion : touche la barrière", UI.BAD if late else UI.AMBER, "gate", Color.WHITE if late else UI.TEXT, "gate_gesture")
+	if sim.g2 and String(sim.shown_analysis().get("alert", "")) == "exit":
+		var ep := _sp(Layout.YARD_CENTER + Vector3(0, 6, 0))
+		if ep.y > top_y + 30.0:
+			_pill_above(ep, "Il faut une sortie !", UI.BAD, "gate", Color.WHITE, "exit")
 	# file en rade
 	var waiting := sim.waiting_ships()
 	var col := UI.INFO if waiting < sim.rade_places() else UI.BAD      # rouge seulement quand la rade est pleine
@@ -205,15 +207,21 @@ func _draw() -> void:
 	_draw_popups()
 
 
-## Lot F3 : « Touche ! » sur le bateau de pêche qui rentre (le premier qu'on peut aider).
+## Lot G1 : bulle « Loyer » (pièce) sur chaque bateau rentré dont le loyer attend ; elle passe au rouge quand il va repartir
+## sans payer (`rent_warn` s). Plus aucune bulle avec Marcel.
 func _draw_fishing(top_y: float) -> void:
 	var fv: FishingView = diorama.fishing_view
-	var hb := fv.helpable()
-	if hb.is_empty():
-		return
-	var sp := _sp(fv.boat_pos(hb[0]) + Vector3(0, 2.5, 0))
-	if sp.y > top_y + 30.0 and (not useful.has_area() or useful.grow(10.0).has_point(sp)):
-		_pill_above(sp, "Touche !", UI.AMBER, "boost", UI.TEXT, "fish_gesture")
+	var sim := diorama.sim
+	var warn := float(sim.fishing.cfg.get("rent_warn", 6.0))
+	for i in fv.collectable():
+		var sp := _sp(fv.boat_pos(i) + Vector3(0, 2.5, 0))
+		if sp.y > top_y + 30.0 and (not useful.has_area() or useful.grow(10.0).has_point(sp)):
+			var left := sim.fishing.wait_left(i)
+			var late := left < warn
+			var txt := "Loyer %s" % Fmt.money(float(sim.fishing.boats[i].amount))
+			if late:
+				txt += " · %d s" % ceili(left)
+			_pill_above(sp, txt, UI.BAD if late else UI.AMBER, "money", Color.WHITE if late else UI.TEXT, "fish_rent_%d" % i)
 
 
 ## Gains qui s'envolent : décalés s'ils chevauchent une bulle (« +2,9 $ » ne recouvre plus « File : 0 », revue D-UI).

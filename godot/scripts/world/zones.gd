@@ -16,6 +16,8 @@ static func is_open(sim: PortSim, z: Dictionary) -> bool:
 		return true
 	if o.begins_with("t") and o.length() == 2 and o.substr(1).is_valid_int():
 		return sim.tier >= int(o.substr(1))
+	if o == "customs1" and sim.g2 and sim.built.has("hut"):
+		return true          # lot G2 : l'enceinte de la douane s'ouvre avec la cabane
 	return sim.built.has(o)
 
 

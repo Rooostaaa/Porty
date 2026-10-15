@@ -1483,3 +1483,305 @@ APK réexporté : `C:\Nadir\tycoon_V2\build\PortHorizonV2.apk` (30,2 Mo, 15/10 1
   (64 segments × 32 anneaux ≈ 4 000 triangles par grain) à chaque bouffée. Remplacée par un maillage partagé à facettes
   (8 × 4 ≈ 64 triangles). Même correction (8 segments) pour les piliers des appontements et les mâts de pavois.
 - APK réexporté 15/10 12 h 40 (30,2 Mo). Guide : `docs/GUIDE_TEST_10MIN.md`.
+
+## Lot G1 — « La Crique, un vrai chapitre » (15/10)
+
+Ordre `docs/ORDRE_G1_CRIQUE.md`, cadrage `docs/CADRAGE_DEBUT.md` (§ 4, 5, 11, 12). Journal tenu au fil de l'eau (reprise possible à
+chaque palier). Aucun des modèles de `docs/ORDRE_BLENDER_G.md` n'était présent au départ du lot (la session Blender avait échoué une première
+fois) : le code a été écrit avec un chargeur tolérant (`Assets.exists`, primitives Godot en repli). **Les 19 modèles ont été livrés
+pendant le lot (14 h 58 – 17 h 08)** : captures, tests finaux et APK les utilisent ; les primitives ne servent plus qu'en repli.
+
+### Étape 0 — Note de faisabilité (avant code)
+
+**Simulation (`sim/fishing.gd`, réécrit ; `config.json › fishing` refondu).** Les cinq achats de F3 deviennent : deux cartes à
+niveaux (`places` 0–8, `services` 0–10) + une liste de bâtiments (`built` : `trawler`, `pier`, `marina`, `marina2`, `marina3`,
+`concession`) + Marcel (`marcel`, `marcel_offered`). Le cycle d'un bateau gagne une phase **WAIT** (loyer à encaisser) :
+OUT → FISH → BACK → LAND → (payé ? OUT : WAIT ≤ `rent_wait` s → repart sans payer). Montant = `valeur(classe) × ticket`,
+`ticket = 1 + 0,15 × services` (additif : ×2,5 au niveau 10 — multiplicatif, ×4 au niveau 10, mettait R₀ hors des 4–6 $/s avec les
+valeurs qui tiennent la chronologie du début). Marina = loyer continu par voilier. **Plafond R₀** visé ≈ 5 $/s tout au maximum (à
+caler à la sonde). La Concession (≈ 1 000 $, dès la marina) remplace `switch_money` : son achat = `act0_ready()` → bascule
+(`open_port()` à la fin, comme F3). Après la Concession, la pêche continue au même modèle (plus de `passive`) et les cartes restantes
+restent achetables. `PortSim.time` ne tourne toujours pas pendant la Crique (la sonde mesure depuis la Concession = l'entrée au T1).
+- Heures sup révélées à l'embauche de Marcel (§ 8.1) : le minuteur des Heures sup passe sur `clock()` (= `time + act0_time`) au
+  lieu de `time` (gelé pendant la Crique) ; les loyers sont ×2 pendant les Heures sup. Sauvegarde v6 : `boost_until`/`boost_ready_at`
+  décalés de `act0_time` au chargement.
+- Hors-ligne : avant Marcel, **le monde se fige** (`apply_offline` renvoie un rapport vide : rien gagné, rien perdu) ; avec
+  Marcel, la pêche rapporte à son rythme (`rate_estimate()`, durée plafonnée comme avant) ; après la Concession, idem pour la part pêche.
+- Annonce du port : `Fishing.step` pose `announced` à `clock ≥ 480 s` **et** criée faite (services ≥ 1), à ≥ 45 s de la dernière
+  nouveauté (Marcel) ; `PortSim` révèle alors « Missions » (`features["missions"]`, signal `feature_unlocked`) et la mission `c0`
+  « Signer la Concession du terre-plein » (`missions.json`, clé `fish`) est la première de la liste.
+- Marcel = responsable hors département : compteur `managers` (mission m4 le compte), feuille RESPONSABLES (seul onglet de
+  Gestion pendant la Crique), sauvegarde ; `managers_count()` (rendement hors-ligne du port) ne le compte pas.
+- **Sauvegarde v7** : clé `act0` au nouveau format (`places`, `services`, `built`, `marcel`…). Une partie v6 **en cours d'acte 0**
+  recommence la Crique (`begin_act0`, 0 $) ; une partie v6 au T1 ou au-delà se charge Crique finie : tout au maximum, Marcel
+  embauché, Concession faite, aucun chantier rejoué.
+
+**Monde (`FishingView`, `Layout`, nouveau `CloudLayer`).**
+- Places : un seul ponton le long de la plage (z 48,4, x −134 → −98 au plus, modules de 6 u) ; **9 places** (niv. 1 = 2 barques,
+  puis une par niveau) au pas de 4 u (barque 2,6 u). Le ponton ne peut pas gagner un module de 6 u à chaque niveau sur 36 u de plage :
+  il s'allonge aux niveaux **3, 4, 6, 7** (quand la place nouvelle le demande) et chaque niveau pose un taquet (`cleat`) et joue un
+  chantier (éclaboussures) à la place nouvelle. Écart assumé, consigné.
+- Voie est des bateaux déplacée de x −102 à **x −104** (place de barque n°9 en x −100) ; chalutiers en x −98,5 ; **grande jetée**
+  `pier_long` (14 × 2,5) le long du cap en (−96,5 ; 7), axe z, thonier sur son flanc ouest (−100,5 ; 7), étrave au nord, par la voie
+  est prolongée jusqu'à z −2 ; passerelle (`pontoon`) vers le flanc.
+- **Marina** dans l'intérieur de la boucle (jamais traversé par les bateaux) : modules `marina_pontoon` 10 × 1,8, axe z, en
+  x −121 (z 32…42 puis 22…32) et x −111 (z 32…42) ; voiliers des deux côtés (3,5 / 4,5 u), 6 → 12 → 20.
+- Services : criée inchangée (−99 ; 55,5) ; pompe `fuel_pump` (niv. 3) sur la plage à l'est ; aire de lavage `wash_bay` (niv. 6)
+  sur la plage derrière le ponton ; glace `ice_plant` (niv. 9) sur le cap (inchangée).
+- **Nuages** (`CloudLayer`) : bancs procéduraux (demi-sphères basse définition, 24 × 12 u, MultiMesh) posés sur tout le rectangle
+  habillé du monde **sauf le trou de l'anse** (plage, pontons, cabane, criée et la route du mareyeur, la mer au nord jusqu'à z −80 et
+  x −70 : le caboteur y passe, visible) ; dérive lente (position du nœud) ; dissolution par shader (fondu + montée, 3,5 s) à la
+  Concession, puis le nœud est libéré ; jamais recréés (une partie chargée après la Concession n'en a pas ; une nouvelle concession
+  non plus).
+- **Caméra** : `CameraRig.set_crique_bounds()` (centre x −124…−98, z 20…48, zoom ≤ 72) tant que les nuages sont là ; bornes du
+  palier dès la dissolution. Cadrage d'intro recalé dans ces bornes.
+- Caboteur de l'annonce : `ship_passing` (absent → `ship_coaster`) traverse au large dans le trou des nuages (z −50 → −65,
+  x −195 → −75), 20 s ; carte de la narratrice (`tiers.json › 0 › announce`).
+- Marcel sur le ponton : modèle `marcel` (absent → `docker`).
+
+**Interface.** AMÉLIORER pendant la Crique : [Concession si disponible] · prochain bâtiment · Places · Services (×1/×10/max,
+maintien) ; après la Concession, un titre « La Crique » et les cartes restantes en bas de la liste. Bulle « Loyer » sur chaque
+bateau rentré (rouge sous `rent_warn` s), toucher = encaisser (pièces vers le compteur, son) ; plus rien après Marcel. RESPONSABLES
+visible dès que Marcel se présente ; Heures sup à son embauche. Tutoriel : `a0_pontoon` → `a0_rent` → `a0_places` → `a0_hall` →
+`a0_marcel` → `a0_mission` → `a0_concession` (version 7, `REV6_ORDER` pour la migration), puis la suite d'avant.
+
+**Sonde et bot.** `Bot.run_act0(mode)` : encaisse, embauche Marcel dès qu'il peut, achète dans l'ordre (prochain bâtiment, puis
+la moins chère des deux cartes) ; « pressé » signe la Concession dès qu'elle est abordable, « tranquille » après le plafond. La
+mesure T1+ (depuis la Concession) se fait sur la partie « tranquille » (R₀ entier dès l'entrée : le pire cas pour le T2). Après la
+Concession, les cartes de pêche restantes entrent dans `Bot._options()` (score = gain / coût).
+
+**Ce qui casse (contrôles de l'acte 0 actuel devenus faux, remplaçant entre parenthèses).** `run_all › test_f3` : 2 (coup de main →
+loyer manuel et bateau qui repart sans payer), 3 (5 achats → cartes à niveaux et bâtiments), « coup de main » (→ Marcel),
+4 (bascule à 300 $ → Concession), 5 (durées 3–5 min → pressé ≤ 12, tranquille 15–20), 6 (v6 → v7 et sa migration), 7 (nouvelle
+concession : pêche reprise au plafond), 10 (tutoriel : 7 étapes en tête, version 7). `ui_smoke` : « F3 acte 0 », « F3 coup de
+main », « F3 l'anse vivante », « F3 bascule » (×2), « F3 après l'acte 0 », « F3 sauvegarde v6 » : réécrits en « G1 … » avec les
+mêmes invariants (ni terre ni ponton, aucune rotation sur place, ≤ 6,5 u/s, camionnette sur sa route, séquence du T1 ≤ 15 s, HUD
+visible, aucune fenêtre > 15 s sans action). Risque principal : l'économie — R₀ ≈ 5 $/s au lieu de 0,5 $/s passif pousse le T2 plus
+tôt ; à mesurer, levier = R₀ dans sa fourchette basse (4 $/s) et l'argent à l'entrée (≈ 0 $ après la Concession au lieu de 328 $).
+
+### G1-a — Simulation, sauvegarde, sonde (fait)
+- `sim/fishing.gd` réécrit (voir l'étape 0) ; `config.json › fishing` refondu : `rent_wait` 20 s, `rent_warn` 6 s, `ticket_step`
+  0,10, `sail_rent` 0,05 $/s par voilier, `announce_at` 480 s, `reveal_gap` 45 s, `marcel` (40 $, après 12 loyers à la main),
+  `places` (**11 $ × 1,33**, 8 niveaux), `services` (**6 $ × 1,27**, 10 niveaux, paliers nommés ×3 : criée, pompe, lavage, glace),
+  `buildings` (chalutiers 50 $, jetée 90 $, marina 150 $, extensions 180 et 240 $, Concession 1 000 $ dès la marina),
+  `boats` (barque 5 $ · 18/6/22/6 s ; chalutier 15 $ · 32/8/36/14 s ; thonier 50 $ · 44/10/50/16 s).
+- `PortSim` : `buy_fish_places(n)`, `buy_fish_services(n)`, `buy_fish_building(id)`, `fish_collect(i)`, `hire_marcel()`,
+  `boost_mult()`, `_flush_fish_events()` (Marcel, annonce → « Missions » révélé, bateau reparti sans payer), signal `fish_event` ;
+  `act0_ready()` = Concession signée ; Heures sup sur `clock()` ; hors-ligne figé avant Marcel (rapport vide, `GameState` ne
+  l'annonce pas) ; sauvegarde **v7** et migration v6 (acte 0 en cours → la Crique recommence à 0 $ ; T1+ → Crique finie, Heures sup
+  décalées de `act0_time`) ; `carry_over` reprend la pêche au plafond.
+- `missions.json` : `c0` « Signer la Concession du terre-plein » (clé `fish`) en tête ; `Objectives` la cache à une partie sans
+  Crique. `unlocks.json` : « Réputation » attend désormais « Faire venir les navires » + 50 s (elle suivait « Missions », révélé
+  dès la Crique : elle serait tombée à la 1re seconde du T1).
+- **Calage** (`tests/crique_probe.gd`, nouveau, 4 graines × 2 modes). Ticket additif (voir DECISIONS). 1re économie (barque 7 $,
+  R₀ 5,5 $/s) : tranquille 18 min 25, pressé 16 min 50 ; retenue : **barque 5 $, R₀ = 4,2 $/s** (bas de la fourchette 4–6, pour
+  limiter l'avance du T1), coûts −10 % : **tranquille 19 min 20–19 min 34**, pressé 19 min 30–20 min.
+  Jalons (graine 1) : places 2 à 1 min 16, criée 2 min 32, Marcel 4 min 16, chalutiers 9 min 34, jetée 11 min 56, marina 13 min 32,
+  extensions 14 min 56 et 15 min 22, Concession 19 min 31 ; 168 escales, 17 loyers à la main, aucun perdu (le bot encaisse à la
+  seconde). **Pressé ≤ 12 min : non tenu** — la Concession = 4 min de R₀, et un joueur pressé n'a que 2,4 $/s à la marina ; le
+  bot « pressé » (achats par temps de retour, puis épargne) ne gagne rien sur le tranquille. Il faudrait une Concession ≈ 400 $ ou
+  un R₀ bien plus haut (qui accélère le T1) : à trancher.
+- **Sonde depuis la Concession** (`pacing_probe`, partie tranquille, 4 graines, base F3 mesurée depuis l'entrée au T1) :
+
+| Graine | Crique | T2 F3 → G1 | T3 F3 → G1 | Fin F3 → G1 |
+|---|---|---|---|---|
+| 1 | 19 min 31 s | 11:33 → 10:48 (−6,5 %) | 40:09 → 43:11 (+7,5 %) | 1 h 28 → 1 h 30 (+2 %) |
+| 2 | 19 min 28 s | 11:31 → 11:08 (−3,3 %) | 42:19 → 40:42 (−3,8 %) | 1 h 29 → 1 h 21 (−9 %) |
+| 3 | 19 min 34 s | 12:50 → 9:58 (−22 %) | 41:56 → 39:29 (−5,9 %) | 1 h 14 → 1 h 14 (0 %) |
+| 4 | 19 min 20 s | 12:49 → 11:08 (−13 %) | 42:08 → 42:02 (−0,2 %) | 1 h 19 → 1 h 15 (−5 %) |
+| Moyenne | 19 min 28 s | 12:11 → 10:45 (**−11,7 %**) | 41:38 → 41:21 (−0,7 %) | 1 h 22,5 → 1 h 20 (−3 %) |
+
+  T3 et fin dans la tolérance ; **T2 hors tolérance** (−12 % en moyenne, graine 3 −22 %). Attribution (même sonde avec
+  `--set=config.boost.mult=1`) : sans Heures sup, T2 g1 11 min 11 (−3,2 %), g3 12 min 05 (−5,8 %). L'avance vient donc surtout des
+  **Heures sup révélées dès Marcel** (cadrage § 8.1) et jouées au T1 (×2 pendant 60 s toutes les 5 min), le reste de R₀ (4,2 $/s au
+  lieu de 0,5 passif). Les deux règles de l'ordre (cadrage § 8.1 et tolérance ±5 %) sont contradictoires : à trancher par le chef
+  de projet (Heures sup actives sur le port à partir du T2 seulement, ou tolérance recalée). Révélations du T1 sinon dans l'ordre
+  d'avant (douane 2 min 31, parc 2 min 44, gate 4 min 15, responsables 5 min, commerce 5 min 43).
+
+### G1-b — Monde, interface, nuages (fait)
+- `Layout` « Lot F3/G1 » (plan coté § 5 ter) : ponton des places unique (z 48,4, x −140 → −104, modules aux niveaux 3, 4, 6, 7,
+  taquets), 9 places au pas de 4 u, voie ouest x −146, quai des chalutiers inchangé, grande jetée (−96 ; 7) + passerelle, thonier
+  (−99,5 ; 7) par la voie est prolongée (`fish_exit_z`), marina (3 modules, 24 anneaux) dans l'intérieur de la boucle, pompe et
+  lavage sur la plage, coins de pêche (9 barques), caboteur de l'annonce (−226 ; 12) → (−134 ; −80), nuages (`CLOUD_COVER`,
+  `CLOUD_HOLE`), bornes de la Crique, `anse_site_spec(clé, cfg)` (places_N, services_N, bâtiments), `anse_obstacles()`.
+- `FishingView` réécrit : ponton par niveaux, taquets, paliers nommés, jetée, marina et voiliers (roulis), Marcel (sinon le voisin),
+  bulles de loyer (`collectable()`), caisses pendant LAND et WAIT, caboteur de l'annonce (`start_passing`), camionnette (toutes les
+  35 s ou 2 débarques dès la criée), **primitives** (`_prim`) pour les modèles absents, liste `primitives` pour le rapport.
+- `CloudLayer` (nouveau `class_name`, `--import` fait) : bancs procéduraux en MultiMesh (8 dômes de 8 × 3 par banc + dalle),
+  nuages isolés au bord du trou, dérive, shader (fondu + montée), `start_dissolve()`. Diorama : `_ensure_clouds()` depuis
+  `_process` (au lien, l'interface n'a pas encore appelé `begin_act0`), `clouds_on()`, `dissolve_clouds()`, `_apply_bounds()` ;
+  `CameraRig.set_crique_bounds()`. Images par seconde en fenêtre : 47–61 (35 au départ, 28 pendant le passage du caboteur avec la
+  carte) ; triangles 64 000–104 000.
+- Interface : `UpgradesSheet` (cartes Places / Services avec ×1 / ×10 / max et maintien, prochain bâtiment, Concession en tête ;
+  après la Concession, titre « La Crique » en bas), `ManageSheet` (un seul onglet pendant la Crique, fiche de Marcel), HUD
+  (RESPONSABLES et sa pastille dès que Marcel se présente, pièces vers le compteur au loyer encaissé, carte de l'annonce et cadrage
+  `ANNOUNCE_LOOK`, bascule : dissolution 3,5 s **puis** caboteur, narratrice, cérémonie, chantiers ; Heures sup sur `clock()`),
+  `WorldOverlay` (bulle « Loyer X $ », rouge avec compte à rebours sous 6 s ; aussi après la Concession tant que Marcel n'est pas là),
+  `Tutorial` (7 étapes de la Crique, version 7, `REV6_ORDER` + alias), `tiers.json` (`announce`, `bascule` réécrits, récit du palier 0),
+  `main.gd` (arguments de capture).
+
+### G1-c — Contrôles, captures, APK (fait)
+- **Contrôles retirés (devenus faux) et remplacés** — `run_all › test_f3` : 2 (coup de main) → « loyer à la main, bateau qui repart
+  sans payer » ; 3 (5 achats) → « cartes : Places ×1,33, criée ×3, Concession dès la marina, plafond R₀ 4–6, la pêche continue,
+  cartes restantes après la Concession » ; « coup de main » → « Marcel : 12 loyers, hors-ligne figé puis à son rythme, Heures sup,
+  compteur managers » ; 4 (bascule à 300 $) → « annonce à la 8ᵉ minute, 45 s après Marcel, Missions, mission c0 » ; 5 (3–5 min) →
+  « tranquille 15–20 min, pressé ≤ 21 min » ; 6 (v6) → « v7 : aller-retour, v6 en cours → recommence, v6 au T1 → finie, Heures sup
+  décalées » ; 7 → « nouvelle concession au plafond » ; 8 (trajets) étendu : 9 barques, jetée, marina, nuages, caboteur ≥ 14 u des
+  coins de pêche et visible ≥ 60 % de sa route ; + « nuages : trou = l'anse, rien du port ni du cap, couverture = monde habillé » ;
+  10 (tutoriel) → 7 étapes, version 7. `ui_smoke` : « F3 acte 0 » → « G1 Crique » (une carte, puis chalutiers / Places / Services) ;
+  « coup de main » → « loyer à la main » (bulle, repère, pièces, tutoriel) + « bateau non touché : bulle rouge, reparti sans payer » ;
+  + « Marcel » (RESPONSABLES, pastille, fiche seule, un onglet, Heures sup) ; + « annonce » (caboteur à l'écran dans le trou,
+  narratrice, MISSIONS, mission en tête) ; « l'anse vivante » → jetée, marina, 6 voiliers, Concession en tête d'AMÉLIORER, mêmes
+  invariants ; + « nuages : bancs posés, caméra bornée, coins de l'écran dans le monde habillé et sous les nuages » ; « bascule »
+  → « Concession : dissolution d'abord, nuages disparus, bornes élargies » ; « après l'acte 0 » → « après la Concession : la pêche
+  continue, cartes restantes, plus de nuages » ; « sauvegarde v6 » → « v7 (nuages posés à la reprise ; partie d'avant F3 : 12 bateaux,
+  20 voiliers, sans nuages) ».
+- **Recalés (aucun retiré)** : `ui_smoke` « mission réclamée depuis le bandeau » accepte `c0` ou `m1` ; garde-fou 280 → 400 s de
+  temps réel (la Crique jouée à l'interface dure ≈ 70 s de plus) ; « F2 intro » : état d'avant `fish_places_1`.
+- **`run_all` 235/235** (129 + 49 + 57 ; avant 233) · **`ui_smoke` 176/176** (avant 171). Un passage de `ui_smoke` lancé en même temps
+  que quatre sondes et les captures a dépassé le garde-fou, un autre a vu « D-UI 2 : caméra rendue au joueur » (un bandeau avec
+  cadrage pendant le contrôle, aléa de minutage) ; vert au passage seul suivant. Avertissements `Modèle absent` attendus (primitives).
+- **Captures** (`--fresh --start --skip-intro`, 540 × 960, toutes regardées), `docs/captures/` : `g1_depart_nuages.png` (l'anse
+  sous les nuages, ponton pourri, cabane, le large au nord-ouest) ; `g1_loyer.png` (deux barques rentrées, bulles « Loyer 5,2 $ ») ;
+  `g1_lavage.png` (bulle rouge « 7,4 $ · 3 s », notification « reparti sans payer », aire de lavage, pompe, criée) ; `g1_criee.png`
+  (palissade et route en chantier) ; `g1_pompe.png`, `g1_glace.png` (fabrique sur le cap, jetée, quai des chalutiers) ; `g1_marcel.png`
+  (sur le ponton, bandeau Heures sup) ; `g1_responsables.png` (la fiche de Marcel, seul onglet) ; `g1_ameliorer.png` (jetée en tête,
+  Places 4/8, Services → pompe) ; `g1_caboteur.png` (le caboteur de Corsaire & Fils en haut à gauche, carte de la narratrice, bouton
+  MISSIONS 0/4) ; `g1_jetee.png` ; `g1_marina.png` (20 voiliers, 4,5 $/s) ; `g1_dissipation.png` (nuages translucides qui montent,
+  le village dessous) ; `g1_zoom_large.png` (zoom 72 : nuages aux bords, jamais le bord du monde).
+- **Modèles Blender** : tous livrés pendant le lot (`DECISIONS.md` § « Lot G — modèles ») et utilisés (`pier_long` tourné de 90°,
+  axe z ; `marina_pontoon` tourné de 90° ; `cloud_bank` posé par le centre de sa face du dessous à y 11 ; `ship_passing`, `marcel`,
+  `fuel_pump`, `wash_bay`, `sailboat_a/b`). Repli en primitives Godot (`FishingView._prim`, `CloudLayer._bank_mesh`) si un modèle manque.
+
+### Limites
+- Pressé ≤ 12 min non tenu (≈ 19 min 30 : la Concession domine) ; T2 −12 % (Heures sup au T1, cadrage § 8.1) : voir G1-a.
+- Le ponton ne gagne pas un module à chaque niveau (plage de 36 u) : aux niveaux 3, 4, 6, 7 ; un taquet et un chantier par place.
+- Le loyer manuel reste nécessaire après la Concession si Marcel n'a pas été embauché (le bot et le tutoriel l'embauchent).
+- Les nuages ignorent la couleur de sommet du modèle (teinte uniforme du shader : blanc légèrement bleuté).
+- `tests/crique_probe.gd` reste (outil de calage, pas un contrôle).
+
+APK réexporté : `C:\Nadir\tycoon_V2\build\PortHorizonV2.apk` (30,5 Mo, 15/10 19 h 14, apres la rotation des modules de marina ; commande `--export-debug "Android"` de
+`exporter_apk.bat`, ancien APK supprimé avant). Passage final : `run_all` 235/235 (129 + 49 + 57, trois parts en parallèle),
+`ui_smoke` 176/176 (seul).
+
+### G1-d — Arbitrages et corrections (15/10, soir)
+Demandes du chef de projet après vérification : Heures sup hors de la Crique, Concession moins chère, Marcel vers la 5ᵉ minute,
+nuages opaques.
+- **Heures sup** : `PortSim.hire_marcel()` ne révèle plus `boost` (l'unlock reste « palier 2 » jusqu'au lot G2 : rien de visible ni
+  d'actif pendant la Crique ; le minuteur reste sur `clock()`, le ×2 des loyers reste prêt pour plus tard). Plus de double
+  révélation « Marcel rejoint la Crique » + « Nouveau : Heures sup ».
+- **Concession** : 1 000 → 600 → **500 $** (le plus bas autorisé). Mesure (`crique_probe`, 4 graines) : à 600 $, pressé 15 min 03–
+  15 min 19 ; à 500 $, **pressé 14 min 51–14 min 57** (cible ≤ 14 : **non tenue de ≈ 55 s**), tranquille **16 min 58–17 min 10**.
+  Le bot pressé achète par temps de retour, la marina dès qu'elle est le meilleur achat (≈ 9 min 30), puis n'achète plus que ce
+  qui se rembourse avant la Concession (règle 0,9 × temps restant ; 0,5 est contre-productif : 15 min 26) ; il arrive à la
+  Concession avec ≈ 1,9 $/s. 400 $ tiendrait les 14 min ; à trancher.
+- **Marcel** : `after_rents` 12 → **16** : il se présente (bot, 4 graines) à **5 min 08** (g1, g2, g3) et **4 min 49** (g4) —
+  l'offre est faite entre 4 min 30 et 4 min 50, l'embauche attend les 40 $. (14 loyers : 4 min 16–4 min 44.)
+- **Nuages** : `CloudLayer._build_sheet()` — une nappe continue à y 6,5 (cellules de 12 u sur toute la couverture, découpées en
+  3 × 3 au bord du trou, ≈ 7 000 triangles), même matériau et même dissolution que les bancs. Plus aucun sol, route, voiture ni
+  maison entre les bancs (captures `g1d_depart`, `g1d_zoom_large`, `g1d_zoom_large_sud`). L'anse, la cabane et la route du
+  mareyeur restent dégagées.
+- **Sonde depuis la Concession** (4 graines, partie tranquille, base F3) :
+
+| Graine | Crique | T2 F3 → G1-d | T3 F3 → G1-d | Fin F3 → G1-d |
+|---|---|---|---|---|
+| 1 | 17 min 10 s | 11:33 → 11:50 (+2,5 %) | 40:09 → 39:16 (−2,2 %) | 1 h 28 → 1 h 17 (−12,5 %) |
+| 2 | 17 min 09 s | 11:31 → 12:33 (+9,0 %) | 42:19 → 43:00 (+1,6 %) | 1 h 29 → 1 h 24 (−5,6 %) |
+| 3 | 17 min 09 s | 12:50 → 12:11 (−5,1 %) | 41:56 → 40:43 (−2,9 %) | 1 h 14 → 1 h 26 (+16 %) |
+| 4 | 16 min 58 s | 12:49 → 10:57 (−14,6 %) | 42:08 → 40:48 (−3,2 %) | 1 h 19 → 1 h 22 (+3,8 %) |
+| Moyenne | 17 min 07 s | 12:11 → 11:53 (**−2,5 %**) | 41:38 → 40:57 (−1,7 %) | 1 h 22,5 → 1 h 22 (−0,3 %) |
+
+  **T2 dans la tolérance** (−2,5 % en moyenne, chaque graine dans ±15 %) sans autre changement de l'économie du port ; T3 et fin aussi
+  en moyenne ; la fin de la graine 3 sort de 1 % (+16 %, la fin varie de ±10 % d'un lot à l'autre depuis F2). Révélations du T1 :
+  paliers 3 min 02, douane 3 min 13, parc 3 min 18, contrats 4 min 03, gate 4 min 49, responsables 5 min 34, commerce 5 min 4x (écart
+  min 5 s).
+- **Contrôles** : `run_all › G1` « Marcel » attend désormais `not feature("boost")` ; durées « pressé ≤ 15 min 30 (cible 14) » ;
+  `ui_smoke` « Marcel » attend le bouton Heures sup caché ; « nuages » exige la nappe (`sheet_tris ≥ 1000`). **`run_all` 235/235**,
+  **`ui_smoke` 176/176** (nombres inchangés : contrôles amendés, aucun retiré).
+- **Captures** (`docs/captures/g1d_*`, regardées) : `g1d_depart.png` (verrou opaque, l'anse dégagée), `g1d_zoom_large.png` et
+  `g1d_zoom_large_sud.png` (zoom 72 aux deux bornes : nuages pleins, plus de route ni de voiture), `g1d_marcel.png` (Marcel sur
+  le ponton, aucun bandeau, pas de bouton Heures sup ; le « Palier suivant » visible est l'infobulle de la barre de palier sous la
+  souris), `g1d_concession.png` (AMÉLIORER : « Concession du terre-plein » en tête à 500 $, puis extension 1 et Places).
+- APK réexporté : `build/PortHorizonV2.apk` (30,5 Mo, 15/10 19 h 47).
+- Vérification du chef de projet (15/10, soir) : G1-d accepté ; **cible recalée : pressé ≤ 15 min** (mesuré 14 min 51–57).
+
+## Lot G2 — « Le Terre-plein : le premier navire à la main » (15/10, soir)
+
+Ordre `docs/ORDRE_G2_TERREPLEIN.md`, cadrage `docs/CADRAGE_DEBUT.md` § 4, 6, 7, 11, 12 ; modèles du lot G livrés (DECISIONS § « Lot G —
+modèles »). Base : lot G1 + G1-d. Journal tenu au fil de l'eau.
+
+### Étape 0 — Note de faisabilité (avant code)
+
+**Deux régimes de partie.** `PortSim.new()` (tests, sauvegardes d'avant G2) garde le port **complet** : les six pièces du départ
+(terrassement, quai n°1, cabane de douane, piste et barrière, grue mobile, parc de stockage) sont **insérées en tête de `built`**
+au `reset()` / au chargement sans clé `g2`, et les services Accostage, Déchargement, Arrivées sont révélés « depuis toujours »
+(`features`). Une partie **jouée** (`begin_act0`, puis la Concession) part de la friche : `built` vide, rien de révélé, les gestes à
+la main. Ainsi `run_all` (210 contrôles du port) reste vrai ; seuls les contrôles du départ (séquence du T1, gestes parc/gate/grue)
+changent. Clé de sauvegarde **v8** : `g2` = {`manual`: true si la partie joue le processus à la main, compteurs des gestes, offres
+des responsables}.
+
+**Six pièces = six bâtiments** (`buildings.json`, tier 1, **avant** `quay_ext`, dans l'ordre) : `platform` Terrassement (≈ 150 $,
+`ground_platform` ; capacité de la plateforme 120), `quay1` Quai n°1 (≈ 200 $, `quay_small` × 2 ; le poste n°1 n'existe qu'avec
+lui), `hut` Cabane de douane (≈ 120 $, `customs_hut` + douanier ; le tampon), `track` Piste et barrière (≈ 150 $, `track_dirt`,
+`barrier_post` ; la sortie), `crane_mobile` Grue mobile (≈ 300 $, `add_crane` ; avant : la grue de bord), `yard` Parc de stockage
+(≈ 400 $, gravier, +180 → 300, les engins). `customs1` reste (remplace le modèle de la cabane, même case). Les pièces de départ
+`Layout.STARTER` (quay0, crane0, yard0, gate0) disparaissent : leurs groupes de décor (`grp`) sont rattachés aux bâtiments
+(quay0 → quay1, crane0 → crane_mobile, yard0 → yard, gate0 → track) ; `start_t1_works` et `T1_STAGGER` sont retirés ; la bascule
+(nuages, caboteur, narratrice, cérémonie) se termine sur la friche nue et `open_port()`.
+
+**Le processus à la main (régime « manuel », avant les responsables).**
+- *Accoster* : sans Léon (ni Mathilde), aucun accostage automatique (`auto_berth_delay` ne sert que le régime complet) : le joueur
+  touche le navire (geste existant `prioritize_ship`, compteur `priority`).
+- *Décharger* : un poste sans grue décharge avec la **grue de bord** à `board_crane_rate` (≈ 0,125 EVP/s, à caler), vers la
+  plateforme (`apron`, capacité 40 + 8/niv.). Plateforme pleine → le navire attend (« il faut une sortie », alerte du goulot).
+- *Tamponner* : `stamp()` — toucher la cabane passe **tout le lot présent** en dédouané. Sans parc, le lot = `apron` → `yard_cleared`
+  (stock de la plateforme, 120 EVP) ; avec le parc, les engins (`transfer_rate`) portent `apron` → `yard_pending` (tout, avant
+  `customs1` ; la fraction de la politique après) et le tampon passe `yard_pending` → `yard_cleared`. Paul embauché : le tampon tourne
+  seul à `inspect_rate` (le service Douane, `_inspect` actuel). Compteur `stamps`.
+- *Laisser passer et encaisser* : `pass_truck()` — un camion se présente dès que 2 EVP sont dédouanés (`truck_queue`, mécanique
+  actuelle) ; toucher la barrière sert **un camion** (2 EVP) qui paie sa part de gate (`gate_fee_ratio`, pièce vers le compteur).
+  Non servi, il repart après `truck_wait` 20 s sans rien (les conteneurs restent), bulle rouge avant, compteur `trucks_lost`.
+  Tonio embauché : la gate tourne seule à `gate_rate` (`_gate` actuel). Compteur `passes`. La manutention reste payée au
+  déchargement (économie du T1 inchangée) : à la barrière, la pièce visible est la part de gate.
+- Les gestes grue (×1,2), engin et barrière express sont **retirés** (`assist_unload`, `yard_boost`, `gate_rush` renvoient 0 :
+  contrôles remplacés).
+- Hors-ligne : régime manuel sans responsable du port → rapport vide (monde figé) ; ensuite règle actuelle.
+- Heures sup : révélées à l'embauche du premier responsable du port.
+
+**Les responsables sur les gestes.** `mgr_offers` : après 5 gestes (accoster / tamponner / laisser passer), le responsable se présente
+(bulle + carte), un à la fois, ≥ 45 s après la nouveauté précédente ; `manager_revealed(d)` = offre faite pour berths / customs /
+gate, niveau 10 pour cranes / yard_ops / harbor (règle actuelle). Prix (`departments.json`) : Léon 150 $, Paul 200 $ (passe au T1),
+Tonio 250 $ — à caler. Embauché : le geste disparaît (plus de bulle), sa capacité = le débit du service (mécanique actuelle,
+×2 du responsable conservé). La **carte du service** apparaît avec son responsable ou son bâtiment (`unlocks.json` : `dept_berths`
+{manager}, `dept_customs` {manager ou customs1}, `dept_gate` {manager}, `dept_cranes` {crane_mobile}, `dept_yard_ops` {yard},
+`dept_harbor` {berth2}) ; ordre d'AMÉLIORER = Arrivées · Accostage · Déchargement · Douane · Stockage · Sortie camions, le prochain
+bâtiment en tête. Les trois chapitres actuels (« Chapitre 2 : les engins… ») sont réécrits selon § 8.2 du cadrage.
+
+**Noms de métier** : `departments.json` (Arrivées, Accostage, Déchargement, Douane, Stockage, Sortie camions), `Info.DEPT_SHORT`,
+`PortSim.HINTS`, `unlocks.json`, `tutorial.json`, `tiers.json`, textes vus avant le T2 (« gate », « portique », « EVP » → conteneur).
+Identifiants inchangés.
+
+**Monde.** Terrassement : dalles `ground_platform` (8 × 8, posées au pas des tuiles ×0,75) sur l'ancien parc et le tablier ; état
+d'avant : rochers, broussailles, `jetty_ruin`. Quai n°1 : deux `quay_small` (x −44…−12, mer en +Y) + capitainerie + musoirs ;
+le caboteur de Corsaire & Fils (le `ship_passing` de l'annonce) se présente en rade (l'escale initiale, premier navire). Grue de
+bord : `coaster_crane` posé sur le navire à quai (`deck_pos_on_coaster`, `boom` / `hook` animés pendant le déchargement) tant que le
+poste n'a pas de grue ; conteneurs posés sur la plateforme (`container_wait` orange = `apron`, `container_ok` vert = dédouanés sur la
+plateforme, avant le parc) dans une grille (nouveau `PlatformView`). Cabane : `customs_hut` + `customs_officer` (toucher = tampon,
+son). Piste : `track_dirt` sur la route d'accès (route et voie des camions actuelles, en terre jusqu'à `gate2`), `barrier_post`
+(bras `arm` animé, toucher = laisser passer) à la place des barrières de départ. Grue mobile et parc : décor actuel (crane0,
+yard0). Bulles : « Touche ! » sur le navire en rade, « À tamponner : N » sur la cabane, « Camion : touche la barrière » (rouge avant
+qu'il reparte), « Il faut une sortie » sur la plateforme pleine. Chantiers par `Layout.LOTS` (nouvelles cases).
+
+**Sonde et bot.** Le bot (régime manuel) touche avec 1 à 3 s de délai humain : navire en rade, cabane dès qu'un lot attend, barrière
+dès qu'un camion attend ; achète la première case disponible tant que les six pièces ne sont pas là ; embauche chaque responsable
+dès qu'il se présente (après Marcel). Jalons depuis la Concession : premier camion (4–5 min), Léon / Paul / Tonio (6–8), grue mobile
+et parc (8–12), T2 (12–14), T3, fin ; base = G1-d.
+
+**Ce qui casse.** `run_all` : « sans geste, l'accostage attend auto_berth_delay » (régime complet : inchangé) ; « coup de main grue »,
+« toucher l'engin », « toucher la barrière express », « les responsables font ces gestes » (→ tamponner / laisser passer / Léon-Paul-
+Tonio) ; `test_f2` « pièces de départ » (→ six bâtiments, états d'avant) ; noms des services dans les libellés. `ui_smoke` : « gestes
+parc / gate » (lignes 475–484), « F2/F3 séquence du T1 » et « F2 premier navire » (→ friche nue, achats, caboteur après le quai,
+grue de bord, tampon, camion), « F3 aucune fenêtre > 15 s » (recalé : le joueur agit dès la Concession), étape « ship » du
+tutoriel. Risques : la sonde T2 (prix des six pièces et des responsables à caler ; Paul et Tonio ×2 à bas prix), la file de camions
+sans Tonio (la vue des camions suit `trucks_waiting`), le premier navire (classe « mini », gabarit 1 : il doit porter la grue de
+bord ; `deck` du méta de `ship_mini`).

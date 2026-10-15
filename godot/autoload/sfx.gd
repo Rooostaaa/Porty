@@ -46,6 +46,7 @@ func _ready() -> void:
 	_streams["click"] = _tone([[900.0, 0.035]], 0.25, "sine")
 	_streams["buy"] = _tone([[523.0, 0.06], [659.0, 0.06], [784.0, 0.1]], 0.3, "triangle")
 	_streams["coin"] = _tone([[988.0, 0.05], [1319.0, 0.12]], 0.22, "square")
+	_streams["stamp"] = _tone([[140.0, 0.04], [0.0, 0.03], [110.0, 0.07]], 0.4, "square")      # lot G2 : le tampon de la douane
 	_streams["bell"] = _bell(880.0, 0.9)
 	_streams["horn"] = _tone([[196.0, 0.18], [0.0, 0.05], [196.0, 0.25]], 0.25, "square")
 	_streams["bad"] = _tone([[392.0, 0.1], [311.0, 0.22]], 0.25, "square")

@@ -226,7 +226,7 @@ func _refresh_card(force: bool) -> void:
 ## Amène la caméra sur la cible monde de l'étape (le HUD en haut de l'écran cache la rade au cadrage de départ).
 func _focus_camera(st: Dictionary) -> void:
 	var t := String(st.get("target", ""))
-	if hud == null or hud.diorama == null or (t != "ship" and t != "crane" and t != "ship_waiting" and not t.begins_with("lot:") and t != "vehicle" and t != "barrier"):
+	if hud == null or hud.diorama == null or (t != "ship" and t != "crane" and t != "ship_waiting" and not t.begins_with("lot:") and t != "vehicle" and t != "barrier" and t != "hut"):
 		return
 	var d := hud.diorama
 	var sim := GameState.sim
@@ -250,6 +250,8 @@ func _focus_camera(st: Dictionary) -> void:
 	elif t == "crane" and not d.crane_views.is_empty():
 		var p := d.crane_views[0].position
 		d.rig.focus(Vector3(p.x - 4.0, 0.0, p.z + 10.0))
+	elif t == "hut":
+		d.rig.focus(Layout.CUSTOMS_HUT + Vector3(2, 0, -10))
 	elif t == "vehicle" or t == "barrier":
 		d.rig.focus(Layout.GATE + Vector3(2, 0, -14) if t == "barrier" else Layout.YARD_CENTER + Vector3(-4, 0, 4))
 	elif t.begins_with("lot:") and Layout.LOTS.has(t.substr(4)):
@@ -365,15 +367,17 @@ func _target(st: Dictionary) -> Dictionary:
 		var w := _longest_waiting(sim)
 		if w != null and d.ship_views.has(w.id):
 			return {"pos": d.to_screen((d.ship_views[w.id] as Node3D).position + Vector3(0, 4, 0))}
-	# lot F3 : une barque (ou un bateau) qui rentre et qu'on peut aider à débarquer
+	# lot F3/G1 : un bateau rentré dont le loyer attend (bulle « Loyer »)
 	if t == "boat" and d != null and d.fishing_view != null:
-		var hb := d.fishing_view.helpable()
+		var hb := d.fishing_view.collectable()
 		if not hb.is_empty():
 			return {"pos": d.to_screen(d.fishing_view.boat_pos(hb[0]) + Vector3(0, 1.5, 0))}
 	if t == "vehicle" and d != null and not d.traffic.vehicles.is_empty():
 		return {"pos": d.to_screen((d.traffic.vehicles[0].node as Node3D).position + Vector3(0, 2, 0))}
 	if t == "barrier" and d != null:
 		return {"pos": d.to_screen(Layout.GATE + Vector3(-2, 1.5, 1))}
+	if t == "hut" and d != null:      # lot G2 : la cabane de douane (tamponner)
+		return {"pos": d.to_screen(Layout.CUSTOMS_HUT + Vector3(0, 2.5, 0))}
 	if t.begins_with("lot:") and d != null:
 		var bid := t.substr(4)
 		if sim.built.has(bid) or not Layout.LOTS.has(bid):
@@ -449,13 +453,24 @@ const REV3_ORDER := ["welcome", "ship", "crane", "quay", "quay", "goulot", "goul
 const REV4_ORDER := ["welcome", "ship", "crane", "quay", "buy", "goulot", "goulot_fix", "parc", "parc", "building", "gate", "mission", "commerce", "contracts"]
 ## Version 5 (avant le lot F3) : pas encore les trois étapes de l'acte 0 en tête ; même suite ensuite.
 const REV5_ORDER := ["welcome", "ship", "crane", "quay", "buy", "goulot", "goulot_fix", "parc", "manager", "building", "gate", "mission", "commerce", "contracts"]
+## Version 6 (lot F3) : trois étapes de l'acte 0 (ponton, barque à aider, criée) ; lot G1 (version 7) : sept étapes de la Crique
+## (ponton, loyer, places, criée, Marcel, mission, Concession). Une partie v6 en cours d'acte 0 recommence la Crique : « a0_boat »
+## et « a0_hall » reprennent au loyer.
+const REV6_ORDER := ["a0_pontoon", "a0_boat", "a0_hall", "welcome", "ship", "crane", "quay", "buy", "goulot", "goulot_fix", "parc", "manager", "building", "gate", "mission", "commerce", "contracts"]
+const REV6_ALIAS := {"a0_boat": "a0_rent", "a0_hall": "a0_rent"}
+## Version 7 (lot G1) : sept étapes de la Crique puis la suite d'avant ; lot G2 (version 8) : le premier navire à la main
+## (terrassement, quai, accoster, cabane, tamponner, piste, laisser passer) ; « crane » (coup de main) et « gate » (barrière
+## express) n'existent plus — un joueur arrêté sur l'une reprend à l'étape suivante.
+const REV7_ORDER := ["a0_pontoon", "a0_rent", "a0_places", "a0_hall", "a0_marcel", "a0_mission", "a0_concession", "welcome", "ship", "crane", "quay", "buy", "goulot", "goulot_fix", "parc", "manager", "building", "gate", "mission", "commerce", "contracts"]
+const REV7_ALIAS := {"crane": "quay", "gate": "mission"}
 
 
 func _from_old_index(old: int, rev: int = 1) -> int:
-	var order: Array = REV5_ORDER if rev == 5 else (REV4_ORDER if rev == 4 else (REV3_ORDER if rev == 3 else (REV2_ORDER if rev == 2 else OLD_ORDER)))
+	var order: Array = REV7_ORDER if rev == 7 else REV6_ORDER if rev == 6 else (REV5_ORDER if rev == 5 else (REV4_ORDER if rev == 4 else (REV3_ORDER if rev == 3 else (REV2_ORDER if rev == 2 else OLD_ORDER))))
 	if old >= order.size():
 		return steps.size()
+	var want := String(REV6_ALIAS.get(order[old], order[old])) if rev == 6 else (String(REV7_ALIAS.get(order[old], order[old])) if rev == 7 else String(order[old]))
 	for i in steps.size():
-		if String(steps[i].id) == order[old]:
+		if String(steps[i].id) == want:
 			return i
 	return old

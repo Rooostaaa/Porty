@@ -15,7 +15,15 @@ var cargo_lines: Dictionary = {}       # cargaison -> libellé du panier
 var _tags_at := -10.0                  # étiquettes « maillon » recalculées une fois par seconde (estimations coûteuses)
 
 
+var crique := false                    # lot G1 : pendant la Crique, Responsables est le seul onglet de Gestion
+
+
 func _init(start_tab: int = 0) -> void:
+	crique = GameState.sim != null and GameState.sim.fishing.act0
+	if crique:
+		super._init("Responsables", ["Responsables"] as Array[String])
+		tab = 0
+		return
 	super._init("Gestion", ["Bâtiments", "Stats", "Responsables", "Port"] as Array[String])
 	tab = start_tab
 
@@ -26,6 +34,9 @@ func build() -> void:
 	dept_lines.clear()
 	policy_btns.clear()
 	_sig = _signature()
+	if crique:
+		_build_managers()
+		return
 	match tab:
 		0:
 			_build_buildings()
@@ -39,7 +50,7 @@ func build() -> void:
 
 func _signature() -> String:
 	var s := sim()
-	return "%d|%d|%d|%d" % [s.tier, s.built.size(), s.managers_count(), s.features.size()]
+	return "%d|%d|%d|%d|%s%s" % [s.tier, s.built.size(), s.managers_count(), s.features.size(), s.fishing.marcel_offered, s.fishing.marcel]
 
 
 # --- Bâtiments ------------------------------------------------------------------
@@ -308,13 +319,18 @@ func _refresh_stats() -> void:
 
 func _build_managers() -> void:
 	var s := sim()
-	help("man_mgr", "Un responsable automatise son département (×2) et fait tourner le port hors-ligne.")
-	var locked := not s.feature("managers")
+	help("man_mgr", "Un responsable fait le travail à ta place, même quand tu es parti : après lui, plus aucun geste, à toi les achats.")
+	# lot G1 : Marcel, patron pêcheur (la Crique), dès qu'il se présente
+	if s.fishing.marcel_offered or s.fishing.marcel:
+		_marcel_card(s)
+	if s.fishing.act0:
+		return
+	var locked := not s.feature("managers") and s.mgr_offered.is_empty()      # (lot G2 : un responsable des gestes s'est présenté)
 	if locked:
-		content.add_child(UI.wrap_label("Les responsables se présenteront " + s.unlock_text("managers") + ".", 30, UI.BAD))
+		content.add_child(UI.wrap_label("Les responsables du port se présenteront " + s.unlock_text("managers") + ".", 30, UI.BAD))
 	for d in PortSim.DEPTS:
-		if not s.feature("dept_" + d):
-			continue        # un responsable ne se présente qu'avec son service (chapitres)
+		if not s.feature("dept_" + d) and not (s.g2 and s.manager_revealed(d)):
+			continue        # un responsable ne se présente qu'avec son service (chapitres) — lot G2 : ou après ses 5 gestes
 		var m: Dictionary = s.db.dept_by_id[d].manager
 		var c := UI.card()
 		content.add_child(c)
@@ -349,11 +365,11 @@ func _build_managers() -> void:
 			ok.custom_minimum_size.x = 220
 			col.add_child(ok)
 		else:
-			var b := UI.button("EMBAUCHER\n" + Fmt.money(float(m.cost)), UI.MONEY, 28, 100)
+			var b := UI.button("EMBAUCHER\n" + Fmt.money(s.manager_cost(d)), UI.MONEY, 28, 100)
 			b.custom_minimum_size.x = 220
-			b.disabled = not s.manager_available(d) or s.money < float(m.cost)
+			b.disabled = not s.manager_available(d) or s.money < s.manager_cost(d)
 			if not s.manager_available(d):
-				b.text = "Palier T%d" % int(m.tier)
+				b.text = "Palier T%d" % s.manager_tier(d)
 			elif not s.manager_revealed(d) and not locked:
 				b.text = "Niveau %d
 requis" % int(s.db.cfg("manager_reveal_level", 10))
@@ -370,14 +386,62 @@ requis" % int(s.db.cfg("manager_reveal_level", 10))
 			ba.disabled = ba.disabled or locked or not s.manager_revealed(d)
 			ba.pressed.connect(_hire.bind(d, true))
 			col.add_child(ba)
-			rows.append({"dept": d, "btn": b, "abtn": ba, "cost": float(m.cost), "amber": int(m.amber)})
+			rows.append({"dept": d, "btn": b, "abtn": ba, "cost": s.manager_cost(d), "amber": int(m.amber)})
+
+
+## Lot G1 — la fiche de Marcel : même habit que les responsables du port, prix en argent seulement (pas d'Ambre demandé).
+func _marcel_card(s: PortSim) -> void:
+	var m: Dictionary = s.fishing.cfg.get("marcel", {})
+	var c := UI.card()
+	content.add_child(c)
+	var row := UI.hbox(20)
+	c.add_child(row)
+	var portrait := PanelContainer.new()
+	portrait.add_theme_stylebox_override("panel", UI.flat(UpgradesSheet.FISH_COLOR, 60))
+	portrait.custom_minimum_size = Vector2(120, 120)
+	var il := UI.label("M", 48, Color.WHITE, true)
+	il.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	il.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	portrait.add_child(il)
+	row.add_child(portrait)
+	var mid := UI.vbox(4)
+	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(mid)
+	mid.add_child(UI.label(String(m.get("name", "Marcel")), 34, UI.VIOLET))
+	mid.add_child(UI.label("%s · La Crique" % String(m.get("title", "Patron pêcheur")), 26, UI.MUTED))
+	mid.add_child(UI.wrap_label(String(m.get("perk", "")), 28, UI.TEXT))
+	var col := UI.vbox(8)
+	row.add_child(col)
+	if s.fishing.marcel:
+		var ok := UI.button("EMBAUCHÉ ✓", UI.MONEY, 30, 100)
+		ok.disabled = true
+		UI.style_done(ok)
+		ok.custom_minimum_size.x = 220
+		col.add_child(ok)
+	else:
+		var cost := s.fishing.marcel_cost()
+		var b := UI.button("EMBAUCHER\n" + Fmt.money(cost), UI.MONEY, 28, 100)
+		b.custom_minimum_size.x = 220
+		b.disabled = s.money < cost
+		b.pressed.connect(_hire.bind("marcel", false))
+		col.add_child(b)
+		rows.append({"marcel": true, "btn": b, "cost": cost})
 
 
 func _hire(d: String, amber: bool) -> void:
 	var btn: Button = null
 	for r in rows:
-		if r.get("dept", "") == d:
-			btn = r.abtn if amber else r.btn
+		if r.get("dept", "") == d or (d == "marcel" and r.has("marcel")):
+			btn = r.abtn if amber and r.has("abtn") else r.btn
+	if d == "marcel":
+		if sim().hire_marcel():
+			Sfx.play("hire")
+			if btn != null:
+				Fx.reward(btn, "Embauché !", UI.MONEY, true)
+		else:
+			Sfx.play("bad")
+		rebuild()
+		return
 	if sim().hire_manager(d, amber):
 		Sfx.play("hire")
 		if btn != null:
@@ -601,7 +665,7 @@ func refresh() -> void:
 	if _signature() != _sig:
 		request_rebuild()
 		return
-	match tab:
+	match 2 if crique else tab:
 		0:
 			for r in rows:
 				if r.has("state"):
@@ -610,6 +674,10 @@ func refresh() -> void:
 			_refresh_stats()
 		2:
 			for r in rows:
+				if r.has("marcel"):
+					var mb: Button = r.btn
+					mb.disabled = s.money < float(r.cost)
+					mb.text = "EMBAUCHER\n" + Fmt.money(float(r.cost)) if not mb.disabled else "Il manque\n" + Fmt.money(float(r.cost) - s.money)
 				if r.has("dept"):
 					var off := not s.feature("managers")
 					var b: Button = r.btn

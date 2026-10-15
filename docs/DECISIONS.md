@@ -681,3 +681,103 @@ leur instant ne l'est pas : une fonction chargée compte comme révélée « dep
 - **Forêt profonde** : blocs ×0,92–1,05 (au lieu de ×2–2,4) au pas de 21 u, ≈ 1,3 × les arbres du village ; 673 blocs ;
   carrés profonds sans ombre ; triangles dessinés au zoom le plus large identiques à F2 (LOD du modèle).
 - Captures de débogage (binaire de l'éditeur) : `--start --skip-intro --act0=N [--act0-warm=S] [--bascule]`.
+
+## Lot G — modèles de la Crique complète, de la marina, des nuages et du terre-plein — 15/10 (ordre `docs/ORDRE_BLENDER_G.md`, expert Blender)
+- **19 nouveaux modèles**, aucun `.glb` existant modifié, palette inchangée, rien touché hors `blender/`, `docs/previews/`,
+  `godot/assets/models/` (nouveaux `.glb` + leurs entrées dans `assets_meta.json`) et cette section. Code : `blender/parts/marina.py`
+  (crique et marina, registre B), `nuages.py`, `terreplein.py` (registre C), branchés dans `build_assets.py` (`MODULES`, budgets nom
+  par nom dans `EXACT`, tous respectés, 9 346 triangles en tout). Planches : `docs/previews/g_crique.png`, `g_nuages.png`,
+  `g_terreplein.png`, `g_budget.png` (tableau des triangles), faites par le nouveau `blender/preview_g.py` (scènes avec eau, sable,
+  friche, caméra du jeu à 35°) sur `preview_lib.py` (matériau ISM de `preview_style.py`, chargement, cadrage) ;
+  `build_assets_budget.py` relit les budgets sans construire.
+- **Crique (B)** : `fuel_pump` 344 tris (borne rouge à goutte blanche, tuyau enroulé, auvent rouge-blanc), `wash_bay` 1 120
+  (dalle 6 × 4,2, portique bleu à 4 jets, flaque, brosses bleu / jaune), `pier_long` 1 452 (14 × 2,5 sur X, tablier à `deck_z` 0,9
+  sur pieux béton, origine à la flottaison ; pneus et bittes à chapeau jaune côté **+Y** = `moor_side`, garde-corps côté −Y,
+  lampadaire ×1,35 en bout +X, `lamp` en repère Godot), `marina_pontoon` 576 (10 × 1,8 sur X, plancher à 0,45, 4 catways par côté
+  en `catway_x` / `catway_y`, 6 places `berths` entre les catways, bateau perpendiculaire au ponton ; bornes eau / électricité
+  bleu-blanc), `sailboat_a` 496 (3,5 u, blanc à liston bleu) et `sailboat_b` 496 (4,5 u, rouge falun), `yacht_small` 576 (5 u,
+  flybridge), `marcel` 384 (gabarit `docker` 1,35 u, ciré jaune, bras croisés, casquette, pipe, face +X), `ship_passing` 524 (coque
+  de `ship_coaster` simplifiée, 9 conteneurs fixes sur le pont, pavillon noir et or de Corsaire à la poupe ; même origine et étrave
+  +X, pas de slots : le jeu ne pose rien dessus). Bateaux : origine à la flottaison, étrave +X, comme au lot F.
+- **Nuages** : `cloud_bank` 504 tris (exactement 24 × 12 × 6, origine au centre de la face du dessous) et `cloud_puff` 162
+  (8 × 5 × 4). Un seul maillage fermé par nuage : champ de hauteur en grappe de dômes, bord rabattu à z = 0 sur le contour, **une
+  face plate dessous, aucune face intérieure** ; **couleur de sommet uniforme** `white` (le grisé du dessous vient de l'ombrage par
+  face du shader, pas de la couleur). Le fondu / la montée sont à faire par le shader du développeur ; `vcol` noté dans le méta.
+- **Terre-plein (C)** : `ground_platform` 184 tris (8 × 8, dessus en z = 0 comme les dalles de `terrain.py`, deux couches de
+  remblai sur les bords, ornières de chenilles, quatre rochers dans l'emprise), `quay_small` 1 120 (16 × 6, dessus en z = 0, mer en
+  +Y, béton neuf à joints, 4 bittes ×1,35 à chapeau jaune, 4 défenses, échelle, bande jaune-noir côté terre, **pas de rails**),
+  `track_dirt` 152 (plaque 8 × 4 sur X, 0,04 d'épaisseur, posée sur n'importe quel sol ; bords herbeux) et `track_dirt_turn` 172
+  (8 × 8, entre par −X, sort par +Y ; les autres virages par rotation), `barrier_post` 364, `coaster_crane` 408,
+  `container_wait` / `container_ok` 156 chacun (gabarit `container20`, corps blanc à montants et nervures gris, étiquette orange /
+  verte sur le dessus, la face −Y et la face +X ; couleurs fixes, pas de teinte par le jeu).
+- **Nœuds nommés** (axes en repère Godot dans `assets_meta.json` → `nodes`, comme au lot F) :
+  `barrier_post` = `base` + **`arm`** (pivot (−2,4 ; 1,1 ; 0), bras de 5 u vers +X, `rotation.z` > 0 lève, 0 → 80°) ; la piste passe
+  sous le bras selon Y (`gate_x` = ±2,1) ; `coaster_crane` = `base` (socle 2 × 2 + mât, origine = dessous du socle, à poser sur le
+  pont : `deck_pos_on_coaster` = (7,4 ; 1,65 ; 0) en repère Godot, à l'avant de la cale) > **`boom`** (pivot (0 ; 3,4 ; 0), flèche de 8 u
+  vers +X local, **exportée relevée de 30°** : `rotation.z` lève, `rotation.y` oriente autour du mât) > **`hook`** (en bout de flèche,
+  exporté avec la rotation inverse pour garder le câble vertical ; descendre = `position.y` locale, câble de 3 u) ;
+  `sailboat_a` / `sailboat_b` = `<nom>_hull` + **`mast`** (pivot au pied du mât, `mast_foot` ; bôme, voile ferlée, étais et girouette
+  suivent le mât : `rotation.z` ±3° pour le roulis). Les planches montrent la grue tournée vers le quai, conteneur au crochet.
+- **Non fait / limites** : `far_shore` laissé au lot F4 comme demandé. Les planches sont des mises en scène Blender (eau plate,
+  terre à +0,5), pas des captures du jeu : Godot n'a pas été lancé (pas de `.import` pour les 19 `.glb`, premier lancement à faire
+  côté développeur). Les sols `ground_platform` et `track_*` n'ont pas de raccord en pente entre la plateforme (z = 0) et la friche
+  plus basse : à régler par le placement (ou une rampe si besoin). `ship_passing` est fixe (conteneurs modelés) : ne pas le teinter
+  par armateur. `marina_pontoon` est au ras de son budget (576 / 600) : plus d'anneaux ou de taquets n'y tiennent pas.
+
+## Chapitre 1 « La Crique » (lot G1) — 15/10 (ordre `docs/ORDRE_G1_CRIQUE.md`, cadrage `docs/CADRAGE_DEBUT.md`, journal `JOURNAL_PLAN_BAIE.md` § « Lot G1 »)
+- **La pêche reste un module léger de la simulation** (`sim/fishing.gd`, `config.json › fishing`), réécrit : deux cartes à niveaux
+  (**Places au ponton** 0–8 : une barque par place, niveau 1 = la réparation gratuite et 2 barques ; **Services à quai** 0–10 :
+  `ticket = 1 + 0,10 × niveau`, paliers nommés aux niveaux 1 criée, 3 pompe, 6 lavage, 9 glace, qui coûtent ×3 et bâtissent),
+  des bâtiments dans l'ordre (quai des chalutiers 50 $, grande jetée 90 $, marina 150 $, extensions 180 et 240 $) et la
+  **Concession du terre-plein** (1 000 $ au lot G1, **500 $ depuis G1-d**, dès la marina) qui remplace le seuil d'argent de F3
+  (`switch_money` disparaît).
+- **Argent = loyer par escale** : un bateau rentré paie `valeur(classe) × ticket` (barque 5 $, chalutier ×3, thonier ×10, ±10 %).
+  Sans Marcel, le joueur **touche** le bateau (bulle « Loyer », pièces vers le compteur) ; sinon il attend 20 s (bulle rouge sous
+  6 s) et **repart sans payer**. La marina paie 0,05 $/s par voilier (6 → 12 → 20). Le coup de main ×1,2 de F3 disparaît.
+- **Marcel** (patron pêcheur, 40 $) se présente après 16 loyers encaissés à la main (12 au lot G1) ; embauché, plus aucun geste ni
+  bulle, il encaisse tout. **G1-d : il ne révèle plus les Heures sup** (ce sera le premier responsable du port, lot G2 ; rien de
+  visible ni d'actif avant le port ; le minuteur des Heures sup reste sur `PortSim.clock()`, les loyers suivraient le ×2). Responsable hors département : compteur `managers` (mission « premier responsable »),
+  feuille RESPONSABLES (seul onglet de Gestion pendant la Crique), sauvegarde ; `managers_count()` du rendement hors-ligne ne le
+  compte pas.
+- **Hors-ligne** : avant Marcel, le monde se fige (rapport vide, rien gagné, rien perdu) ; avec Marcel, la pêche rapporte à son
+  rythme estimé ; après la Concession, idem pour la part pêche (le port garde son rendement de base + responsables).
+- **Plafond R₀ = 4,2 $/s** (bas de la fourchette 4–6 du cadrage, pour limiter l'avance du T1) tout au maximum (9 barques, 2 chalutiers, 1 thonier, 20 voiliers, ticket ×2) ; ticket additif (+10 %)
+  et non multiplicatif (+15 % composé aurait mis R₀ hors de 4–6 avec les valeurs qui tiennent le début) ; la pêche continue
+  pour toujours, les cartes restantes restent achetables en bas d'AMÉLIORER (titre « La Crique »).
+- **Chronologie mesurée** (bot, 4 graines) : tranquille **19 min 20–19 min 34** (plafond puis Concession) ; **pressé 19 min 30–20 min
+  (cible ≤ 12 non tenue)** : la Concession vaut 4 min de R₀, mais un joueur pressé n'a que ≈ 2,4 $/s à la marina (≈ 12 min au plus
+  tôt) ; 12 min demanderait une Concession ≈ 400 $ ou un R₀ bien plus haut (qui accélère le T1). À trancher par le chef de projet.
+- **Progression depuis la Concession** (4 graines, base F3 mesurée depuis l'entrée au T1) : T2 **−12 %** en moyenne (g3 −22 %),
+  T3 −0,7 %, fin −3 %. L'avance du T2 vient surtout des **Heures sup révélées dès Marcel** (cadrage § 8.1), donc jouées au T1 par le
+  bot : sans Heures sup, T2 −3,2 % (g1) et −5,8 % (g3) ; le reste vient de R₀ (4,2 $/s au lieu de 0,5 $/s passif). Hors tolérance
+  ±5 % : à trancher (Heures sup actives sur le port dès le T2 seulement, ou tolérance recalée).
+- **Annonce du port** : `clock ≥ 480 s`, criée faite, ≥ 45 s après Marcel → le caboteur `ship_passing` traverse au large (trou des
+  nuages), carte de la narratrice (`tiers.json › 0 › announce`), **Missions** révélé, mission `c0` « Signer la Concession du
+  terre-plein » (clé `fish` de `missions.json`) en tête de liste, accomplie à la Concession. Une partie sans Crique (tests,
+  parties d'avant F3) ne montre pas cette mission.
+- **Nuages** (`CloudLayer`, modèles `cloud_bank` / `cloud_puff` en MultiMesh ; repli procédural — demi-sphères sur dalle — si absents) sur tout le rectangle habillé sauf le trou de l'anse (`Layout.CLOUD_HOLE`), dérive lente, **dissolution par shader**
+  (fondu + montée 3,5 s) **avant** la bascule : puis les bornes de la caméra s'élargissent, le caboteur revient, narratrice,
+  cérémonie, chantiers du T1 (inchangés : lot G2). Jamais recréés ; posés dès que la Crique commence (`Diorama._ensure_clouds`).
+- **Caméra** bornée à l'anse pendant la Crique (`CameraRig.set_crique_bounds`, zoom ≤ 72) ; cadrage d'intro recalé.
+- **Monde** : un seul ponton des places qui s'allonge (modules aux niveaux 3, 4, 6, 7 : la plage fait 36 u, un module de 6 u par
+  niveau n'y tient pas — un taquet et un chantier par place), 9 places au pas de 4 u, voie ouest en x −146 ; grande jetée le
+  long du cap (thonier étrave au nord, voie est prolongée) ; marina dans l'intérieur de la boucle. Plan coté § 5 ter.
+- **Sauvegarde v7** (`act0` au nouveau format) : v6 en cours d'acte 0 → la Crique recommence (0 $) ; v6 au T1+ → Crique finie
+  (plafond, Marcel, Concession, Heures sup décalées de `act0_time`). Nouvelle concession : pêche reprise au plafond.
+- **Tutoriel version 7** : ponton → loyer → places → criée → Marcel → mission → Concession, puis la suite d'avant (`REV6_ORDER`).
+- **Modèles** : les 19 modèles du lot G ont été livrés pendant le lot et sont utilisés ; chargeur tolérant (`FishingView._model`,
+  `CloudLayer._build`) avec primitives Godot en repli (`_prim`) si un modèle manque.
+- Captures de débogage (binaire de l'éditeur) : `--places=N --services=N --fish-build=a,b --marcel[=offer] --announce --act0-warm=S
+  --rent --bascule`.
+
+## Chapitre 1 « La Crique » — corrections G1-d — 15/10 (arbitrages du chef de projet, journal § « Lot G1 › G1-d »)
+- **Heures sup** : plus révélées par Marcel ; elles le seront par le premier responsable du port (Léon, lot G2). Rien de visible ni
+  d'actif pendant la Crique (l'unlock reste « palier 2 » jusqu'à G2 ; minuteur sur `clock()` conservé). Une seule révélation à la fois.
+- **Concession du terre-plein : 500 $** (1 000 au lot G1 ; 600 ne suffisait pas : pressé 15 min 10). Mesure : pressé 14 min 51–57
+  (cible recalée par le chef de projet : **pressé ≤ 15 min** ; 400 $ tiendrait 14 min), tranquille 16 min 58–17 min 10 (cible 15–20). La Concession reste de
+  loin l'achat le plus cher de la Crique (extension 2 : 240 $).
+- **Marcel** se présente après **16 loyers** à la main : 4 min 49–5 min 08 sur les 4 graines (objectif de la première session).
+- **Nuages opaques** : nappe blanche continue à y 6,5 sous les bancs (`CloudLayer._build_sheet`), découpée au bord du trou,
+  dissoute avec les bancs. Plus rien ne se voit entre les nuages, à tous les zooms.
+- **Sonde depuis la Concession** (4 graines) : T2 **−2,5 %** en moyenne (g4 −14,6 %, g2 +9 %), T3 −1,7 %, fin −0,3 % (g3 +16 %) :
+  dans la tolérance sans autre changement de l'économie du port — l'avance du T2 du lot G1 venait bien des Heures sup jouées au T1.

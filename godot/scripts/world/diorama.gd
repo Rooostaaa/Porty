@@ -82,10 +82,15 @@ var _stage_trucks := 0
 signal t1_works_done()                # la séquence de chantiers du T1 est finie (quai, grue, parc, gate)
 signal start_released()               # le premier navire glisse vers le quai : la simulation peut démarrer
 var sites: SiteWorks                  # chantiers en cours (présentation seule)
-# --- lot F3 : l'anse des pêcheurs (FishingView) et la bascule vers le T1 ---
-signal fish_popup(pos: Vector3, text: String, big: bool)      # débarque vendue (« +X $ ») ou coup de main
+# --- lot F3/G1 : l'anse des pêcheurs (FishingView), les nuages de la Crique (CloudLayer) et la bascule vers le T1 ---
+signal fish_popup(pos: Vector3, text: String, big: bool)      # loyer encaissé par Marcel (« +X $ »)
+signal fish_paid(pos: Vector3, amount: float)                 # lot G1 : loyer encaissé d'un toucher (pièces vers le compteur)
 var fishing_view: FishingView
-var fish_helps_shown := 0             # (tests) coups de main donnés d'un toucher
+var fish_rents_shown := 0             # (tests) loyers encaissés d'un toucher
+var stamps_shown := 0                 # (tests, lot G2) tampons d'un toucher
+var passes_shown := 0                 # (tests, lot G2) camions laissés passer d'un toucher
+var board_cranes := 0                 # (tests, lot G2) grues de bord montrées sur un navire à quai
+var clouds: CloudLayer                # lot G1 : nuages de la Crique (null quand il n'y en a pas, ou plus)
 var edge_root: Node3D                 # rives du golfe, forêt, rive d'en face, routes sous les arbres (construits une fois)
 ## Pièces de départ du T1 (Layout.STARTER) : "pending" (friche : état d'avant), "building" (chantier), "done".
 ## Partie chargée, test, capture : tout est "done" (rien ne se rejoue).
@@ -103,7 +108,7 @@ var _first_crab_t := 0.0
 const T1_GAP := 0.7                   # s avant le premier chantier de la séquence (déplacement de la caméra)
 ## Lot F3 : s entre le début d'un chantier de la séquence et celui du suivant (ils se chevauchent) : quai 0 → 6 s, grue
 ## 3 → 6,5 s, parc 5 → 10 s, gate 7,5 → 11,5 s ; la séquence entière tient en ≈ 12 s (≤ 15 s), caméra sur chaque pièce.
-const T1_STAGGER := {"quay0": 3.0, "crane0": 2.0, "yard0": 2.5}
+const T1_STAGGER := {}      # lot G2 : plus de séquence de chantiers automatique
 ## Bâtiments clés d'une zone : leur ouverture de zone montre déjà les dalles et les accessoires en MultiMesh pendant la
 ## séquence ; les autres attendent la fin de leur chantier.
 const _SITE_ZONE_KEYS := ["quay_ext", "customs1", "dredge1", "berth2", "reefer", "gate2", "berth3", "lng", "rail"]
@@ -206,8 +211,47 @@ func bind(s: PortSim) -> void:
 	for sh in sim.ships:
 		_adopt(sh)
 	_sig = signature()
-	rebuild()
 	fishing_view.bind(sim)
+	# lot G1 : la Crique en cours (pas une nouvelle concession) → les nuages, posés dès que la Crique commence (`_ensure_clouds`,
+	# depuis _process : au lien, `begin_act0` n'a pas encore été appelé par l'interface) ; dissous à la Concession, jamais recréés
+	if clouds != null and is_instance_valid(clouds):
+		clouds.queue_free()
+	clouds = null
+	_clouds_done = false
+	_ensure_clouds()
+	rebuild()
+
+
+var _clouds_done := false
+
+
+func _ensure_clouds() -> void:
+	if sim == null or _clouds_done or (clouds != null and is_instance_valid(clouds)):
+		return
+	if sim.fishing.act0 and not sim.fishing.replay and not sim.act0_ready():
+		clouds = CloudLayer.new()
+		add_child(clouds)
+		_apply_bounds()
+
+
+## Lot G1 : les nuages de la Crique sont-ils posés (caméra bornée à l'anse) ?
+func clouds_on() -> bool:
+	return clouds != null and is_instance_valid(clouds) and not clouds.dissolving
+
+
+## La Concession : les nuages se dissolvent (3,5 s), puis les bornes de la caméra s'élargissent au palier.
+func dissolve_clouds() -> void:
+	_clouds_done = true
+	if clouds != null and is_instance_valid(clouds):
+		clouds.start_dissolve()
+	_apply_bounds()
+
+
+func _apply_bounds() -> void:
+	if clouds_on():
+		rig.set_crique_bounds()
+	else:
+		rig.set_tier_bounds(sim.tier)
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +516,7 @@ func rebuild() -> void:
 			static_root.add_child(tmi)
 	# quais : segments pour chaque poste existant + musoirs (le segment de l'allongement appartient à sa zone) ; lot F2 : rien
 	# tant que le vieux quai n'est pas rebâti (friche : estacade ruinée, Layout.starter_before)
-	var nb := sim.berths.size() if grp_ok("quay0") else 0
+	var nb := sim.berths.size() if grp_ok("quay1") else 0
 	var x_end := -36.0
 	for bi in nb:
 		var b: Dictionary = Layout.BERTHS[mini(bi, Layout.BERTHS.size() - 1)]
@@ -496,7 +540,7 @@ func rebuild() -> void:
 	var land_end := float(lx[1])
 	if not Zones.reclaimed(sim):
 		land_end = minf(land_end, float(Layout.LAND_X[2][1]))
-	var x2 := x_end if grp_ok("quay0") else land_end
+	var x2 := x_end if grp_ok("quay1") else land_end
 	while x2 < land_end - 0.1:
 		var mx := x2 + 3.0
 		if (not sim.built.has("quay_ext") and mx > -12.0 and mx < 0.0) or (not sim.built.has("berth2") and mx > 0.0 and mx < 36.0):
@@ -513,10 +557,10 @@ func rebuild() -> void:
 				qe.set_meta("zone_id", int(qez.id))      # la suite du terre-plein attend l'asphalte pendant son ouverture
 			static_root.add_child(qe)
 		x2 += 6.0
-	for xw in ([-45.0, -39.0] if grp_ok("quay0") else []):
+	for xw in ([-45.0, -39.0] if grp_ok("quay1") else []):
 		var qw := Assets.instance("quay_end")
 		qw.position = Vector3(xw, 0, Layout.QUAY_Z)
-		qw.set_meta("site", "quay0")
+		qw.set_meta("site", "quay1")
 		static_root.add_child(qw)
 	# décor et bâtiments
 	for p in Layout.PROPS:
@@ -558,11 +602,12 @@ func rebuild() -> void:
 			zone_nodes[zid].landmark = n
 		var tag := String(p.get("tag", ""))
 		if tag.begins_with("barrier"):
-			n.set_meta("lane", "out" if tag == "barrier_out" else "in")
+			n.set_meta("lane", "both" if tag == "barrier_post" else ("out" if tag == "barrier_out" else "in"))
 			barriers.append(n)
 		elif tag == "pass_light":
 			pass_lights.append(n)
 	traffic.set_barriers(barriers)
+	_build_g2_ground()
 	_build_scatter()
 	_build_hedges()
 	_build_before()
@@ -579,7 +624,7 @@ func rebuild() -> void:
 	_build_crossing_marks()
 	# personnel : chacun fait l'aller-retour entre deux points (le long du quai, devant la douane, sur le perron)
 	traffic.walkers.clear()
-	if ready_bid("quay0"):
+	if ready_bid("quay1"):
 		for i in 3:
 			var a := Vector3(-33.0 + i * 9.0, 0.8, -4.2)
 			_add_walker("docker", a, a + Vector3(5.0, 0, 0), 90.0)
@@ -601,7 +646,7 @@ func rebuild() -> void:
 	_build_lots()
 	_apply_sites()
 	yard.rebuild(sim)
-	rig.set_tier_bounds(sim.tier)
+	_apply_bounds()
 	_update_water_land(Zones.reclaimed(sim))
 	for id in newly:
 		if not opening_queue.has(id):
@@ -1134,7 +1179,7 @@ func _rebuild_cranes() -> void:
 		var n := cr.size()
 		for ci in n:
 			var ck := String(keys.get("%d:%d" % [bi, ci], ""))
-			if not grp_ok(ck) or (bi == 0 and not grp_ok("quay0")):
+			if not grp_ok(ck) or (bi == 0 and not grp_ok("quay1")):
 				continue          # lot F2 : grue de départ pas encore montée (friche)
 			var cv := CraneView.new()
 			cv.set_meta("site", ck)
@@ -1239,20 +1284,21 @@ func signature() -> String:
 
 ## Clé de chantier d'un poste à quai (le quai n°1 est la pièce de départ « quay0 »).
 static func berth_key(bi: int) -> String:
-	return ["quay0", "berth2", "berth3", "berth4"][clampi(bi, 0, 3)]
+	return ["quay1", "berth2", "berth3", "berth4"][clampi(bi, 0, 3)]
 
 
 ## Les éléments d'une pièce de départ (ou d'une clé quelconque) se construisent-ils ? Faux seulement pour une pièce de
 ## départ encore en friche.
 func grp_ok(key: String) -> bool:
-	return key == "" or String(starter_state.get(key, "done")) != "pending"
+	# lot G2 : les éléments d'une pièce du départ (quay1, crane_mobile, yard, track) se construisent avec son bâtiment
+	return key == "" or sim == null or sim.built.has(key)
 
 
 ## Clé de chantier de chaque grue « poste:indice » : la grue mobile de départ (« crane0 »), puis les grues ajoutées par les
 ## bâtiments dans l'ordre de leur achat (mêmes règles que PortSim.rebuild_infra).
 func crane_keys() -> Dictionary:
-	var out := {"0:0": "crane0"}
-	var count := {0: 1}
+	var out := {}
+	var count := {}
 	for bid in sim.built:
 		var b: Dictionary = sim.db.building_by_id.get(bid, {})
 		for e in b.get("effects", []):
@@ -1294,7 +1340,7 @@ func vis_berths() -> int:
 	var n := 0
 	for bi in sim.berths.size():
 		var k := berth_key(bi)
-		if bi == 0 and not ready_bid("quay0"):
+		if bi == 0 and not ready_bid("quay1"):
 			break
 		if bi > 0 and sites.hiding(k) and not _SITE_ZONE_KEYS.has(k):
 			break
@@ -1396,10 +1442,76 @@ func _on_site_finished(key: String) -> void:
 	_site_rebuild = true
 	if starter_state.has(key):
 		starter_state[key] = "done"
-		if key == "quay0":
+		if key == "quay1":
 			_spawn_first_ship()
 		if not t1_works_active():
 			t1_works_done.emit()
+
+
+## Lot G2 — sols du terre-plein : la plateforme (dalles `ground_platform`) tant que le parc de stockage n'est pas là ; la piste
+## (`track_dirt`) tant que la route n'est pas bitumée (deuxième voie, T2).
+func _build_g2_ground() -> void:
+	if sim.built.has("platform") and (not sim.built.has("yard") or sites.hiding("yard")) and Assets.exists("ground_platform"):
+		var r: Rect2 = Layout.PLATFORM_RECT
+		var nx := 5
+		var nz := 3
+		var sx := r.size.x / float(nx)
+		var sz := r.size.y / float(nz)
+		for i in nx:
+			for j in nz:
+				var g := Assets.instance("ground_platform")
+				g.position = Vector3(r.position.x + sx * (float(i) + 0.5), 0.0, r.position.y + sz * (float(j) + 0.5))
+				g.scale = Vector3(sx / 8.0, 1.0, sz / 8.0)
+				g.set_meta("site", "platform")
+				_add(g, 1)
+	if sim.built.has("track") and not sim.built.has("gate2") and Assets.exists("track_dirt"):
+		for run in Layout.TRACK_RUNS:
+			var a: Vector3 = run[0]
+			var b: Vector3 = run[1]
+			var n := maxi(1, ceili(a.distance_to(b) / 8.0))
+			var d := (b - a) / float(n)
+			for k in n:
+				var t := Assets.instance("track_dirt")
+				t.position = a + d * (float(k) + 0.5) + Vector3(0, 0.03, 0)
+				t.rotation.y = -atan2(d.z, d.x)
+				t.scale = Vector3(d.length() / 8.0, 1.0, 1.0)
+				t.set_meta("site", "track")
+				_add(t, 4)
+
+
+## Lot G2 — grue de bord : sur un navire à quai à un poste sans grue, le caboteur décharge avec sa propre grue (`coaster_crane`,
+## flèche et crochet animés tant qu'il décharge).
+var _bc_t := 0.0
+
+
+func _sync_board_cranes(delta: float) -> void:
+	_bc_t += delta
+	var n := 0
+	for mv in moored_views():
+		var want := sim.board_crane(mv.berth_i)
+		var bc: Node3D = mv.get_meta("board_crane") if mv.has_meta("board_crane") else null
+		if want and (bc == null or not is_instance_valid(bc)) and Assets.exists("coaster_crane"):
+			bc = Assets.instance("coaster_crane")
+			var dk: float = mv.deck_y
+			bc.position = Vector3(Layout.BOARD_CRANE_POS.x, dk, 0.0)
+			mv.model.add_child(bc)
+			bc.scale = Vector3.ONE / maxf(0.01, mv.model.scale.x)
+			mv.set_meta("board_crane", bc)
+		elif not want and bc != null and is_instance_valid(bc):
+			bc.queue_free()
+			mv.remove_meta("board_crane")
+			bc = null
+		if bc != null and is_instance_valid(bc):
+			n += 1
+			var boom := Assets.part(bc, "boom")
+			if boom != null:
+				var ph := _bc_t * 0.9 + float(mv.berth_i)
+				boom.rotation.y = 1.3 + 0.9 * sin(ph)            # la flèche va du pont au quai
+				boom.rotation.z = deg_to_rad(30.0 + 10.0 * sin(ph * 2.0))
+				var hook := Assets.part(bc, "hook")
+				if hook != null:
+					hook.rotation.z = -boom.rotation.z
+	board_cranes = n
 
 
 ## Achat d'un bâtiment : son chantier commence (la simulation l'a déjà appliqué). Les améliorations de service ne lancent
@@ -1417,9 +1529,8 @@ func start_site(bid: String) -> void:
 ## Nouvelle partie (ou nouvelle concession) : le monde repart de la friche, la séquence attend `start_t1_works` (après les
 ## cartes d'intro ; F3 : après l'acte 0). La simulation est gelée par l'interface tant que `start_flow_active()`.
 func start_works_pending() -> void:
-	for st in Layout.STARTER:
-		starter_state[String(st.id)] = "pending"
-	_first_hold = true
+	# lot G2 : plus de pièces « en attente » ni de premier navire retenu — la friche se bâtit par achats
+	_first_hold = false
 	_first_hold_t = 0.0
 	_first_crab_t = 0.0
 	first_view = null
@@ -1513,7 +1624,7 @@ func spawn_bascule_ship() -> ShipView:
 			v.dispatch_on(0, p)
 			v.queue_t = _t
 			v.gate_level = 2
-			v.hold_d = -1.0 if ready_bid("quay0") else ShipView._abscissa(p, Layout.CHANNEL_ENTRY)
+			v.hold_d = -1.0 if ready_bid("quay1") else ShipView._abscissa(p, Layout.CHANNEL_ENTRY)
 			_bind(v, s)
 			first_view = v
 			first_view_t = _t
@@ -2222,7 +2333,7 @@ func demo_ship(cls: String, slot: int = 0, bi: int = 0) -> ShipView:
 ## Navires à l'écran, une image : chef d'orchestre, règles de passage, puis chaque vue (liée : elle suit son escale ; sans
 ## escale : son propre voyage) ; une vue arrivée au bout de son trajet de sortie est libérée.
 func step_ships(delta: float) -> void:
-	if not ready_bid("quay0") and first_view == null:
+	if not ready_bid("quay1") and first_view == null:
 		return          # lot F2 : pas de cargo sans quai (friche, chantier du vieux quai)
 	_direct_ships()
 	_hold_ships(delta)
@@ -2745,6 +2856,9 @@ func _process(delta: float) -> void:
 		_sig = sig
 		if static_root.get_child_count() > 0:
 			rebuild()
+	_ensure_clouds()
+	if clouds != null and not is_instance_valid(clouds):
+		clouds = null
 	# lot F2 : chantiers (en pause sous un écran), séquence du T1, reconstruction après un chantier fini (pas pendant une
 	# ouverture de zone : elle tient des nœuds)
 	sites.paused = fx_paused
@@ -2753,6 +2867,7 @@ func _process(delta: float) -> void:
 		_site_rebuild = false
 		rebuild()
 	step_ships(delta)
+	_sync_board_cranes(delta)
 	fishing_view.speed_k = maxf(1.0, Sim.speed)
 	fishing_view.sub_t = 0.0 if Sim.paused else Sim.alpha() * float(sim.db.cfg("tick"))
 	fishing_view.sync(delta)
@@ -2841,34 +2956,35 @@ func _on_tapped(wp: Vector3, _sp: Vector2) -> void:
 		return
 	var pick := pick_tap(wp)
 	match String(pick.get("kind", "")):
-		"crane":
-			var cv: CraneView = pick.node
-			var moved := sim.assist_unload(cv.berth)
-			if moved > 0.0:
-				assist_done.emit(cv.position + Vector3(0, 7, 0), moved)
-				cv.kick()
-		"vehicle":
-			var vn: Node3D = pick.node
-			var moved2 := sim.yard_boost()
-			if moved2 > 0.0:
-				gesture_done.emit(vn.position + Vector3(0, 5, 0), "Rangé ! +%s EVP" % Fmt.num(moved2), moved2)
+		"hut":
+			# lot G2 : tamponner — les conteneurs posés passent au vert
+			var n_st := sim.stamp()
+			if n_st > 0.0:
+				stamps_shown += 1
+				Sfx.play("stamp", 0.05)
+				gesture_done.emit(Layout.CUSTOMS_HUT + Vector3(0, 5, 0), "Tamponné ! %d conteneurs" % roundi(n_st), -1.0)
 		"barrier":
-			var served := sim.gate_rush()
-			if served > 0.0:
-				gesture_done.emit(Layout.GATE + Vector3(0, 5, 0), "Un camion passe ! +%s EVP" % Fmt.num(served), served)
+			# lot G2 : laisser passer et encaisser — le camion charge, paie et part
+			var paid := sim.pass_truck()
+			if sim.counter("passes") > 0.0 and paid >= 0.0 and traffic.barrier_kick_on_pass():
+				passes_shown += 1
+				fish_paid.emit(Layout.GATE + Vector3(0, 3, 0), paid)
 		"ship":
-			# navire en rade : un seul toucher l'accoste en priorité (la Capitainerie le fera seule une fois embauchée)
+			# navire en rade : un seul toucher l'accoste en priorité (Léon ou la Capitainerie le feront seuls une fois embauchés)
 			var id: int = pick.id
 			var sh := sim.ship_by_id(id)
-			if sh != null and sh.state == Ship.State.ANCHORED and not sh.priority and not sim.managers.harbor and sim.prioritize_ship(id):
+			var auto_b := bool(sim.managers.harbor) or (sim.g2 and bool(sim.managers.berths))
+			if sh != null and sh.state == Ship.State.ANCHORED and not sh.priority and not auto_b and sim.prioritize_ship(id):
 				ship_prioritized.emit(id)
 			else:
 				ship_tapped.emit(id)
 		"fish":
+			# lot G1 : un bateau rentré (sans Marcel) — le toucher encaisse son loyer
 			var fi := int(pick.i)
-			if sim.fish_help(fi):
-				fish_helps_shown += 1
-				gesture_done.emit(fishing_view.boat_pos(fi) + Vector3(0, 3, 0), "Coup de main !", -1.0)
+			var paid := sim.fish_collect(fi)
+			if paid > 0.0:
+				fish_rents_shown += 1
+				fish_paid.emit(fishing_view.boat_pos(fi) + Vector3(0, 2.5, 0), paid)
 		"lot":
 			lot_tapped.emit(String(pick.id))
 		"dept":
@@ -2892,23 +3008,17 @@ func pick_tap(wp: Vector3) -> Dictionary:
 			var b := extra.duplicate()
 			b.kind = kind
 			st.best = b
-	# lot F3 : un bateau de pêche qui rentre (acte 0) — le toucher l'aide à débarquer ; pendant l'acte 0 (bascule comprise),
+	# lot G1 : un bateau de pêche rentré dont le loyer attend — le toucher l'encaisse ; pendant la Crique (bascule comprise),
 	# rien d'autre ne se touche (le port à conteneurs est fermé : ni empreinte, ni service, ni navire)
-	for fi in fishing_view.helpable():
+	for fi in fishing_view.collectable():
 		consider.call("fish", fishing_view.boat_pos(fi), FishingView.TAP_R, {"i": fi})
 	if sim.fishing.act0:
 		return st.best
-	for cv in crane_views:
-		if cv.berth < sim.berths.size() and sim.assist_ready(cv.berth):
-			consider.call("crane", cv.position, float(Layout.TAP_RADIUS.crane), {"node": cv})
-	if sim.yard_boost_ready():
-		for v in traffic.vehicles:
-			consider.call("vehicle", (v.node as Node3D).position, float(Layout.TAP_RADIUS.vehicle), {"node": v.node})
-	if sim.gate_rush_ready():
-		for b in traffic.barriers:
-			if is_instance_valid(b):
-				var arm := b.position + Vector3(1.9 * b.scale.x * cos(b.rotation.y), 0, -1.9 * b.scale.x * sin(b.rotation.y))      # milieu du bras
-				consider.call("barrier", arm, float(Layout.TAP_RADIUS.barrier), {"node": b})
+	# lot G2 : les gestes du terre-plein — tamponner (la cabane), laisser passer (la barrière)
+	if sim.stamp_ready() and ready_bid("hut"):
+		consider.call("hut", Layout.CUSTOMS_HUT, float(Layout.TAP_RADIUS.barrier), {})
+	if sim.pass_ready() and ready_bid("track"):
+		consider.call("barrier", Layout.GATE, float(Layout.TAP_RADIUS.barrier), {})
 	for id in ship_views:
 		var sv: ShipView = ship_views[id]
 		if is_instance_valid(sv):

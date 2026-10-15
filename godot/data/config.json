@@ -8,24 +8,41 @@
   "hazard_cost_cap": 0.25,
 
   "fishing": {
-    "rent": 0.04, "help_mult": 1.2, "help_land": 2.5, "hall_mult": 2.0, "switch_money": 300, "passive": 0.5, "jitter": 0.1,
+    "rent_wait": 20, "rent_warn": 6, "ticket_step": 0.10, "jitter": 0.1, "sail_rent": 0.05,
+    "announce_at": 480, "reveal_gap": 45,
+    "marcel": {"name": "Marcel", "title": "Patron pêcheur", "cost": 40, "after_rents": 16,
+               "perk": "Encaisse les loyers à ta place, même quand tu es parti. Plus aucun geste : à toi les achats."},
+    "places": {"name": "Places au ponton", "max": 8, "cost": 11, "growth": 1.33, "start_boats": 2, "dur": 3.0, "icon": "berth",
+               "text": "Chaque place louée, c'est une barque de plus qui rentre et paie son loyer."},
+    "services": {"name": "Services à quai", "max": 10, "cost": 6, "growth": 1.27, "named_mult": 3.0, "icon": "money",
+                 "text": "Chaque niveau rend l'escale plus chère : +10 % de loyer par bateau rentré.",
+                 "named": {"1": {"id": "hall", "name": "La criée", "model": "fish_hall", "dur": 4.5,
+                                 "text": "La halle à marée : le mareyeur vient chercher le poisson en camionnette."},
+                           "3": {"id": "fuel", "name": "Pompe à carburant", "model": "fuel_pump", "dur": 3.5,
+                                 "text": "Les bateaux font le plein chez toi."},
+                           "6": {"id": "wash", "name": "Aire de lavage", "model": "wash_bay", "dur": 4.0,
+                                 "text": "Coques lavées, pêcheurs fidèles."},
+                           "9": {"id": "ice", "name": "Fabrique de glace", "model": "ice_plant", "dur": 4.5,
+                                 "text": "De la glace pour la cale : le poisson vaut plus cher."}}},
+    "buildings": [
+      {"id": "trawler", "name": "Quai des chalutiers", "cost": 50, "boats": {"trawler": 2}, "dur": 5.0, "icon": "ship",
+       "text": "Deux chalutiers s'amarrent le long du cap : ils paient trois fois le loyer d'une barque."},
+      {"id": "pier", "name": "Grande jetée", "cost": 90, "boats": {"tuna": 1}, "dur": 6.0, "icon": "berth",
+       "text": "Une jetée en béton pour le thonier du large : il paie dix fois le loyer d'une barque."},
+      {"id": "marina", "name": "Marina", "cost": 150, "sail": 6, "dur": 5.0, "icon": "ship",
+       "text": "Des pontons flottants : six voiliers paient leur anneau, sans que tu lèves le petit doigt."},
+      {"id": "marina2", "name": "Marina — extension 1", "cost": 180, "sail": 12, "dur": 4.0, "icon": "ship",
+       "text": "Un deuxième ponton : douze voiliers."},
+      {"id": "marina3", "name": "Marina — extension 2", "cost": 240, "sail": 20, "dur": 4.0, "icon": "ship",
+       "text": "Un troisième ponton : vingt voiliers. La Crique est pleine."},
+      {"id": "concession", "name": "Concession du terre-plein", "cost": 500, "after": "marina", "concession": true, "icon": "trophy",
+       "text": "De l'autre côté du cap, la friche et la vieille estacade d'Odette : signe la concession, et bâtis un port à conteneurs."}
+    ],
     "boats": {
-      "dinghy":  {"name": "Barque",    "value": 10, "out": 20, "fish": 6,  "back": 20, "land": 6,  "max_shown": 4},
-      "trawler": {"name": "Chalutier", "value": 34, "out": 22, "fish": 6,  "back": 24, "land": 8,  "max_shown": 2},
-      "tuna":    {"name": "Thonier",   "value": 80, "out": 26, "fish": 8,  "back": 30, "land": 10, "max_shown": 1}
-    },
-    "buys": [
-      {"id": "pontoon",  "name": "Réparer le ponton",   "cost": 0,   "icon": "berth",  "boats": {"dinghy": 2},
-       "text": "Deux places louées aux barques du village : loyer des places et vente des caisses sur le ponton."},
-      {"id": "pontoon2", "name": "Deuxième ponton",     "cost": 25,  "icon": "berth",  "boats": {"dinghy": 2},
-       "text": "Deux places de plus : deux barques de plus qui débarquent chez toi."},
-      {"id": "hall",     "name": "La criée",            "cost": 60,  "icon": "money",  "hall": true,
-       "text": "La halle à marée vend aux enchères : chaque débarque rapporte ×2. Le mareyeur vient en camionnette."},
-      {"id": "trawler",  "name": "Quai des chalutiers", "cost": 120, "icon": "ship",   "boats": {"trawler": 2},
-       "text": "Deux chalutiers s'amarrent : quatre fois plus de poisson par débarque."},
-      {"id": "ice",      "name": "Fabrique de glace",   "cost": 200, "icon": "reefer", "boats": {"tuna": 1},
-       "text": "De la glace pour la cale : un thonier vient du large, dix fois plus de poisson par débarque."}
-    ]
+      "dinghy":  {"name": "Barque",    "value": 5,  "out": 18, "fish": 6,  "back": 22, "land": 6},
+      "trawler": {"name": "Chalutier", "value": 15, "out": 32, "fish": 8,  "back": 36, "land": 14},
+      "tuna":    {"name": "Thonier",   "value": 50, "out": 44, "fish": 10, "back": 50, "land": 16}
+    }
   },
 
   "arrive_time": 7,
@@ -37,7 +54,7 @@
   "moor_time_min": 1.5,
   "formal_time_min": 1.5,
   "auto_berth_delay": 12,
-  "manual": {"assist_seconds": 2.0, "assist_cooldown": 2.0, "express_pilot": 0.6, "yard_seconds": 2.0, "yard_cooldown": 4.0, "gate_seconds": 2.0, "gate_cooldown": 4.0},
+  "manual": {"express_pilot": 0.6, "board_crane_rate": 0.3, "truck_wait": 20, "truck_warn": 6, "gesture_offers": 5, "offer_gap": 45},
   "manager_reveal_level": 10,
   "reveal_gap": 60,
   "reveal_gap_min": 45,
@@ -45,6 +62,7 @@
   "rade_full_hold": 3.0,
   "patience_base": 80,
   "rade_places": 2,
+  "rade_places_g2": 7,
   "rade_places_per_10_levels": 1,
 
   "apron_per_berth": 40,

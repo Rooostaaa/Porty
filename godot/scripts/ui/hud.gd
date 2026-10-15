@@ -125,11 +125,12 @@ func _ready() -> void:
 	diorama.zone_tapped.connect(func(zid: int, pos: Vector3) -> void: overlay.show_zone_info(zid, pos))
 	diorama.zone_opened.connect(_on_zone_opened)
 	diorama.gesture_done.connect(_on_gesture)
-	# lot F3 : débarque vendue sur le ponton ou à la criée (« +X $ »), plus grande après un coup de main
+	# lot F3/G1 : loyer encaissé par Marcel (« +X $ ») ; loyer encaissé d'un toucher (pièces qui sautent vers le compteur)
 	diorama.fish_popup.connect(func(p: Vector3, t: String, big: bool) -> void:
 		fish_popups += 1
 		Sfx.play("coin", 0.05)
 		overlay.add_popup(p, t, UI.AMBER if big else UI.MONEY, big))
+	diorama.fish_paid.connect(_on_fish_paid)
 	if diorama.has_signal("ship_paid"):
 		diorama.connect("ship_paid", _on_ship_paid)
 	bind(GameState.sim)
@@ -165,10 +166,13 @@ func _apply_column() -> void:
 
 func bind(s: PortSim) -> void:
 	if _bound != null:
-		for c in [["notify", _on_notify], ["revenue", _on_revenue], ["tier_changed", _on_tier], ["event_started", _on_event], ["mission_ready", _on_mission], ["feature_unlocked", _on_feature], ["ship_class_first", _on_first_class], ["purchased", _on_purchased]]:
+		for c in [["notify", _on_notify], ["revenue", _on_revenue], ["tier_changed", _on_tier], ["event_started", _on_event], ["mission_ready", _on_mission], ["feature_unlocked", _on_feature], ["ship_class_first", _on_first_class], ["purchased", _on_purchased], ["fish_event", _on_fish_event]]:
 			if _bound.is_connected(c[0], c[1]):
 				_bound.disconnect(c[0], c[1])
 	_bound = s
+	s.fish_event.connect(_on_fish_event)
+	if not s.manager_offered.is_connected(_on_manager_offered):
+		s.manager_offered.connect(_on_manager_offered)
 	s.notify.connect(_on_notify)
 	s.revenue.connect(_on_revenue)
 	s.tier_changed.connect(_on_tier)
@@ -758,7 +762,54 @@ func _waiting_managers(s: PortSim) -> int:
 	for d in PortSim.DEPTS:
 		if not s.managers[d] and s.manager_revealed(d) and s.manager_available(d):
 			n += 1
+	if s.fishing.marcel_offered and not s.fishing.marcel:      # lot G1 : Marcel attend sur le ponton
+		n += 1
 	return n
+
+
+## Lot G1 — loyer encaissé d'un toucher : des pièces sautent du bateau vers le compteur d'argent, « +X $ ».
+func _on_fish_paid(pos: Vector3, amount: float) -> void:
+	fish_popups += 1
+	Sfx.play("coin", 0.1)
+	overlay.add_popup(pos, "+%s" % Fmt.money(amount), UI.AMBER, true)
+	if money_l != null and diorama != null:
+		Fx.coins(diorama.to_screen(pos), Fx.center_of(money_l), 6, flash_money)
+	diorama.rig.shake(0.08)
+
+
+## Lot G2 — un responsable des gestes se présente (après 5 gestes) : la narratrice le présente, RESPONSABLES rebondit.
+const MGR_CARDS := {
+	"berths": "Léon « Gros-Bras » Barbier se présente sur le quai : il accostera les navires pour toi, même quand tu es parti. Embauche-le (RESPONSABLES).",
+	"customs": "Paul Delmas, douanier, se présente à la cabane : il tamponnera les conteneurs pour toi, même quand tu es parti. Embauche-le (RESPONSABLES).",
+	"gate": "Tonio Ferrer se présente à la barrière : il laissera passer les camions et encaissera pour toi, même quand tu es parti. Embauche-le (RESPONSABLES).",
+}
+var mgr_cards_shown := 0          # (tests) cartes de la narratrice pour les responsables des gestes
+
+
+func _on_manager_offered(d: String) -> void:
+	_pop_in(manage_btn)
+	_refresh(GameState.sim)
+	if MGR_CARDS.has(d) and not story_active():
+		mgr_cards_shown += 1
+		_show_story({"title": "%s se présente" % String(GameState.db.dept_by_id[d].manager.name), "pose": "hello", "text": String(MGR_CARDS[d])}, Callable())
+
+
+## Lot G1 — événements de la Crique : Marcel se présente (bulle sur le ponton, RESPONSABLES rebondit), l'annonce du port
+## (le caboteur passe au large, la narratrice, la mission « Signer la concession »), un bateau reparti sans payer.
+func _on_fish_event(kind: String) -> void:
+	var s := GameState.sim
+	match kind:
+		"marcel_offer":
+			_pop_in(manage_btn)
+			_refresh(s)
+		"announce":
+			_frame(Layout.ANNOUNCE_LOOK, Layout.CRIQUE_ZOOM_MAX)
+			Sfx.play("ship_horn", 0.5)
+			var card: Dictionary = GameState.db.tier_def(0).get("announce", {})
+			if not card.is_empty():
+				_show_story(card, func() -> void: _frame(Layout.ANSE_LOOK, Layout.ANSE_ZOOM))
+		"rent_lost":
+			toast("Un bateau est reparti sans payer : touche-les quand ils rentrent (ou embauche Marcel).", "bad")
 
 
 ## « + » de l'Ambre : comment en gagner (il ouvrait les Missions, revue D-UI).
@@ -864,11 +915,12 @@ func _refresh(s: PortSim) -> void:
 	# (« touche-moi ») compte ceux qui attendent qu'on les embauche — plus jamais un bouton gris (revue D-UI)
 	var waiting_mgr := _waiting_managers(s)
 	var on_manage := s.feature("manage")
-	manage_btn.visible = on_manage or s.feature("managers")
+	# lot G1 : RESPONSABLES dès que Marcel se présente (le seul onglet de Gestion pendant la Crique)
+	manage_btn.visible = on_manage or s.feature("managers") or s.fishing.marcel_offered or not s.mgr_offered.is_empty()
 	var ml: Label = manage_btn.get_meta("label")
 	ml.text = "GESTION" if on_manage else "RESPONSABLES"
 	(manage_btn.get_meta("icon") as TextureRect).texture = UI.icon_tex("manage" if on_manage else "people")
-	mgr_pill.visible = s.feature("managers") and waiting_mgr > 0
+	mgr_pill.visible = (s.feature("managers") or s.fishing.marcel_offered or not s.mgr_offered.is_empty()) and waiting_mgr > 0
 	mgr_pill_l.text = str(waiting_mgr)
 	miss_badge.visible = s.feature("missions") and Objectives.claimable_count(s) > 0
 	if s.feature("missions"):
@@ -931,16 +983,16 @@ func _refresh(s: PortSim) -> void:
 	var bdef: Dictionary = s.db.cfg("boost")
 	boost_btn.state = boost_state
 	if boost_state == "actif":
-		boost_btn.caption = "%d s" % ceili(s.boost_until - s.time)
-		boost_btn.progress = clampf((s.boost_until - s.time) / maxf(1.0, float(bdef.duration)), 0.0, 1.0)
+		boost_btn.caption = "%d s" % ceili(s.boost_until - s.clock())
+		boost_btn.progress = clampf((s.boost_until - s.clock()) / maxf(1.0, float(bdef.duration)), 0.0, 1.0)
 	elif boost_state == "pret":
 		boost_btn.caption = "×%s" % Fmt.num(float(bdef.mult))
 		boost_btn.progress = 1.0
 	else:
 		boost_btn.caption = ""
 		var cd := maxf(1.0, float(bdef.get("cooldown", 300.0)))
-		boost_btn.progress = clampf(1.0 - (s.boost_ready_at - s.time) / cd, 0.0, 1.0)
-	boost_btn.tooltip_text = "Heures sup : " + ("actives" if boost_state == "actif" else ("prêtes" if boost_state == "pret" else "recharge %s" % Fmt.duration(s.boost_ready_at - s.time)))
+		boost_btn.progress = clampf(1.0 - (s.boost_ready_at - s.clock()) / cd, 0.0, 1.0)
+	boost_btn.tooltip_text = "Heures sup : " + ("actives" if boost_state == "actif" else ("prêtes" if boost_state == "pret" else "recharge %s" % Fmt.duration(s.boost_ready_at - s.clock())))
 	if boost_state != _boost_state:
 		var was := _boost_state
 		_boost_state = boost_state
@@ -1317,11 +1369,31 @@ static func _fixes(key: String, e: Dictionary, s: PortSim) -> bool:
 ## Nombre d'achats d'un niveau abordables qui valent le coup (pastille d'Améliorer, voir `Advice.worthwhile_count`).
 static func worthwhile_count(s: PortSim) -> int:
 	if fishing_cards(s):
-		return 1 if s.money >= s.fishing.next_cost() else 0      # lot F3 : l'achat suivant de l'acte 0
-	return Advice.worthwhile_count(s)
+		return fishing_affordable(s)      # lot G1 : les cartes de la Crique abordables
+	var n := Advice.worthwhile_count(s)
+	var st := s.next_starter()      # lot G2 : la prochaine pièce du départ, en tête d'AMÉLIORER
+	if st != "" and s.building_state(st) == "available" and float(s.db.building_by_id[st].cost) <= s.money:
+		n += 1
+	return n
 
 
-## Lot F3 : la feuille Améliorer montre les achats de la pêche (acte 0 en cours, bascule pas encore possible).
+## Lot G1 : cartes de la Crique abordables (Places, Services, le prochain bâtiment, la Concession).
+static func fishing_affordable(s: PortSim) -> int:
+	var f := s.fishing
+	var n := 0
+	if f.places < f.places_max() and s.money >= f.places_cost():
+		n += 1
+	if f.places > 0 and f.services < f.services_max() and s.money >= f.services_cost():
+		n += 1
+	var nb := f.next_building()
+	if f.places > 0 and not nb.is_empty() and s.money >= float(nb.cost):
+		n += 1
+	if f.concession_available() and s.money >= float(f.concession_def().cost):
+		n += 1
+	return n
+
+
+## Lot F3/G1 : la feuille Améliorer montre les cartes de la Crique seules (chapitre 1 en cours, Concession pas encore signée).
 static func fishing_cards(s: PortSim) -> bool:
 	return s != null and s.fishing.act0 and not s.act0_ready()
 
@@ -1414,10 +1486,10 @@ func _on_boost() -> void:
 				toast("Recharge terminée grâce à l'Ambre.", "good"))
 		show_popup("Heures sup en recharge", [
 			UI.wrap_label("Encore %s avant de pouvoir relancer. Tu peux la terminer tout de suite pour %d Ambre (tu en as %d)." % [
-				Fmt.duration(s.boost_ready_at - s.time), int(b.amber_skip), s.amber], 30, UI.TEXT)], "boost", [go], "PLUS TARD")
+				Fmt.duration(s.boost_ready_at - s.clock()), int(b.amber_skip), s.amber], 30, UI.TEXT)], "boost", [go], "PLUS TARD")
 	else:
 		Sfx.play("bad")
-		toast("Recharge en cours : %s. Il faut %d Ambre pour la terminer." % [Fmt.duration(s.boost_ready_at - s.time), int(b.amber_skip)], "info")
+		toast("Recharge en cours : %s. Il faut %d Ambre pour la terminer." % [Fmt.duration(s.boost_ready_at - s.clock()), int(b.amber_skip)], "info")
 
 
 func _on_event_pay() -> void:
@@ -2223,7 +2295,7 @@ func _begin_start() -> void:
 	start_flow = true
 	bascule_on = false
 	var s := GameState.sim
-	if s.fishing.level <= 0 and not s.fishing.act0:
+	if s.fishing.places <= 0 and not s.fishing.act0:
 		s.begin_act0()          # partie neuve : l'acte 0 (0 $, port fermé)
 	elif not s.fishing.act0:
 		s.hold_port()           # nouvelle concession : la pêche continue, la bascule se joue port fermé
@@ -2248,9 +2320,10 @@ func _resume_act0() -> void:
 	_intro_done()
 
 
-## Cadrage des cartes d'intro : le fond du golfe, l'anse des pêcheurs, le cap et la friche de l'autre côté.
-const INTRO_LOOK := Vector3(-92.0, 0.0, 26.0)
-const INTRO_ZOOM := 100.0
+## Cadrage des cartes d'intro : le fond du golfe, l'anse des pêcheurs, le flanc du cap ; les nuages aux bords (lot G1 : dans les
+## bornes de la Crique).
+const INTRO_LOOK := Vector3(-116.0, 0.0, 30.0)
+const INTRO_ZOOM := 72.0
 
 
 func _frame(p: Vector3, zoom: float, now: bool = false) -> void:
@@ -2300,7 +2373,7 @@ func _sync_start() -> void:
 			_close_story()
 	if not bascule_on and s.act0_ready():
 		_begin_bascule()
-	# le premier navire glisse vers le quai (chantiers finis) : le port ouvre
+	# le premier navire glisse vers le quai (chantiers finis) : le port ouvre (lot G1 : pas avant que les nuages soient partis)
 	if bascule_on and not diorama.start_flow_active() and not story_active() and not ceremony_active():
 		s.open_port()
 		bascule_on = false
@@ -2314,16 +2387,33 @@ func _intro_done() -> void:
 	_frame(Layout.ANSE_LOOK, Layout.ANSE_ZOOM)
 
 
-## Bascule vers le T1 : le caboteur au large (la caméra le suit), la narratrice, puis la cérémonie et les chantiers.
+## Bascule vers le T1 (lot G1 : la Concession signée) : **d'abord** les nuages se dissolvent (fondu + montée, 3,5 s), **puis**
+## les bornes de la caméra s'élargissent, le caboteur de Corsaire & Fils revient du large (la caméra le suit), la narratrice,
+## la cérémonie « Palier 1 — Le Vieux Quai » (la caméra passe le cap) et les chantiers.
 func _begin_bascule() -> void:
 	bascule_on = true
 	bascule_t = diorama._t
+	if GameState.sim.fishing.replay:
+		diorama.dissolve_clouds()
+		diorama.spawn_bascule_ship()
+		_bascule_ceremony()
+		return
+	if diorama.clouds_on():
+		diorama.dissolve_clouds()
+		Sfx.play("build", 0.2)
+		_frame(Layout.ANNOUNCE_LOOK, Layout.CRIQUE_ZOOM_MAX)
+		get_tree().create_timer(CloudLayer.DISSOLVE_S).timeout.connect(_bascule_ship)
+	else:
+		_bascule_ship()
+
+
+func _bascule_ship() -> void:
+	if not bascule_on or GameState.sim == null or not GameState.sim.fishing.act0:
+		return
+	diorama.dissolve_clouds()          # (bornes du palier)
 	var v := diorama.spawn_bascule_ship()
 	if v != null:
 		_frame(v.position + Vector3(-10.0, 0, 26.0), 84.0)
-	if GameState.sim.fishing.replay:
-		_bascule_ceremony()
-		return
 	var card: Dictionary = GameState.db.tier_def(0).get("bascule", {})
 	if card.is_empty():
 		_bascule_ceremony()
@@ -2331,10 +2421,17 @@ func _begin_bascule() -> void:
 		_show_story(card, _bascule_ceremony)
 
 
+## Lot G2 : cadrage de la friche après la Concession (le quai, la plateforme, la cabane et la barrière à venir).
+const G2_FRICHE_LOOK := Vector3(-24.0, 0.0, 14.0)
+const G2_FRICHE_ZOOM := 72.0
+
+
 func _bascule_ceremony() -> void:
 	var td := GameState.db.tier_def(1)
 	ceremony("Palier 1 — %s" % String(td.get("name", "")), "De l'autre côté du cap", UI.AMBER, "tier1", Vector3(-70.0, 0, -6.0),
-		func() -> void: diorama.start_t1_works())
+		func() -> void:
+			diorama.start_t1_works()
+			_frame(G2_FRICHE_LOOK, G2_FRICHE_ZOOM))      # lot G2 : la friche nue, de l'autre côté du cap
 
 
 ## Carte de la narratrice (même habit que les cartes d'intro), passée d'un toucher ou seule au bout de STORY_AUTO s.

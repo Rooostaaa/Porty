@@ -1,4 +1,5 @@
 [
+  {"id": "c0", "text": "Signer la Concession du terre-plein", "fish": "concession", "target": 1, "amber": 1},
   {"id": "m1", "text": "Décharger 300 EVP", "counter": "evp", "target": 300, "amber": 1},
   {"id": "t1", "text": "Allonger le quai pour les caboteurs", "building": "quay_ext", "target": 1, "amber": 1, "income_seconds": 30},
   {"id": "m2", "text": "Monter les Portiques au niveau 10", "level": "cranes", "target": 10, "amber": 1},

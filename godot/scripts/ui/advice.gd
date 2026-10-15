@@ -17,6 +17,12 @@ static func hint_action(s: PortSim) -> Dictionary:
 	var key: String = a.get("key", "")
 	if key == "tier":
 		return {"kind": "tier", "id": "", "cost": 0.0, "can": s.can_tier_up(), "label": "PALIER T%d" % (s.tier + 1)}
+	if key == "starter":
+		# lot G2 : la prochaine pièce du départ (Terrassement, Quai n°1…)
+		var sb := String(a.get("building", ""))
+		if sb != "" and s.db.building_by_id.has(sb):
+			var sc := float(s.db.building_by_id[sb].cost)
+			return {"kind": "build", "id": sb, "cost": sc, "can": sc <= s.money and s.building_state(sb) == "available", "label": "%s · %s" % [Info.building_short(s, sb), Fmt.money(sc)]}
 	if key == "fog":
 		# brouillard : rien à acheter qui aide (le pilotage est suspendu), on attend qu'il se lève
 		return {"kind": "", "id": "", "cost": 0.0, "can": false, "label": "PATIENTER"}

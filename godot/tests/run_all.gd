@@ -83,6 +83,7 @@ func _part3(db: DataDB) -> void:
 	test_e_flux(db)
 	test_f2(db)
 	test_f3(db)
+	test_g2(db)
 
 
 func test_format() -> void:
@@ -286,18 +287,14 @@ func test_manual_chores(db: DataDB) -> void:
 	var sh := b.ship_by_id(ship_id)
 	check(sh.state == Ship.State.PILOTING and b.time < t0 - 5.0, "il accoste aussitôt (%s au lieu de %s)" % [Fmt.duration(b.time), Fmt.duration(t0)])
 	check(sh.timer <= b.pilot_duration() * float(db.cfg("manual").express_pilot) + 0.01, "pilotage express")
-	# coup de main sur la grue
-	while b.time < 120.0 and not b.assist_ready(0):
+	# lot G2 (remplace « coup de main sur la grue », × 4) : le coup de main ×1,2 est retiré — un responsable remplace le geste ;
+	# les gestes du terre-plein (tamponner, laisser passer) sont contrôlés dans test_g2
+	var tried := false
+	for i in 480:
 		b.step(0.25)
-	check(b.assist_ready(0), "la grue peut recevoir un coup de main")
-	var evp0 := b.counter("evp")
-	var m0 := b.money
-	var moved := b.assist_unload(0)
-	check(moved > 0.0 and b.counter("evp") > evp0 and b.money > m0, "le coup de main décharge et rapporte (+%s EVP)" % Fmt.num(moved))
-	check(b.assist_unload(0) == 0.0, "recharge entre deux coups de main")
-	b.managers["cranes"] = true
-	b.time += 10.0
-	check(not b.assist_ready(0), "le chef des grutiers le fait à ta place")
+		tried = tried or b.assist_ready(0) or b.yard_boost_ready() or b.gate_rush_ready()
+	check(not tried and b.assist_unload(0) == 0.0 and b.yard_boost() == 0.0 and b.gate_rush() == 0.0,
+		"G2 : les anciens gestes (coup de main à la grue, engin du parc, barrière express) sont retirés")
 
 
 func test_world_levers(db: DataDB) -> void:
@@ -357,7 +354,7 @@ func test_prestige(db: DataDB) -> void:
 	var b := PortSim.new(db, 77)
 	b.carry_over(a)
 	check(b.renown == a.prestige_gain() and b.prestiges == 1, "Renom %d, concession n°%d" % [b.renown, b.prestiges + 1])
-	check(b.tier == 1 and b.built.is_empty() and is_equal_approx(b.money, float(db.cfg("start_money"))), "on repart de zéro")
+	check(b.tier == 1 and b.built == PortSim.STARTERS and is_equal_approx(b.money, float(db.cfg("start_money"))), "on repart de zéro (lot G2, recalé : un port complet garde ses six pièces du départ)")
 	check(b.missions_claimed.size() == a.missions_claimed.size() and b.amber > a.amber, "missions réclamées et Ambre conservés")
 	check(b.counter("evp") == 0.0 and is_equal_approx(b.counter_total("evp"), a.counter("evp")), "compteurs cumulés conservés")
 	check(is_equal_approx(b.stat("value", 0) / PortSim.new(db, 77).stat("value", 0), b.renown_mult()), "le Renom multiplie la valeur (×%.2f)" % b.renown_mult())
@@ -416,11 +413,11 @@ func test_review_fixes(db: DataDB) -> void:
 	used.renown = 3
 	used.prestiges = 2
 	used.lifetime = {"evp": 5.0}
-	used._assist_at[0] = 99.0
+	used.truck_wait_t = 9.0      # (lot G2 : attente du camion en tête, à la place du minuteur du coup de main)
 	used.last_income["gate"] = 12.0
 	used.from_dict(PortSim.new(db, 1).to_dict())
 	check(used.renown == 0 and used.prestiges == 0 and used.lifetime.is_empty(), "le prestige d'une ancienne partie est effacé")
-	check(used._assist_at.is_empty() and used.last_income.is_empty(), "l'état temporaire est effacé")
+	check(used.truck_wait_t == 0.0 and used.last_income.is_empty(), "l'état temporaire est effacé")
 	# une licence achetée se voit tout de suite dans la valeur par EVP
 	var ls := PortSim.new(db, 13)
 	ls.features["licences"] = true
@@ -434,16 +431,22 @@ func test_review_fixes(db: DataDB) -> void:
 		gs.step(0.25)
 	var base := gs.income_estimate_with("cranes", 0)
 	check(is_equal_approx(gs.upgrade_gain("cranes", 3), gs.upgrade_gain("cranes", 3, -1, base)), "gain avec référence fournie identique")
-	# tutoriel : on ne reste pas bloqué à « coup de main » si le chef des grutiers est déjà embauché
+	# tutoriel (lot G2, remplace « l'étape coup de main se termine si Yasmine est embauchée » : l'étape n'existe plus) : on ne
+	# reste pas bloqué à « tamponner » ou « laisser passer » si leur responsable est déjà embauché
 	var raw: Array = DataDB.load_json("res://data/tutorial.json")
-	var crane_done := ""
+	var ok_steps := 0
+	var gm := PortSim.new(db, 4)
+	gm.begin_act0()
+	gm.open_port()
+	gm.managers["customs"] = true
+	gm.managers["gate"] = true
 	for st in raw:
-		if st.id == "crane":
-			crane_done = String(st.done)
-	var e := Expression.new()
-	e.parse(crane_done, ["sim"])
-	gs.managers["cranes"] = true
-	check(bool(e.execute([gs], null, false)), "l'étape « coup de main » se termine si Yasmine est embauchée")
+		if String(st.id) in ["t_stamp", "t_pass"]:
+			var e := Expression.new()
+			e.parse(String(st.done), ["sim"])
+			if bool(e.execute([gm], null, false)):
+				ok_steps += 1
+	check(ok_steps == 2, "G2 : les étapes « tamponner » et « laisser passer » se terminent si Paul et Tonio sont embauchés (%d/2)" % ok_steps)
 
 
 ## Début de partie doux : petits navires, gabarits de quai, douane à construire, fonctions révélées une à une.
@@ -506,7 +509,7 @@ func test_gentle_start(db: DataDB) -> void:
 	od.erase("features")
 	var m := PortSim.new(db, 6)
 	m.from_dict(od)
-	check(str(m.built.slice(0, 3)) == str(["quay_ext", "customs1", "gravel2"]), "ancienne sauvegarde : quai allongé et douane ajoutés (%s)" % str(m.built))
+	check(str(m.built.slice(6, 9)) == str(["quay_ext", "customs1", "gravel2"]) and m.built.slice(0, 6) == PortSim.STARTERS, "ancienne sauvegarde : quai allongé et douane ajoutés après les pièces du départ (lot G2, recalé) (%s)" % str(m.built))
 	check(m.max_depth() >= 2 and m.customs_open and m.feature("contracts") and m.feature("managers"), "ancienne sauvegarde : tout reste disponible")
 	for i in 240:
 		m.step(0.25)
@@ -895,7 +898,8 @@ func test_trajets() -> void:
 	var walls: Array[Rect2] = []
 	for bid in Layout.LOTS:
 		var l: Dictionary = Layout.LOTS[bid]
-		if l.has("on") or bool(l.get("portal", false)) or bool(l.get("water", false)) or bid in ["gravel2", "gravel3", "asphalt", "rtg", "parking1", "parking2", "quay_ext", "berth2", "berth3", "berth4", "dredge1"]:
+		# (lot G2, recalé : la plateforme, le quai n°1 et la piste sont des sols, pas des murs)
+		if l.has("on") or bool(l.get("portal", false)) or bool(l.get("water", false)) or bool(l.get("ground", false)) or bid in ["gravel2", "gravel3", "asphalt", "rtg", "parking1", "parking2", "quay_ext", "berth2", "berth3", "berth4", "dredge1"]:
 			continue
 		walls.append(Layout.lot_rect(bid))
 	for m in ["harbor_office", "hangar", "control_tower"]:
@@ -1090,23 +1094,32 @@ func test_chapitres(db: DataDB) -> void:
 		"un sujet par seuil : conditions distinctes, jamais deux révélations ensemble, %s s au moins avant une révélation ordinaire (min %s s, 4 parties)" % [Fmt.num(gap_cfg), Fmt.num(worst_gap)])
 	f.money = 1.0e9
 	check(not f.hire_manager("harbor") and f.hire_manager("cranes"), "un responsable ne s'embauche qu'au niveau 10 de son service (prix et palier inchangés)")
-	# gestes optionnels : accélérateurs à recharge, jamais une obligation, remplacés par les responsables
+	# lot G2 (remplace « toucher l'engin », « toucher la barrière express », « les responsables du parc et de la gate font
+	# ces gestes ») : les gestes du terre-plein — tamponner (la cabane), laisser passer et encaisser (la barrière) — et leurs
+	# responsables qui les remplacent (Paul, Tonio)
 	var g := PortSim.new(db, 43)
-	g.features["dept_yard_ops"] = true
-	g.features["dept_gate"] = true
-	g.apron[0] = 20.0
-	var a0 := g.apron_stock()
-	var moved := g.yard_boost()
-	check(moved > 0.0 and g.apron_stock() < a0 and g.yard_boost() == 0.0 and g.counter("yard_boosts") == 1.0, "toucher l'engin : il range tout de suite (+%s EVP), puis recharge" % Fmt.num(moved))
-	g.yard_cleared[0] = 50.0
-	g.truck_queue = 20.0
+	g.begin_act0()
+	g.open_port()
+	g.money = 1.0e4
+	for b in PortSim.STARTERS:
+		g.build(String(b))
+	g.yard_pending[0] = 20.0
 	var m0 := g.money
-	var served := g.gate_rush()
-	check(served > 0.0 and g.money > m0 and g.gate_rush() == 0.0, "toucher la barrière : un camion passe tout de suite (+%s EVP), puis recharge" % Fmt.num(served))
-	g.managers["yard_ops"] = true
+	var stamped := g.stamp()
+	check(stamped >= 19.9 and g.pending_total() == 0.0 and g.cleared_total() >= 19.9 and g.money > m0 and g.counter("stamps") == 1.0 and not g.stamp_ready(),
+		"G2 : toucher la cabane tamponne tout le lot (%s conteneurs dédouanés, droits encaissés)" % Fmt.num(stamped))
+	g.truck_queue = float(db.cfg("truck_evp"))
+	var d0 := g._sum(g.delivered)
+	var m1 := g.money
+	var paid := g.pass_truck()
+	check(paid > 0.0 and is_equal_approx(g._sum(g.delivered) - d0, float(db.cfg("truck_evp"))) and g.money > m1 and g.counter("passes") == 1.0,
+		"G2 : toucher la barrière laisse passer un camion (2 conteneurs) qui paie %s" % Fmt.money(paid))
+	g.managers["customs"] = true
 	g.managers["gate"] = true
-	g.time += 100.0
-	check(not g.yard_boost_ready() and not g.gate_rush_ready(), "les responsables du parc et de la gate font ces gestes à ta place")
+	g.yard_pending[0] = 10.0
+	g.truck_queue = float(db.cfg("truck_evp"))
+	check(not g.stamp_ready() and not g.pass_ready() and g.stamp() == 0.0 and g.pass_truck() == 0.0,
+		"G2 : Paul et Tonio embauchés remplacent les gestes (plus rien à toucher)")
 	# avant son chapitre, un service tourne seul au minimum : le parc n'est jamais le goulot avant d'être présenté ; la gate
 	# peut l'être au plus 45 s d'affilée — c'est ce qui ouvre son chapitre (revue N7, option a : « gate goulot pendant 45 s »)
 	var worst := 0.0
@@ -1436,16 +1449,21 @@ func test_c7(db: DataDB) -> void:
 	b6.features["manage"] = b6.time
 	var t_after := b6.unlock_text("dept_customs")
 	check(not t_before.contains("Gestion") and t_after.contains("Gestion → Bâtiments"), "C7 B6 : « %s » puis « %s »" % [t_before, t_after])
-	# C1 : toucher la barrière renvoie les EVP réellement sortis par la gate (pas le solde de la file, qui se remplit aussi)
+	# C1 (lot G2, remplacé : la barrière express n'existe plus) : laisser passer un camion sort exactement un camion
+	# (2 conteneurs livrés), le solde de la file baisse d'autant, même si elle se remplit aussi
 	var g := PortSim.new(db, 39)
-	g.features["dept_gate"] = g.time
+	g.begin_act0()
+	g.open_port()
+	g.money = 1.0e4
+	for b in PortSim.STARTERS:
+		g.build(String(b))
 	g.yard_cleared[0] = 400.0
 	g.truck_queue = float(db.cfg("truck_evp")) * 2.0
 	var d0 := g._sum(g.delivered)
 	var q0 := g.truck_queue
-	var served := g.gate_rush()
+	g.pass_truck()
 	var real := g._sum(g.delivered) - d0
-	check(served > 0.0 and is_equal_approx(served, real), "C7 C1 : la barrière rend %s EVP sortis (livrés : %s ; solde de la file : %s)" % [Fmt.num(served), Fmt.num(real), Fmt.num(q0 - g.truck_queue)])
+	check(is_equal_approx(real, float(db.cfg("truck_evp"))) and is_equal_approx(q0 - g.truck_queue, real), "C7 C1 (G2) : laisser passer sort %s conteneurs (solde de la file : %s)" % [Fmt.num(real), Fmt.num(q0 - g.truck_queue)])
 	# C2 : rade pleine comptée en temps écoulé (dix analyses au même instant n'ajoutent rien) ; pas de temps de goulot fantôme
 	# au chargement
 	var r := PortSim.new(db, 40)
@@ -2426,8 +2444,10 @@ func test_f2(db: DataDB) -> void:
 	rig.free()
 	check(edge_bad.is_empty() and widest <= CameraRig.ZOOM_MAX, "F2 : zoom le plus large %d, aux quatre coins des bornes l'écran reste dans le monde habillé (%s)" % [int(widest), str(edge_bad.slice(0, 3))])
 	# 5. départ de rien : quatre pièces dans l'ordre (quai → grue → parc → gate), chacune ses éléments (« grp »), son chantier
-	# de 3 à 6 s et son état d'avant (estacade ruinée sur l'eau devant le vieux quai, friche du parc sur la terre)
-	var ids: Array = Layout.STARTER.map(func(st: Dictionary) -> String: return String(st.id))
+	# (lot G2, remplace « F2 départ » : plus de séquence automatique — les pièces du départ sont six bâtiments, en tête de la
+	# liste, chantiers de 3 à 6 s ; le décor de chaque pièce porte son bâtiment ; l'estacade ruinée devant le quai n°1, la
+	# route d'accès en friche avant la piste, sur la terre)
+	var ids: Array = db.buildings.slice(0, 6).map(func(b: Dictionary) -> String: return String(b.id))
 	var grps := {}
 	for p in Layout.PROPS:
 		if p.has("grp"):
@@ -2435,13 +2455,14 @@ func test_f2(db: DataDB) -> void:
 	for g in Layout.GROUNDS:
 		if g.has("grp"):
 			grps[String(g.grp)] = true
-	var grp_ok := grps.keys().all(func(k: String) -> bool: return ids.has(k)) and grps.has("quay0") and grps.has("yard0") and grps.has("gate0")
-	var dur_ok := Layout.STARTER.all(func(st: Dictionary) -> bool: return float(st.dur) >= 3.0 and float(st.dur) <= 6.0)
-	var jetty := Layout.starter_before("quay0").filter(func(it: Dictionary) -> bool: return String(it.m) == "jetty_ruin")
+	var grp_ok := grps.keys().all(func(k: String) -> bool: return ids.has(k)) and grps.has("quay1") and grps.has("yard") and grps.has("track")
+	var dur_ok := ids.all(func(bid: String) -> bool: return float(Layout.site_spec(bid).get("dur", 0.0)) >= 3.0 and float(Layout.site_spec(bid).get("dur", 0.0)) <= 6.0)
+	var jetty := Layout.before_state("quay1").filter(func(it: Dictionary) -> bool: return String(it.m) == "jetty_ruin")
 	var jetty_ok := jetty.size() == 1 and (jetty[0].p as Vector3).z < Layout.SEA_EDGE_Z and (jetty[0].p as Vector3).x > -36.0 and (jetty[0].p as Vector3).x < -12.0
-	var yard_ok := Layout.starter_before("yard0").all(func(it: Dictionary) -> bool: return Layout.on_land(Vector2((it.p as Vector3).x, (it.p as Vector3).z), false))
-	check(ids == ["quay0", "crane0", "yard0", "gate0"] and grp_ok and dur_ok and jetty_ok and yard_ok,
-		"F2 départ : %s dans l'ordre, chantiers de 3 à 6 s, estacade ruinée devant le vieux quai, friche du parc sur la terre (groupes %s)" % [str(ids), str(grps.keys())])
+	var yard_ok := Layout.before_state("track").all(func(it: Dictionary) -> bool: return Layout.on_land(Vector2((it.p as Vector3).x, (it.p as Vector3).z), false)) \
+		and Layout.STARTER.is_empty()
+	check(ids == PortSim.STARTERS and grp_ok and dur_ok and jetty_ok and yard_ok,
+		"G2 départ : %s en tête de la liste, chantiers de 3 à 6 s, estacade ruinée devant le quai n°1, friche de la route sur la terre (groupes %s)" % [str(ids), str(grps.keys())])
 	# 6. chantiers de chaque case : 3 s (petite) à 6 s (quais, grande case) ; état d'avant (rochers, broussailles) sur les cases
 	# à terre, dans leur empreinte, sur la terre ; rien sur l'eau, un quai ou le terre-plein
 	var site_bad: Array[String] = []
@@ -2452,12 +2473,15 @@ func test_f2(db: DataDB) -> void:
 			site_bad.append("%s %s s" % [bid, Fmt.num(d)])
 		var bs := Layout.before_state(bid)
 		var l: Dictionary = Layout.LOTS[bid]
-		var wet: bool = bool(l.get("water", false)) or l.has("on") or bool(l.get("portal", false)) or bid.begins_with("berth") or bid == "quay_ext" \
+		# (lot G2, recalé : la piste a sa friche — rochers sur la route — et le quai n°1 son estacade ruinée, sur l'eau devant lui)
+		var wet: bool = bool(l.get("water", false)) or (l.has("on") and not bool(l.get("ground", false))) or bool(l.get("portal", false)) or bid.begins_with("berth") or bid == "quay_ext" \
 			or bid == "gate2" or bool(Layout.zone_by_id(int(l.zone)).get("reclaim", false))
 		if wet != bs.is_empty():
 			site_bad.append("%s état d'avant %d" % [bid, bs.size()])
 		for it in bs:
 			var ip: Vector3 = it.p
+			if bid in ["quay1", "track"]:      # (lot G2 : l'estacade sur l'eau, la palissade de la piste sur la route)
+				break
 			if not Layout.lot_rect(bid).has_point(Vector2(ip.x, ip.z)) or not Layout.on_land(Vector2(ip.x, ip.z), true):
 				site_bad.append("%s hors case" % bid)
 				break
@@ -2486,101 +2510,155 @@ func test_f2(db: DataDB) -> void:
 		"F2 intro : 3 cartes (%s), Odette et le golfe d'Ambre, palier 0 « La Crique »" % str(cards.map(func(c: Dictionary) -> String: return String(c.title))))
 
 
-## Lot F3 — acte 0 « La Crique » : la pêche (module de la simulation), les achats, le coup de main, la bascule, le revenu
-## passif, la sauvegarde v6 et sa migration, la nouvelle concession, les trajets des bateaux, la forêt profonde, le tutoriel.
+## Lot F3/G1 — chapitre 1 « La Crique » : la pêche (module de la simulation), les cartes à niveaux et les bâtiments, le loyer
+## manuel et le bateau qui repart sans payer, Marcel, l'annonce, la Concession et le plafond R₀, le bot (pressé, tranquille),
+## la sauvegarde v7 et sa migration, la nouvelle concession, les trajets des bateaux, les nuages, la forêt profonde, le tutoriel.
 func test_f3(db: DataDB) -> void:
-	print("[lot F3 — acte 0 « La Crique »]")
+	print("[lot F3/G1 — chapitre 1 « La Crique »]")
+	var fc: Dictionary = db.cfg("fishing")
 	# 1. PortSim.new : port ouvert, pas de pêche (tests et parties d'avant F3 ; une partie neuve jouée appelle begin_act0)
 	var s0 := PortSim.new(db, 7)
-	check(not s0.fishing.act0 and s0.fishing.level == 0 and s0.fishing.passive_rate() == 0.0, "F3 : PortSim.new — port ouvert, pas de pêche")
-	# 2. acte 0 : 0 $, port fermé — seule la pêche tourne (horloge du port, navires, aléas, révélations, compteurs figés)
+	check(not s0.fishing.act0 and s0.fishing.places == 0 and s0.fishing.rate_estimate() == 0.0, "F3 : PortSim.new — port ouvert, pas de pêche")
+	# 2. la Crique : 0 $, port fermé — seule la pêche tourne (horloge du port, navires, aléas, révélations, compteurs figés) ; le
+	# loyer est à la main : sans toucher, un bateau rentré attend `rent_wait` s puis repart sans payer (0 $ gagné)
 	var s := PortSim.new(db, 7)
+	s.begin_act0()
+	# (lot G2, recalé : la partie jouée part de la friche — aucun navire avant le quai n°1 ; on vérifie que rien ne bouge)
 	var ships0 := s.ships.size()
 	var st0: Array = s.ships.map(func(sh: Ship) -> int: return sh.state)
-	s.begin_act0()
 	var money_ok := s.money == 0.0
 	var build_blocked := not s.build("quay_ext")
-	var first := s.buy_fish()
+	var first := s.buy_fish_places(1)
+	var waited := 0
 	for i in 600:
 		s.step(0.25)
+		for k in s.fishing.boats.size():
+			if int(s.fishing.boats[k].phase) == Fishing.Phase.WAIT:
+				waited += 1
 	var frozen := s.time == 0.0 and s.ships.size() == ships0 and s.ships.map(func(sh: Ship) -> int: return sh.state) == st0 \
 		and s.active_event.is_empty() and s.features.is_empty() and s.counter("evp") == 0.0 and s.missions_claimed.is_empty()
-	check(money_ok and build_blocked and first and frozen and s.money > 0.0 and s.fishing.landings >= 4 and s.fishing.clock >= 149.0 \
-		and s.real_income_rate() > 0.0,
-		"F3 acte 0 : 0 $, rien ne se bâtit au port, ponton gratuit ; 150 s de pêche, port figé (horloge %s), %d débarques, %s, revenu affiché %s/s" % [
-		str(s.time), s.fishing.landings, Fmt.money(s.money), Fmt.num(s.real_income_rate())])
-	# 3. achats dans l'ordre, au prix des données, 5 au plus ; coup de main seulement sur un bateau qui rentre ou débarque
-	var buys: Array = db.cfg("fishing").buys
-	var costs_ok := buys.size() == 5 and float(buys[0].cost) == 0.0
-	for i in range(1, buys.size()):
-		costs_ok = costs_ok and float(buys[i].cost) > float(buys[i - 1].cost)
-	var lv0 := s.fishing.level
-	s.money = 0.0
-	var poor := not s.buy_fish()
-	s.money = 1.0e4
-	var n_ok := 0
-	for k in 8:
-		if s.buy_fish():
-			n_ok += 1
-	var helpable := 0
-	var not_helpable := 0
-	for i in s.fishing.boats.size():
-		var ph := int(s.fishing.boats[i].phase)
-		if ph == Fishing.Phase.BACK or ph == Fishing.Phase.LAND:
-			helpable += 1 if s.fishing.can_help(i) else 0
-		elif s.fishing.can_help(i):
-			not_helpable += 1
-	check(costs_ok and lv0 == 1 and poor and n_ok == 4 and s.fishing.level == 5 and s.fishing.boat_count("dinghy") == 4 \
-		and s.fishing.boat_count("trawler") == 2 and s.fishing.boat_count("tuna") == 1 and not_helpable == 0,
-		"F3 achats : 5 au plus (%d de plus après le ponton), dans l'ordre, au prix des données ; 4 barques, 2 chalutiers, 1 thonier ; coup de main jamais au large" % n_ok)
-	# coup de main : la débarque se fait tout de suite et rapporte plus (même tirage, même bateau)
-	var a := PortSim.new(db, 9)
-	a.begin_act0()
-	a.buy_fish()
-	var b := PortSim.new(db, 9)
-	b.begin_act0()
-	b.buy_fish()
-	var got := [0.0, 0.0]
-	var at := [-1.0, -1.0]
-	a.fish_landed.connect(func(i: int, amt: float, _h: bool) -> void:
-		if i == 0 and at[0] < 0.0:
-			at[0] = a.fishing.clock
-			got[0] = amt)
-	b.fish_landed.connect(func(i: int, amt: float, _h: bool) -> void:
-		if i == 0 and at[1] < 0.0:
-			at[1] = b.fishing.clock
-			got[1] = amt)
-	var helped := false
-	for k in 400:
-		a.step(0.25)
-		b.step(0.25)
-		if not helped and int(b.fishing.boats[0].phase) == Fishing.Phase.LAND:
-			helped = b.fish_help(0)
-	check(helped and at[0] > 0.0 and at[1] > 0.0 and at[1] < at[0] - 2.0 and got[1] > got[0] * 1.05,
-		"F3 coup de main : débarque à %s s au lieu de %s s, vente %s au lieu de %s" % [Fmt.num(at[1]), Fmt.num(at[0]), Fmt.money(got[1]), Fmt.money(got[0])])
-	# 4. bascule : pas avant les 5 achats et le seuil d'argent ; ensuite le port ouvre, la pêche devient passive (revenu fixe)
+	check(money_ok and build_blocked and first and frozen and s.fishing.places == 1 and s.fishing.boats.size() == 2 and s.money == 0.0 \
+		and s.fishing.rents_lost >= 2 and waited > 0 and s.fishing.clock >= 149.0 and s.fishing.landings >= 2,
+		"G1 Crique : 0 $, rien ne se bâtit au port, ponton gratuit (2 barques) ; 150 s de pêche, port figé (horloge %s) ; sans toucher, les bateaux attendent puis repartent sans payer (%d perdus, %s)" % [
+		str(s.time), s.fishing.rents_lost, Fmt.money(s.money)])
+	# 3. encaisser à la main : toucher un bateau rentré paie `valeur × ticket` ; Marcel se présente après `after_rents` loyers ;
+	# embauché, il encaisse tout (plus rien à toucher), le hors-ligne passe de « figé » à son rythme, les Heures sup se révèlent
+	var m := PortSim.new(db, 7)
+	m.begin_act0()
+	m.buy_fish_places(1)
+	var paid := 0.0
+	var npaid := 0
+	var offered_at := -1
+	var bubble_before := false
+	for i in 1600:
+		m.step(0.25)
+		for k in m.fishing.boats.size():
+			if m.fishing.can_collect(k):
+				bubble_before = true
+				var a := m.fish_collect(k)
+				if a > 0.0:
+					paid += a
+					npaid += 1
+		if m.fishing.marcel_offered and offered_at < 0:
+			offered_at = npaid
+			break
+	var off_before := m.apply_offline(3600.0)
+	var frozen_off := off_before.is_empty() and m.money == paid
+	m.money += m.fishing.marcel_cost()
+	var hired := m.hire_marcel()
+	var auto := 0.0
+	var collectable := 0
+	var m0 := m.money
+	for i in 400:
+		m.step(0.25)
+		for k in m.fishing.boats.size():
+			if m.fishing.can_collect(k):
+				collectable += 1
+	auto = m.money - m0
+	var off_after := m.apply_offline(600.0)
+	var value0 := float(fc.boats.dinghy.value)
+	check(bubble_before and npaid >= 1 and paid >= value0 * 0.85 * float(npaid) and offered_at == int(fc.marcel.after_rents) and frozen_off \
+		and hired and collectable == 0 and auto > 0.0 and m.fishing.rents_lost == 0 and not m.feature("boost") and m.counter("managers") == 1.0 \
+		and absf(float(off_after.get("money", 0.0)) - 600.0 * m.fishing.rate_estimate()) < 0.01,
+		"G1 loyer à la main : %d loyers encaissés (%s), Marcel se présente au %dᵉ ; avant lui le hors-ligne est figé (%s) ; embauché (%s) : plus rien à toucher, %s encaissés seuls en 100 s, Heures sup pas révélées (lot G1-d), hors-ligne %s pour 10 min" % [
+		npaid, Fmt.money(paid), offered_at, frozen_off, hired, Fmt.money(auto), Fmt.money(float(off_after.get("money", 0.0)))])
+	# 4. les cartes : Places 8 niveaux (9 barques), coûts croissants ; Services 10 niveaux, paliers nommés ×3 ; bâtiments dans
+	# l'ordre ; la Concession dès la marina (pas avant) ; tout au maximum → plafond R₀ dans 4–6 $/s ; après la Concession, les
+	# cartes restantes restent achetables jusqu'à leur maximum, la pêche continue (loyers par Marcel)
 	var c := PortSim.new(db, 3)
 	c.begin_act0()
-	c.money = 1.0e3
-	var early := c.act0_ready()
-	for k in 5:
-		c.buy_fish()
-	c.money = 10.0
-	var poor2 := c.act0_ready()
-	c.money = float(db.cfg("fishing").switch_money)
-	var ready := c.act0_ready()
+	c.money = 1.0e5
+	c.buy_fish_places(1)
+	var pc1 := c.fishing.places_cost()
+	c.buy_fish_places(1)
+	var costs_up := c.fishing.places_cost() > pc1 and pc1 > 0.0
+	var named := c.fishing.services_cost() > 2.5 * float(fc.services.cost)      # niveau 1 = la criée, ×3
+	var early := c.fishing.concession_available() or c.buy_fish_building("concession")
+	var wrong_order := c.buy_fish_building("pier")
+	c.buy_fish_building("trawler")
+	c.buy_fish_building("pier")
+	var before_marina := c.fishing.concession_available()
+	c.buy_fish_building("marina")
+	var after_marina := c.fishing.concession_available() and c.fishing.sails() == 6
+	var n_pl := 0
+	while c.buy_fish_places(1):
+		n_pl += 1
+	var n_sv := 0
+	while c.buy_fish_services(1):
+		n_sv += 1
+	c.buy_fish_building("marina2")
+	c.buy_fish_building("marina3")
+	var maxed := c.fishing.maxed() and c.fishing.places == 8 and c.fishing.services == 10 and c.fishing.boat_count("dinghy") == 9 \
+		and c.fishing.boat_count("trawler") == 2 and c.fishing.boat_count("tuna") == 1 and c.fishing.sails() == 20
+	c.fishing.marcel_offered = true
+	c.hire_marcel()
+	var r0 := c.fishing.rate_estimate()
+	var cap_ok := r0 >= 4.0 and r0 <= 6.0 and absf(c.fishing.cap_rate() - r0) < 0.01
+	var conc := c.buy_fish_building("concession")
+	var opened := c.act0_ready()      # (la bascule de l'interface finit par open_port)
 	c.open_port()
-	var m0 := c.money
-	var f0 := c.fishing.earned
-	for k in 241:
+	var m1 := c.money
+	for k in 240:
 		c.step(0.25)
-	var passive := c.fishing.earned - f0
-	check(not early and not poor2 and ready and not c.fishing.act0 and c.time >= 59.9 and absf(passive - 60.25 * c.fishing.passive_rate()) < 0.5 \
-		and c.fishing.passive_rate() == float(db.cfg("fishing").passive) and c.last_income.has("fish") and Info.SOURCE_NAMES.has("fish") \
-		and not c.fish_help(0),
-		"F3 bascule : jamais avant les 5 achats et %s ; port ouvert, horloge %s ; pêche passive %s en 60 s (%s/s), dans les recettes (Gestion › Stats), plus de coup de main" % [
-		Fmt.money(float(db.cfg("fishing").switch_money)), Fmt.num(c.time), Fmt.money(passive), Fmt.num(c.fishing.passive_rate())])
-	# 5. le bot joue l'acte 0 en 3 à 5 min sur les 4 graines de la sonde ; sans aucun coup de main, il tient aussi en ≈ 5 min
+	var after := c.money - m1
+	check(costs_up and named and not early and not wrong_order and not before_marina and after_marina and n_pl == 6 and n_sv == 10 and maxed \
+		and cap_ok and conc and opened and c.time >= 59.9 and after > 0.5 * 60.0 * r0 and c.fishing.earned > 0.0 and Info.SOURCE_NAMES.has("fish"),
+		"G1 cartes : Places ×1,35 (%s), criée ×3 (%s), Concession dès la marina (avant %s, après %s), bâtiments dans l'ordre (%s %s), niveaux %d/%d, tout au maximum (%s : 9 barques, 2 chalutiers, 1 thonier, 20 voiliers) → R₀ %s/s (4–6, %s) ; Concession (%s %s) = port ouvert (horloge %s), la pêche continue (%s en 60 s)" % [
+		costs_up, named, before_marina, after_marina, not early, not wrong_order, n_pl, n_sv, maxed, Fmt.num(r0), cap_ok, conc, opened, Fmt.num(c.time), Fmt.money(after)])
+	# après la Concession : les cartes restantes restent achetables (une partie pressée)
+	var h := PortSim.new(db, 3)
+	h.begin_act0()
+	h.money = 1.0e5
+	h.buy_fish_places(1)
+	for bid in ["trawler", "pier", "marina", "concession"]:
+		h.buy_fish_building(bid)
+	h.open_port()
+	var late_ok := h.buy_fish_places(1) and h.buy_fish_services(1) and h.buy_fish_building("marina2") and not h.fishing.act0 and h.time == 0.0
+	check(late_ok, "G1 après la Concession : Places, Services et la marina restent achetables jusqu'à leur maximum")
+	# 5. l'annonce du port : à la 8ᵉ minute, la criée faite, à ≥ 45 s de Marcel → « Missions » révélé, la mission « Signer la
+	# Concession » en tête, accomplie à la Concession
+	var an := PortSim.new(db, 5)
+	an.begin_act0()
+	an.money = 1.0e4
+	an.buy_fish_places(1)
+	an.fishing.clock = float(fc.announce_at) + 1.0
+	an.step(0.25)
+	var not_yet := not an.fishing.announced          # pas de criée
+	an.buy_fish_services(1)
+	an.fishing.marcel_offered = true
+	an.hire_marcel()                                 # une nouveauté à l'instant : l'annonce attend 45 s
+	an.step(0.25)
+	var gap_wait := not an.fishing.announced
+	for k in 200:
+		an.step(0.25)
+	var vis := Objectives.visible_missions(an)
+	var first_m := String(vis[0].id) == "c0" and not Objectives.mission_done(an, vis[0])
+	for bid in ["trawler", "pier", "marina", "concession"]:
+		an.buy_fish_building(bid)
+	check(not_yet and gap_wait and an.fishing.announced and an.feature("missions") and first_m and Objectives.mission_done(an, vis[0]) and an.fishing.has("concession"),
+		"G1 annonce : à la 8ᵉ minute, criée faite, 45 s après Marcel (%s, %s) ; Missions révélé, « Signer la Concession » en tête, accomplie à la Concession" % [not_yet, gap_wait])
+	# 6. le bot joue la Crique sur les 4 graines : tranquille (plafond puis Concession) 15–20 min, pressé (Concession dès la
+	# marina) ≤ 15 min (cible 12 : voir le journal), Marcel embauché, jamais un loyer perdu
 	var durs: Array[String] = []
 	var dur_ok := true
 	for sd in [1, 2, 3, 4]:
@@ -2591,41 +2669,59 @@ func test_f3(db: DataDB) -> void:
 		var bs2 := PortSim.new(db, sd)
 		bs2.begin_act0()
 		var bot2 := Bot.new(bs2)
-		bot2.use_manual = false
+		bot2.hurry = true
 		var d2 := bot2.run_act0()
 		durs.append("g%d %s / %s" % [sd, Fmt.duration(d), Fmt.duration(d2)])
-		dur_ok = dur_ok and d >= 180.0 and d <= 300.0 and d2 <= 330.0 and not bs.fishing.act0 and bs.money >= 300.0
-	check(dur_ok, "F3 durée de l'acte 0 (bot / sans coup de main) : %s" % ", ".join(durs))
-	# 6. sauvegarde v6 : aller-retour en plein acte 0 (achats, bateaux, horloges, tirage) ; partie d'avant F3 = acte 0 fait
+		dur_ok = dur_ok and d >= 900.0 and d <= 1200.0 and d2 <= 930.0 and not bs.fishing.act0 and bs.fishing.maxed() and bs.fishing.marcel \
+			and bs.fishing.rents_lost == 0 and bs2.fishing.marcel and bs2.fishing.announced and bs.time == 0.0
+	check(dur_ok, "G1 durée de la Crique (bot tranquille 15–20 min / pressé ≤ 15 min 30, cible 14 : journal G1-d) : %s" % ", ".join(durs))
+	# 7. sauvegarde v7 : aller-retour en pleine Crique (cartes, bateaux, loyers en attente, horloges, tirage, Heures sup sur
+	# clock()) ; v6 en cours d'acte 0 → la Crique recommence (0 $) ; v6 au T1 → Crique finie (plafond, Marcel, Concession)
 	var sv := PortSim.new(db, 5)
 	sv.begin_act0()
-	sv.buy_fish()
+	sv.buy_fish_places(1)
 	for k in 200:
 		sv.step(0.25)
 	sv.money += 100.0
-	sv.buy_fish()
-	sv.buy_fish()
+	sv.buy_fish_places(2)
+	sv.buy_fish_services(1)
 	for k in 37:
 		sv.step(0.25)
 	var dd: Dictionary = JSON.parse_string(JSON.stringify({"sim": sv.to_dict()})).sim
 	var sl := PortSim.new(db)
 	sl.from_dict(dd)
-	var same := sl.fishing.act0 and sl.fishing.level == 3 and sl.fishing.boats.size() == sv.fishing.boats.size() \
-		and is_equal_approx(sl.fishing.clock, sv.fishing.clock) and sl.time == 0.0
+	var same := sl.fishing.act0 and sl.fishing.places == 3 and sl.fishing.services == 1 and sl.fishing.boats.size() == sv.fishing.boats.size() \
+		and is_equal_approx(sl.fishing.clock, sv.fishing.clock) and sl.time == 0.0 and sl.fishing.rents_lost == sv.fishing.rents_lost
 	for k in 120:
 		sv.step(0.25)
 		sl.step(0.25)
-	same = same and is_equal_approx(sl.money, sv.money) and sl.fishing.landings == sv.fishing.landings
+	same = same and is_equal_approx(sl.money, sv.money) and sl.fishing.landings == sv.fishing.landings and sl.fishing.rents_lost == sv.fishing.rents_lost
 	var vre := RegEx.create_from_string("const VERSION := (\\d+)").search(FileAccess.get_file_as_string("res://autoload/save.gd"))
 	var vmap := {"VERSION": int(vre.get_string(1)) if vre != null else 0}
+	# v6 en cours d'acte 0 (clé « level », pas « places ») : la Crique recommence
+	var v6: Dictionary = JSON.parse_string(JSON.stringify(sv.to_dict()))
+	v6.act0 = {"on": true, "replay": false, "level": 3, "boats": [], "clock": 100.0, "act0_time": 100.0, "landings": 4, "helps": 2, "earned": 40.0}
+	v6.money = 80.0
+	var r6 := PortSim.new(db)
+	r6.from_dict(v6)
+	var restart := r6.fishing.act0 and r6.fishing.places == 0 and r6.money == 0.0 and r6.fishing.boats.is_empty()
+	# v6 au T1 (ou sans clé act0) : Crique finie
 	var old_d := s0.to_dict()
 	old_d.erase("act0")
+	old_d.boost_ready_at = 100.0
 	var mg := PortSim.new(db)
 	mg.from_dict(old_d)
-	check(int(vmap.get("VERSION", 0)) == 6 and dd.has("act0") and same and not mg.fishing.act0 and mg.fishing.level == 5 \
-		and mg.fishing.boats.size() == 7 and mg.fishing.passive_rate() > 0.0 and not mg.act0_ready(),
-		"F3 sauvegarde v6 : aller-retour en plein acte 0 (niveau %d, %d bateaux, même suite), partie d'avant F3 chargée acte 0 fait, pêche passive" % [sl.fishing.level, sl.fishing.boats.size()])
-	# 7. nouvelle concession : la pêche continue (passive), l'acte 0 ne se rejoue pas
+	var t1d: Dictionary = JSON.parse_string(JSON.stringify(s0.to_dict()))
+	t1d.act0 = {"on": false, "replay": false, "level": 5, "boats": [], "clock": 300.0, "act0_time": 220.0, "landings": 20, "helps": 23, "earned": 300.0}
+	t1d.boost_ready_at = 100.0
+	var mg2 := PortSim.new(db)
+	mg2.from_dict(t1d)
+	check(int(vmap.get("VERSION", 0)) >= 7 and dd.has("act0") and int(dd.act0.get("v", 0)) == 7 and same and restart \
+		and not mg.fishing.act0 and mg.fishing.maxed() and mg.fishing.marcel and mg.fishing.has("concession") and mg.fishing.boats.size() == 12 and not mg.act0_ready() \
+		and not mg2.fishing.act0 and mg2.fishing.maxed() and is_equal_approx(mg2.boost_ready_at, 320.0) and mg2.fishing.act0_time == 220.0,
+		"G1 sauvegarde v7 : aller-retour en pleine Crique (niveau %d/%d, %d bateaux, même suite) ; v6 en cours d'acte 0 → la Crique recommence (%s) ; v6 au T1 → Crique finie (plafond, Marcel, Concession, Heures sup décalées)" % [
+		sl.fishing.places, sl.fishing.services, sl.fishing.boats.size(), restart])
+	# 8. nouvelle concession : la pêche est reprise au plafond, la Crique ne se rejoue pas
 	var fin := PortSim.new(db, 2)
 	fin.fishing.migrate_done()
 	fin.tier = 3
@@ -2633,21 +2729,19 @@ func test_f3(db: DataDB) -> void:
 	fin.counters["evp"] = 2.6e6
 	var nc := PortSim.new(db, 4)
 	nc.carry_over(fin)
-	check(nc.fishing.level == 5 and not nc.fishing.act0 and nc.fishing.passive_rate() > 0.0, "F3 nouvelle concession : la pêche est reprise (passive), pas d'acte 0")
-	# 8. trajets des bateaux : jamais à terre, jamais sur un ponton ni le quai, loin du chenal et du mouillage des cargos ; vitesse
-	# de croisière lente (aucun sprint), glissement latéral à la place
+	check(nc.fishing.maxed() and not nc.fishing.act0 and nc.fishing.marcel and nc.fishing.rate_estimate() > 4.0, "G1 nouvelle concession : la pêche est reprise au plafond, pas de Crique")
+	# 9. trajets des bateaux : jamais à terre, jamais sur un ponton, le quai, la jetée ni la marina, loin du chenal et du mouillage
+	# des cargos ; vitesse de croisière lente (aucun sprint), glissement latéral à la place ; le caboteur de l'annonce dans le trou
+	# des nuages, loin des coins de pêche
 	var bad: Array[String] = []
 	var spd_max := 0.0
 	var spd_at := ""
 	var beam := {"dinghy": 0.52, "trawler": 1.1, "tuna": 1.43}
-	var rects: Array[Rect2] = []
-	for id in Layout.ANSE_PONTOONS:
-		for pd in Layout.anse_pontoons(id):
-			rects.append(Layout.pontoon_rect(pd))
+	var rects := Layout.anse_obstacles()
 	var min_anchor := INF
 	var min_chan := INF
 	for cls in Layout.FISH_BERTHS:
-		var bd: Dictionary = db.cfg("fishing").boats[cls]
+		var bd: Dictionary = fc.boats[cls]
 		for slot in (Layout.FISH_BERTHS[cls] as Array).size():
 			var po: Array = Layout.fish_path_out(cls, slot).pts
 			var lead := Vector2((po[-1] as Vector3).x - (po[-2] as Vector3).x, (po[-1] as Vector3).z - (po[-2] as Vector3).z).normalized()
@@ -2666,17 +2760,48 @@ func test_f3(db: DataDB) -> void:
 					if Layout.any_land(p2):
 						bad.append("%s %s %d à terre (%d, %d)" % [cls, kn, slot, int(p.x), int(p.z)])
 					for r in rects:
-						if r.grow(float(beam[cls]) - 0.05).has_point(p2):
-							bad.append("%s %s %d sur un ponton (%d, %d)" % [cls, kn, slot, int(p.x), int(p.z)])
-					for an in Layout.ANCHORS:
-						min_anchor = minf(min_anchor, p2.distance_to(Vector2(an.x, an.z)))
+						if r.grow(float(beam[cls]) - 0.05).has_point(p2) and not (kn != "out" and p2.distance_to(Vector2(Layout.fish_berth(cls, slot).x, Layout.fish_berth(cls, slot).z)) < 2.0):
+							bad.append("%s %s %d sur un ouvrage (%d, %d)" % [cls, kn, slot, int(p.x), int(p.z)])
+					if not Layout.in_cloud_hole(p2):
+						bad.append("%s %s %d sous les nuages (%d, %d)" % [cls, kn, slot, int(p.x), int(p.z)])
+					for an2 in Layout.ANCHORS:
+						min_anchor = minf(min_anchor, p2.distance_to(Vector2(an2.x, an2.z)))
 					for ch in Layout.CHANNEL:
 						min_chan = minf(min_chan, p2.distance_to(Vector2(ch.x, ch.z)))
 					min_anchor = minf(min_anchor, p2.distance_to(Vector2(Layout.SPAWN.x, Layout.SPAWN.z)))
-	check(bad.is_empty() and min_anchor >= 40.0 and min_chan >= 60.0 and spd_max <= 6.0,
-		"F3 trajets des bateaux : ni terre ni ponton (%s), ≥ %d u du mouillage et de l'arrivée des cargos, ≥ %d u du chenal, vitesse au plus %s u/s (%s)" % [
-		str(bad.slice(0, 3)), int(min_anchor), int(min_chan), Fmt.num(spd_max), spd_at])
-	# 9. forêt profonde ramenée à ≈ 1,3 × les arbres du village (hauteur du plus grand pin d'un bloc / plus grand arbre du village)
+	var pass_min := INF
+	var pass_hole := 0
+	var pass_n := 0
+	for p in Layout.sample_path(Layout.PASSING_SHIP_PATH, 2.0):
+		pass_n += 1
+		if Layout.in_cloud_hole(Vector2(p.x, p.z)):
+			pass_hole += 1
+		for cls in Layout.FISH_GROUNDS:
+			for g in Layout.FISH_GROUNDS[cls]:
+				pass_min = minf(pass_min, Vector2(p.x, p.z).distance_to(g))
+	check(bad.is_empty() and min_anchor >= 40.0 and min_chan >= 60.0 and spd_max <= 6.0 and pass_min >= 14.0 and pass_hole >= pass_n * 0.6,
+		"G1 trajets des bateaux (9 barques, 2 chalutiers, thonier à la jetée) : ni terre ni ouvrage ni nuages (%s), ≥ %d u du mouillage, ≥ %d u du chenal, vitesse au plus %s u/s (%s) ; caboteur de l'annonce à ≥ %d u des coins de pêche, visible %d/%d" % [
+		str(bad.slice(0, 3)), int(min_anchor), int(min_chan), Fmt.num(spd_max), spd_at, int(pass_min), pass_hole, pass_n])
+	# 10. les nuages : le trou contient l'anse (places, bâtiments, cabane, route du mareyeur jusqu'à la forêt, marina, jetée) et
+	# rien du port (quai n°1, parc, gate, estacade), ni le pôle nautique du cap ; la couverture va au-delà du rectangle habillé
+	var hole_bad: Array[String] = []
+	for cls in Layout.FISH_BERTHS:
+		for b in Layout.FISH_BERTHS[cls]:
+			if not Layout.in_cloud_hole(Vector2(b.x, b.z)):
+				hole_bad.append("place %s" % cls)
+	for id in Layout.ANSE_BUILDINGS:
+		var p: Vector3 = Layout.ANSE_BUILDINGS[id].p
+		if not Layout.in_cloud_hole(Vector2(p.x, p.z)):
+			hole_bad.append(id)
+	for q in [Vector2(Layout.ODETTE_HUT.p.x, Layout.ODETTE_HUT.p.z), Vector2(-99, 95), Vector2(Layout.PIER.p.x, Layout.PIER.p.z), Vector2(-125, 37), Vector2(-113, 37)]:
+		if not Layout.in_cloud_hole(q):
+			hole_bad.append(str(q))
+	for q in [Vector2(-24, -7), Vector2(-20, 10), Vector2(-21, 45), Vector2(-62, -16), Vector2(-30, -60), Vector2(-120, 110), Vector2(-60, 60)]:
+		if Layout.in_cloud_hole(q):
+			hole_bad.append("port/cap/village visible " + str(q))
+	var cover_ok := Layout.CLOUD_COVER.encloses(Rect2(-320, -340, 720, 690))
+	check(hole_bad.is_empty() and cover_ok, "G1 nuages : le trou contient l'anse et rien du port ni du cap (%s) ; couverture sur tout le monde habillé (%s)" % [str(hole_bad.slice(0, 4)), cover_ok])
+	# 11. forêt profonde ramenée à ≈ 1,3 × les arbres du village (hauteur du plus grand pin d'un bloc / plus grand arbre du village)
 	var deep_s := 0.0
 	var n_deep := 0
 	for it in Layout.forest():
@@ -2685,12 +2810,209 @@ func test_f3(db: DataDB) -> void:
 			n_deep += 1
 	var ratio := Assets.aabb("forest_block").size.y * deep_s / maxf(0.01, Assets.aabb("tree").size.y * 1.3)
 	check(n_deep >= 150 and ratio <= 1.45, "F3 forêt profonde : %d blocs, échelle au plus ×%s, pins au plus %s × le plus grand arbre du village (avant ×3,2)" % [n_deep, Fmt.num(deep_s), Fmt.num(ratio)])
-	# 10. tutoriel : trois étapes de l'acte 0 en tête, la suite inchangée (une progression enregistrée avant F3 se retrouve)
+	# 12. tutoriel : sept étapes de la Crique en tête, la suite inchangée (une progression enregistrée avant F3 ou G1 se retrouve)
 	var steps: Array = DataDB.load_json("res://data/tutorial.json")
 	var ids: Array = steps.map(func(x: Dictionary) -> String: return String(x.id))
 	var tre := RegEx.create_from_string("const REV5_ORDER := \\[([^\\]]*)\\]").search(FileAccess.get_file_as_string("res://scripts/ui/tutorial.gd"))
 	var tsrc := {"REV5_ORDER": JSON.parse_string("[" + tre.get_string(1) + "]") if tre != null else []}
 	var sre := RegEx.create_from_string("const TUTO_REV := (\\d+)").search(FileAccess.get_file_as_string("res://autoload/settings.gd"))
 	var setc := {"TUTO_REV": int(sre.get_string(1)) if sre != null else 0}
-	check(ids.slice(0, 4) == ["a0_pontoon", "a0_boat", "a0_hall", "welcome"] and ids.slice(3) == tsrc.REV5_ORDER and int(setc.TUTO_REV) == 6,
-		"F3 tutoriel : %s en tête, puis la liste d'avant (version 6)" % str(ids.slice(0, 3)))
+	var a0_ids := ["a0_pontoon", "a0_rent", "a0_places", "a0_hall", "a0_marcel", "a0_mission", "a0_concession"]
+	# (lot G2, recalé : après « Bienvenue », le premier navire à la main — terrassement, quai, accoster, cabane, tamponner, piste,
+	# laisser passer —, puis la suite d'avant sans « coup de main » ni « barrière express » ; version 8)
+	var g2_ids := ["welcome", "t_platform", "t_quay", "ship", "t_hut", "t_stamp", "t_track", "t_pass"]
+	var rest: Array = (tsrc.REV5_ORDER as Array).filter(func(x: String) -> bool: return not (x in ["welcome", "ship", "crane", "gate"]))
+	check(ids.slice(0, 7) == a0_ids and ids.slice(7, 15) == g2_ids and ids.slice(15) == rest and int(setc.TUTO_REV) == 8,
+		"G1/G2 tutoriel : %s en tête, puis le premier navire à la main, puis la suite (version 8)" % str(ids.slice(0, 7)))
+
+
+## Lot G2 — le Terre-plein, le premier navire à la main : la friche nue après la Concession (aucune séquence automatique),
+## les six pièces du départ une à une, la grue de bord, tamponner, laisser passer et encaisser, le camion qui repart, la
+## plateforme pleine, les responsables après 5 gestes (et le geste remplacé), les cartes des services avec leur responsable
+## ou leur bâtiment, les noms de métier, le monde figé sans responsable, la sauvegarde v8, le bot (jalons).
+func test_g2(db: DataDB) -> void:
+	print("[lot G2 — le Terre-plein à la main]")
+	var mc: Dictionary = db.cfg("manual")
+	# 1. après la Concession : la friche nue — aucun bâtiment, aucun navire, rien de révélé ; un seul achat (le terrassement)
+	var s := PortSim.new(db, 21)
+	s.begin_act0()
+	s.open_port()
+	var nude := s.built.is_empty() and s.ships.is_empty() and s.berths.is_empty() and s.g2 and s.next_starter() == "platform"
+	var avail: Array = []
+	for b in db.buildings:
+		if s.building_state(String(b.id)) == "available":
+			avail.append(String(b.id))
+	for i in 240:
+		s.step(0.25)
+	check(nude and avail == ["platform"] and s.ships.is_empty() and s.counter("evp") == 0.0 and String(s.analysis.key) == "starter",
+		"G2 friche : après la Concession, rien de bâti ni de navire (aucune séquence automatique), un seul achat possible (%s), conseil « %s »" % [str(avail), String(s.analysis.key)])
+	# 2. les pièces une à une ; le quai n°1 amène le caboteur ; il ne s'accoste qu'à la main (pas d'accostage automatique)
+	s.money = 1.0e4
+	var order_ok := not s.build("quay1") and s.build("platform") and s.build("quay1")
+	var ship_in := s.ships.size() == 1
+	var waited := 0.0
+	for i in 400:
+		s.step(0.25)
+	var anch: Ship = null
+	for sh in s.ships:
+		if sh.state == Ship.State.ANCHORED:
+			anch = sh
+	check(order_ok and ship_in and anch != null and s.berths[0].ship == -1,
+		"G2 quai n°1 : dans l'ordre (terrassement d'abord) ; le caboteur se présente en rade et y reste sans geste (100 s)")
+	# 3. accoster à la main ; la grue de bord décharge lentement (≈ board_crane_rate), sur la plateforme ; sans cabane, rien
+	# n'est dédouané (tout attend le tampon)
+	s.prioritize_ship(anch.id)
+	var t_un := -1.0
+	var evp0 := s.counter("evp")
+	var e1 := 0.0
+	var rate := 0.0
+	for i in 400:
+		s.step(0.25)
+		if t_un < 0.0 and s.counter("evp") > evp0:
+			t_un = s.time
+			e1 = s.counter("evp")
+		elif t_un > 0.0 and rate == 0.0 and s.time - t_un >= 10.0:
+			rate = (s.counter("evp") - e1) / (s.time - t_un)
+	check(s.board_crane(0) and t_un > 0.0 and absf(rate - float(mc.board_crane_rate)) < 0.05 and s.pending_total() > 0.5 and s.cleared_total() < 0.01 and int(s.gestures.berth) == 1,
+		"G2 grue de bord : accosté à la main (1 geste), déchargement à %s conteneur/s (cible %s), tout attend le tampon (%s)" % [Fmt.num(rate), Fmt.num(float(mc.board_crane_rate)), Fmt.num(s.pending_total())])
+	# 4. tamponner : la cabane ; sans elle, pas de tampon
+	var no_hut := not s.stamp_ready() and s.stamp() == 0.0
+	s.build("hut")
+	var st := s.stamp()
+	check(no_hut and st > 0.0 and s.pending_total() == 0.0 and s.counter("stamps") == 1.0 and int(s.gestures.stamp) == 1,
+		"G2 tamponner : impossible sans cabane, puis toucher la cabane dédouane le lot (%s)" % Fmt.num(st))
+	# 5. pas de camion sans piste ; ensuite un camion se présente, toucher la barrière = il charge 2 conteneurs et paie
+	for i in 120:
+		s.step(0.25)
+	var no_truck := s.truck_queue == 0.0 and not s.pass_ready()
+	s.build("track")
+	var guard := 0
+	while not s.pass_ready() and guard < 800:
+		s.step(0.25)
+		guard += 1
+	var m0 := s.money
+	var d0 := s._sum(s.delivered)
+	var paid := s.pass_truck()
+	check(no_truck and paid > 0.0 and s.money - m0 >= paid - 0.01 and is_equal_approx(s._sum(s.delivered) - d0, float(db.cfg("truck_evp"))) and int(s.gestures.pass) == 1,
+		"G2 laisser passer : pas de camion sans piste ; un camion se présente, toucher la barrière = 2 conteneurs sortis, %s encaissés" % Fmt.money(paid))
+	# 6. un camion qu'on ne laisse pas passer repart au bout de `truck_wait` s, sans rien (bulle rouge avant : truck_wait_left)
+	guard = 0
+	while not s.pass_ready() and guard < 800:
+		s.step(0.25)
+		guard += 1
+	var lost0 := s.counter("trucks_lost")
+	var d1 := s._sum(s.delivered)
+	var warn_seen := false
+	for i in int((float(mc.truck_wait) + 2.0) / 0.25):
+		s.step(0.25)
+		warn_seen = warn_seen or s.truck_wait_left() < float(mc.truck_warn)
+	check(s.counter("trucks_lost") > lost0 and is_equal_approx(s._sum(s.delivered), d1) and warn_seen,
+		"G2 camion non servi : il repart après %d s sans rien charger (perdus %d), avertissement avant" % [int(mc.truck_wait), int(s.counter("trucks_lost"))])
+	# 7. plateforme pleine sans sortie : « il faut une sortie » (alerte), le quai se remplit, le déchargement s'arrête
+	var f := PortSim.new(db, 22)
+	f.begin_act0()
+	f.open_port()
+	f.money = 1.0e4
+	f.build("platform")
+	f.build("quay1")
+	f.build("hut")
+	f.build("crane_mobile")
+	f.yard_cleared[0] = f.yard_capacity()
+	f.apron[0] = f.apron_capacity()
+	for i in 40:
+		f.step(0.25)
+	check(String(f.shown_analysis().get("alert", "")) == "exit" and f.yard_fill() >= 0.99,
+		"G2 plateforme pleine : alerte « il faut une sortie » (%s, remplissage %d %%)" % [String(f.shown_analysis().get("alert", "")), roundi(f.yard_fill() * 100.0)])
+	# 8. responsables : après 5 gestes, un à la fois, dans l'ordre, à ≥ 45 s ; l'embauche remplace le geste et ouvre la carte
+	var r := PortSim.new(db, 23)
+	r.begin_act0()
+	r.open_port()
+	r.money = 1.0e5
+	for b in PortSim.STARTERS:
+		r.build(String(b))
+	var offers: Array = []
+	r.manager_offered.connect(func(d: String) -> void: offers.append([d, r.time]))
+	r.gestures = {"berth": 5, "stamp": 5, "pass": 5}
+	for i in 800:
+		r.step(0.25)
+	var gaps_ok := offers.size() == 3 and offers.map(func(o: Array) -> String: return String(o[0])) == ["berths", "customs", "gate"]
+	for k in range(1, offers.size()):
+		gaps_ok = gaps_ok and float(offers[k][1]) - float(offers[k - 1][1]) >= float(mc.offer_gap) - 0.01
+	var cards_before := not r.feature("dept_berths") and not r.feature("dept_gate")
+	var h1 := r.hire_manager("berths") and r.hire_manager("customs") and r.hire_manager("gate")
+	for i in 40:
+		r.step(0.25)
+	r.yard_pending[0] = 6.0
+	r.truck_queue = 4.0
+	var replaced := not r.stamp_ready() and not r.pass_ready() and r.managers_count() == 3
+	# (Heures sup : une révélation ordinaire, elle passe à son tour après celles déjà dues — `reveal_gap`)
+	var hire_t := r.time
+	var g := 0
+	while not r.feature("boost") and g < 2400:
+		r.step(0.25)
+		g += 1
+	check(gaps_ok and cards_before and h1 and replaced and r.feature("dept_berths") and r.feature("dept_customs") and r.feature("dept_gate") and r.feature("boost"),
+		"G2 responsables : Léon, Paul, Tonio se présentent après 5 gestes, dans l'ordre, à ≥ %d s (%s) ; embauchés, ils remplacent le geste, leur carte apparaît, Heures sup ensuite (%s après)" % [
+		int(mc.offer_gap), str(offers.map(func(o: Array) -> String: return "%s %s" % [o[0], Fmt.duration(float(o[1]))])), Fmt.duration(r.time - hire_t)])
+	# 9. cartes avec bâtiment : Déchargement avec la grue mobile, Stockage avec le parc, Arrivées avec le quai n°2
+	var c := PortSim.new(db, 24)
+	c.begin_act0()
+	c.open_port()
+	c.money = 1.0e6
+	var before := not c.feature("dept_cranes") and not c.feature("dept_yard_ops") and not c.feature("dept_harbor")
+	for b in PortSim.STARTERS:
+		c.build(String(b))
+	for i in 400:
+		c.step(0.25)
+	check(before and c.feature("dept_cranes") and c.feature("dept_yard_ops") and not c.feature("dept_harbor") and not c.buy_dept("harbor", 1),
+		"G2 cartes : Déchargement avec la grue mobile, Stockage avec le parc ; Arrivées pas avant le quai n°2")
+	# 10. noms de métier (identifiants inchangés)
+	var names := ["harbor", "berths", "cranes", "customs", "yard_ops", "gate"].map(func(d: String) -> String: return String(db.dept_by_id[d].name))
+	check(names == ["Arrivées", "Accostage", "Déchargement", "Douane", "Stockage", "Sortie camions"],
+		"G2 noms de métier : %s" % ", ".join(names))
+	# 11. le monde figé sans responsable du port (rien gagné, rien perdu ; la pêche de Marcel seule), puis la règle d'avant
+	var o := PortSim.new(db, 25)
+	o.begin_act0()
+	o.open_port()
+	o.money = 100.0
+	var rep0 := o.apply_offline(3600.0)
+	var frozen := rep0.is_empty() and o.money == 100.0
+	o.managers["berths"] = true
+	var rep1 := o.apply_offline(600.0)
+	check(frozen and not rep1.is_empty(), "G2 hors-ligne : sans responsable du port, le port est figé (rien gagné ni perdu) ; avec Léon, la règle d'avant")
+	# 12. sauvegarde v8 : régime manuel, gestes, offres, friche ; une partie sans « g2 » au T1 = port complet
+	var sv := PortSim.new(db, 26)
+	sv.begin_act0()
+	sv.open_port()
+	sv.money = 500.0
+	sv.build("platform")
+	sv.build("quay1")
+	sv.gestures.berth = 3
+	sv.mgr_offered["berths"] = 12.0
+	var dd: Dictionary = JSON.parse_string(JSON.stringify(sv.to_dict()))
+	var sl := PortSim.new(db)
+	sl.from_dict(dd)
+	var t1d := PortSim.new(db, 27).to_dict()
+	t1d.erase("g2")
+	var lg := PortSim.new(db)
+	lg.from_dict(t1d)
+	var vre := RegEx.create_from_string("const VERSION := (\\d+)").search(FileAccess.get_file_as_string("res://autoload/save.gd"))
+	check(sl.g2 and sl.built == ["platform", "quay1"] and int(sl.gestures.berth) == 3 and sl.mgr_offered.has("berths") and sl.berths.size() == 1 \
+		and not lg.g2 and lg.built.slice(0, 6) == PortSim.STARTERS and lg.feature("dept_cranes") and vre != null and int(vre.get_string(1)) == 8,
+		"G2 sauvegarde v8 : régime manuel rechargé (friche, gestes, offres) ; partie d'avant G2 au T1 = port complet")
+	# 13. le bot joue le terre-plein : jalons depuis la Concession (premier camion, responsables, grue mobile, parc), sans perte
+	var jal: Array[String] = []
+	var bot_ok := true
+	for sd in [1, 3]:
+		var bs := PortSim.new(db, sd)
+		bs.begin_act0()
+		var bot := Bot.new(bs)
+		bot.run_act0()
+		bot.run(600.0)
+		var ms := bot.milestones
+		jal.append("g%d camion %s, Léon %s, Tonio %s, grue %s, parc %s" % [sd, Fmt.duration(float(ms.get("Premier camion", INF))),
+			Fmt.duration(float(ms.get("Responsable embauché : Léon « Gros-Bras » Barbier", INF))), Fmt.duration(float(ms.get("Responsable embauché : Tonio Ferrer", INF))),
+			Fmt.duration(float(ms.get("Bâtiment : Grue mobile", INF))), Fmt.duration(float(ms.get("Bâtiment : Parc de stockage", INF)))])
+		bot_ok = bot_ok and ms.has("Premier camion") and ms.has("Responsable embauché : Tonio Ferrer") and ms.has("Bâtiment : Parc de stockage") \
+			and float(ms["Premier camion"]) < 300.0 and bs.managers_count() >= 3
+	check(bot_ok, "G2 bot : le premier navire à la main puis les responsables en 10 min (%s)" % "; ".join(jal))

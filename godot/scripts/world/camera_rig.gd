@@ -68,6 +68,19 @@ func set_tier_bounds(tier: int) -> void:
 	# rive d'en face et eau couvrent tout ce rectangle — jamais le bord du monde (zoom 190 avant)
 	bounds = Rect2(-130.0, -150.0, float(lx[1]) + 60.0 + 130.0, 310.0)
 	zoom_max = clampf(bounds.size.x * 0.75, 90.0, ZOOM_MAX)
+	crique = false
+
+
+## Lot G1 — pendant la Crique (nuages posés), la caméra est bornée à l'anse : au zoom le plus large on voit les nuages aux
+## bords, jamais le bord du monde (Layout.CRIQUE_BOUNDS, CRIQUE_ZOOM_MAX).
+var crique := false
+
+
+func set_crique_bounds() -> void:
+	bounds = Layout.CRIQUE_BOUNDS
+	zoom_max = Layout.CRIQUE_ZOOM_MAX
+	zoom_goal = minf(zoom_goal, zoom_max)
+	crique = true
 
 
 ## Verrouillée par une capture avec --look : les recentrages du jeu (premier navire d'une classe, tutoriel) sont ignorés.

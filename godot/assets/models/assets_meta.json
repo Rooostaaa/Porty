@@ -1900,5 +1900,345 @@
    68.0
   ],
   "anchor_y": 26.86
+ },
+ "fuel_pump": {
+  "tris": 344,
+  "footprint": [
+   2.62,
+   2.0
+  ],
+  "anchor_y": 3.07
+ },
+ "wash_bay": {
+  "tris": 1120,
+  "footprint": [
+   6.4,
+   4.6
+  ],
+  "anchor_y": 4.32
+ },
+ "pier_long": {
+  "deck_z": 0.9,
+  "span_x": [
+   -7.0,
+   7.0
+  ],
+  "moor_side": "+y",
+  "lamp": [
+   6.4,
+   0.9,
+   0.6
+  ],
+  "tris": 1452,
+  "footprint": [
+   14.0,
+   2.66
+  ],
+  "anchor_y": 6.39
+ },
+ "sailboat_a": {
+  "mast_foot": [
+   0.42,
+   0.385,
+   0
+  ],
+  "nodes": {
+   "mast": {
+    "pivot": [
+     0.42,
+     0.385,
+     0
+    ],
+    "rotate": "rotation.z (l\u00e9ger roulis, \u00b13\u00b0)"
+   }
+  },
+  "length": 3.5,
+  "width": 1.05,
+  "tris": 496,
+  "footprint": [
+   3.8,
+   1.17
+  ],
+  "anchor_y": 5.34
+ },
+ "sailboat_b": {
+  "mast_foot": [
+   0.54,
+   0.495,
+   0
+  ],
+  "nodes": {
+   "mast": {
+    "pivot": [
+     0.54,
+     0.495,
+     0
+    ],
+    "rotate": "rotation.z (l\u00e9ger roulis, \u00b13\u00b0)"
+   }
+  },
+  "length": 4.5,
+  "width": 1.35,
+  "tris": 496,
+  "footprint": [
+   4.92,
+   1.47
+  ],
+  "anchor_y": 6.64
+ },
+ "yacht_small": {
+  "length": 5.0,
+  "width": 1.75,
+  "tris": 576,
+  "footprint": [
+   5.1,
+   1.95
+  ],
+  "anchor_y": 2.96
+ },
+ "marcel": {
+  "tris": 384,
+  "footprint": [
+   0.74,
+   0.62
+  ],
+  "anchor_y": 1.78
+ },
+ "ship_passing": {
+  "length": 22.0,
+  "width": 5.4,
+  "deck": 1.65,
+  "keel": -1.35,
+  "tris": 524,
+  "footprint": [
+   23.45,
+   5.9
+  ],
+  "anchor_y": 6.55
+ },
+ "cloud_bank": {
+  "module": [
+   24.0,
+   12.0,
+   6.0
+  ],
+  "vcol": "white (uniforme)",
+  "tris": 504,
+  "footprint": [
+   24.0,
+   12.0
+  ],
+  "anchor_y": 6.4
+ },
+ "ground_platform": {
+  "module": [
+   8.0,
+   8.0
+  ],
+  "tris": 184,
+  "footprint": [
+   8.0,
+   8.0
+  ],
+  "anchor_y": 0.92
+ },
+ "track_dirt": {
+  "module": 8.0,
+  "width": 4.0,
+  "axis": "x",
+  "tris": 152,
+  "footprint": [
+   8.0,
+   5.76
+  ],
+  "anchor_y": 0.67
+ },
+ "quay_small": {
+  "module": [
+   16.0,
+   6.0
+  ],
+  "sea_side": "+y",
+  "tris": 1120,
+  "footprint": [
+   16.0,
+   6.63
+  ],
+  "anchor_y": 1.26
+ },
+ "barrier_post": {
+  "nodes": {
+   "arm": {
+    "pivot": [
+     -2.4,
+     1.1,
+     0
+    ],
+    "rotate": "rotation.z (> 0 : l\u00e8ve, 80\u00b0 ouvert)",
+    "range_deg": [
+     0,
+     80
+    ]
+   }
+  },
+  "arm_length": 5.0,
+  "gate_x": [
+   -2.1,
+   2.1
+  ],
+  "tris": 364,
+  "footprint": [
+   7.85,
+   1.17
+  ],
+  "anchor_y": 1.88
+ },
+ "coaster_crane": {
+  "deck_pos_on_coaster": [
+   7.4,
+   1.65,
+   0
+  ],
+  "nodes": {
+   "boom": {
+    "parent": "base",
+    "pivot": [
+     0.0,
+     3.4,
+     -0.0
+    ],
+    "rotate": "rotation.z (> 0 l\u00e8ve ; 30\u00b0 au repos) et rotation.y (orientation autour du m\u00e2t)",
+    "rest_deg": 30,
+    "range_deg": [
+     10,
+     70
+    ],
+    "length": 8.0
+   },
+   "hook": {
+    "parent": "boom",
+    "pos": [
+     8.0,
+     0,
+     0
+    ],
+    "rotate": "rotation.z = -rotation.z du boom (c\u00e2ble vertical) ; descendre : position.y locale (c\u00e2ble 3 u)"
+   }
+  },
+  "tris": 408,
+  "footprint": [
+   8.85,
+   2.15
+  ],
+  "anchor_y": 8.19
+ },
+ "container_wait": {
+  "size": [
+   2.0,
+   1.3,
+   1.3
+  ],
+  "tris": 156,
+  "footprint": [
+   2.02,
+   1.33
+  ],
+  "anchor_y": 1.71
+ },
+ "container_ok": {
+  "size": [
+   2.0,
+   1.3,
+   1.3
+  ],
+  "tris": 156,
+  "footprint": [
+   2.02,
+   1.33
+  ],
+  "anchor_y": 1.71
+ },
+ "marina_pontoon": {
+  "deck_z": 0.45,
+  "module": [
+   10.0,
+   1.8
+  ],
+  "catway_x": [
+   -3.75,
+   -1.25,
+   1.25,
+   3.75
+  ],
+  "catway_y": [
+   -2.2,
+   2.2
+  ],
+  "berths": [
+   [
+    -2.5,
+    0,
+    2.4
+   ],
+   [
+    -2.5,
+    0,
+    -2.4
+   ],
+   [
+    0.0,
+    0,
+    2.4
+   ],
+   [
+    0.0,
+    0,
+    -2.4
+   ],
+   [
+    2.5,
+    0,
+    2.4
+   ],
+   [
+    2.5,
+    0,
+    -2.4
+   ]
+  ],
+  "tris": 576,
+  "footprint": [
+   10.0,
+   7.0
+  ],
+  "anchor_y": 1.74
+ },
+ "cloud_puff": {
+  "module": [
+   8.0,
+   5.0,
+   4.0
+  ],
+  "vcol": "white (uniforme)",
+  "tris": 162,
+  "footprint": [
+   8.0,
+   5.0
+  ],
+  "anchor_y": 4.4
+ },
+ "track_dirt_turn": {
+  "module": [
+   8.0,
+   8.0
+  ],
+  "enter": "-x",
+  "exit": "+y",
+  "tris": 172,
+  "footprint": [
+   7.4,
+   6.79
+  ],
+  "anchor_y": 0.67
  }
 }

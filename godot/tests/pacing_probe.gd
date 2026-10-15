@@ -152,8 +152,9 @@ func _init() -> void:
 		for a in OS.get_cmdline_user_args():
 			if a.begins_with("--bot-save="):
 				bot.save_horizon = float(a.substr(11))
-		# lot F3 : le bot joue l'acte 0 (pêche), puis tout se mesure depuis l'entrée au T1 (l'horloge du port, `sim.time`,
-		# ne tourne pas pendant l'acte 0) ; durée sans coup de main sur une partie à part, même graine (--no-act0 : base F2)
+		# lot F3/G1 : le bot joue la Crique (pêche), puis tout se mesure depuis la Concession = l'entrée au T1 (l'horloge du port,
+		# `sim.time`, ne tourne pas pendant la Crique). Mesure « tranquille » (plafond R₀ puis Concession) sur la partie mesurée ;
+		# « pressé » (Concession dès la marina) sur une partie à part, même graine (--no-act0 : base F2, sans Crique)
 		var a0_line := ""
 		if not OS.get_cmdline_user_args().has("--no-act0"):
 			sim.begin_act0()
@@ -162,11 +163,11 @@ func _init() -> void:
 			var sim2 := PortSim.new(db, sd)
 			sim2.begin_act0()
 			var bot2 := Bot.new(sim2)
-			bot2.use_manual = false
-			var a0n := bot2.run_act0()
-			a0_line = "     acte 0 : %s (sans coup de main %s) · achats %s · %d débarques, %d coups de main · argent à l'entrée du T1 %s · revenu de fin %s/s, passif %s/s" % [
-				Fmt.duration(a0), Fmt.duration(a0n), " / ".join(bot.act0_buys.map(func(x: float) -> String: return Fmt.duration(x))),
-				sim.fishing.landings, sim.fishing.helps, Fmt.money(m_t1), Fmt.num(bot.act0_end_rate), Fmt.num(sim.fishing.passive_rate())]
+			bot2.hurry = true
+			var a0h := bot2.run_act0()
+			a0_line = "     Crique tranquille : %s (pressé %s, revenu %s/s) · %s · %d escales, %d loyers à la main, %d perdus · argent à la Concession %s · revenu R₀ %s/s" % [
+				Fmt.duration(a0), Fmt.duration(a0h), Fmt.num(bot2.act0_end_rate), " / ".join(bot.act0_buys),
+				sim.fishing.landings, sim.fishing.rents_manual, sim.fishing.rents_lost, Fmt.money(m_t1), Fmt.num(bot.act0_end_rate)]
 			print("g%d %s" % [sd, a0_line.strip_edges()])
 		var keys := {}               # goulot -> secondes, par palier
 		var excess := {}             # palier -> secondes où demande > 1,5 × capacité
@@ -412,6 +413,13 @@ func _init() -> void:
 			_dur(t3b[0] if t3b.size() > 0 else INF), _dur(t3b[3] if t3b.size() > 3 else INF), str(lic_at)])
 		if a0_line != "":
 			table.append(a0_line)
+		# lot G2 : le terre-plein à la main, depuis la Concession
+		var g2l := ""
+		for k in ["Bâtiment : Terrassement", "Bâtiment : Quai n°1", "Bâtiment : Cabane de douane", "Bâtiment : Piste et barrière", "Premier camion",
+				"Responsable embauché : Léon « Gros-Bras » Barbier", "Responsable embauché : Inspecteur Paul Delmas", "Responsable embauché : Tonio Ferrer",
+				"Bâtiment : Grue mobile", "Bâtiment : Parc de stockage"]:
+			g2l += "%s %s · " % [k.replace("Bâtiment : ", "").replace("Responsable embauché : ", ""), _dur(float(ms.get(k, INF)))]
+		table.append("     G2 : " + g2l + "camions perdus %d, tampons %d, passages %d" % [int(sim.counter("trucks_lost")), int(sim.counter("stamps")), int(sim.counter("passes"))])
 		var first_buy := INF
 		if not bot.purchases.is_empty():
 			first_buy = float(bot.purchases[0].t)

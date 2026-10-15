@@ -1,5 +1,5 @@
 [
-  {"id": 0, "name": "La Crique", "story": "L'anse des pêcheurs, à l'ouest du cap : le ponton d'Odette, sa cabane, les barques des voisins. On loue des places, on vend le poisson, puis la criée.",
+  {"id": 0, "name": "La Crique", "story": "L'anse des pêcheurs, à l'ouest du cap, sous un ciel bouché partout ailleurs : le ponton d'Odette, sa cabane, les barques des voisins. On encaisse les loyers, on confie la Crique à Marcel, on l'agrandit jusqu'à la marina, puis on signe la concession du terre-plein.",
    "intro": [
      {"title": "Une lettre du notaire", "pose": "think",
       "text": "« Votre grand-tante Odette vous lègue sa crique, au fond du golfe d'Ambre : un ponton, une cabane, des filets… et la friche de l'autre côté du cap. » Au crayon, Odette a ajouté : « Fais-en quelque chose de bien. Et nourris les goélands. »"},
@@ -8,8 +8,10 @@
      {"title": "Le ponton d'Odette", "pose": "bravo",
       "text": "Le ponton tient avec trois clous et beaucoup d'optimisme. Répare-le : les barques du village paieront leur place, et tu vendras leur poisson. On commence petit, mais on commence !"}
    ],
-   "bascule": {"title": "Un caboteur au large !", "pose": "think",
-     "text": "Tiens, Corsaire & Fils… Ce caboteur cherche un quai pour décharger. De l'autre côté du cap, il y a la vieille estacade. Un port à conteneurs, ça te dit ?"}},
+   "announce": {"title": "Un caboteur au large !", "pose": "think",
+     "text": "Tiens, Corsaire & Fils… Ce caboteur cherche un quai pour décharger, et il repassera. De l'autre côté du cap, sous les nuages, il y a la friche et la vieille estacade d'Odette. Un port à conteneurs, ça te dit ? Je t'ai noté ça dans tes missions : signe la concession du terre-plein quand tu pourras."},
+   "bascule": {"title": "La concession est signée !", "pose": "bravo",
+     "text": "Les nuages se lèvent sur la friche d'Odette : une estacade en ruine, des broussailles… et le caboteur de Corsaire & Fils qui revient. Un port à conteneurs, ça commence comme ça. Marcel garde la Crique."}},
   {"id": 1, "name": "Le Vieux Quai", "story": "Derrière le cap, une estacade en ruine et une friche : on y rebâtit le vieux quai, sa grue et son parc. Le caboteur de Corsaire & Fils attend déjà au large.",
    "value_mult": 1.8, "dues_mult": 1.8, "traffic_mult": 1.0},
   {"id": 2, "name": "Port régional", "story": "Les premiers armateurs sérieux frappent à la porte.",

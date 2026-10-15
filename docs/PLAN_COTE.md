@@ -99,8 +99,8 @@ herbe du cap, pointillés très pâles) et un navire au mouillage n°1. À l'ouv
 - zoom le plus large **130 u** (`ZOOM_MAX` ; 190 avant).
 - À ce zoom, aux quatre coins des bornes, l'écran reste dans x −320…400, z −340…350. Tout ce rectangle est habillé (eau,
   rives et forêt dans `Layout.FOREST_AREA`) : on ne voit jamais le bord du monde (contrôlé dans `run_all` et `ui_smoke`).
-- Cadrage des cartes d'intro (lot F3) : (−92 ; 26), largeur 100 u (l'anse, le cap, la friche) ; acte 0 : `Layout.ANSE_LOOK`
-  (−109 ; 41), largeur 58 u (l'anse, ses pontons, la cabane, le quai des chalutiers).
+- Cadrage des cartes d'intro (lot G1) : (−116 ; 30), largeur 72 u ; la Crique : `Layout.ANSE_LOOK` (−117 ; 40), largeur 62 u ;
+  pendant la Crique la caméra est bornée à l'anse (§ 5 ter), les bornes du palier reviennent à la Concession.
 
 ## 5 bis. Le golfe d'Ambre, la forêt, le départ (lot F2)
 - **Rives du golfe** (`GULF_WEST`, `GULF_EAST`, `HINTERLAND` ; sol vert sombre, hors du plan coté et de `land_polys`, ajoutées
@@ -139,31 +139,44 @@ herbe du cap, pointillés très pâles) et un navire au mouillage n°1. À l'ouv
   poste n°1 (`first_ship_path`) sans passer par le mouillage.
 - **Anse des pêcheurs** : cotes de l'acte 0 au § 5 ter (lot F3).
 
-## 5 ter. L'anse des pêcheurs (lot F3, `Layout` « Lot F3 », `FishingView`)
+## 5 ter. L'anse des pêcheurs (lots F3 et G1, `Layout` « Lot F3/G1 », `FishingView`, `CloudLayer`)
 À l'ouest du cap, entre la plage ouest (−132 ; 60) → (−94 ; 48), le flanc ouest du cap (−94 ; 48) → (−90 ; 0) et la rive ouest
-du golfe. Hors du bassin des conteneurs ; les bateaux restent au sud de z −35 : **≥ 40 u du mouillage et de l'arrivée des
-cargos** (SPAWN, places −121 et −71), **≥ 60 u du chenal** (contrôlé dans `run_all`).
-- **Pontons** (modèle `pontoon`, module 6 × 1,6, plancher à −0,55) :
-  - ponton d'Odette (réparé, 0 $) : x −130…−118 sur z 51,5, passerelle x −124 vers la plage ; état d'avant : `pontoon_ruin`
-    au même endroit ; places des barques (étrave à l'est) en (−127 ; 49,9) et (−121 ; 49,9) ;
-  - deuxième ponton (25 $) : x −116…−104 sur z 49,5, passerelle x −110 ; places (−113 ; 47,9) et (−107 ; 47,9) ;
-  - quai des chalutiers (120 $) : le long du cap, x −95,6, z 16…46 ; chalutiers (étrave au nord) en (−98 ; 40,5) et
-    (−98 ; 31,5) ; thonier (fabrique de glace, 200 $) en (−98,4 ; 21).
-- **Bâtiments** : criée (60 $) `fish_hall` en (−99 ; 55,5), à l'est des pontons (vue du sud-est, elle ne les cache pas), et sa
-  **route du mareyeur** x −102…−96, z 59…96 jusqu'à la rue du village (z 96…102), puis sous les arbres (village_w) ; fabrique
-  de glace `ice_plant` en (−88,5 ; 28), tournée de 90° (goulotte vers le quai) ; cabane d'Odette `odette_hut` en (−127 ; 62,5)
-  (toujours là). Camionnette `fish_van` garée en (−97,5 ; 63,5) (voie montante ; descente en x −100,5 ; rue : z 97,5 vers
-  l'ouest, 100,5 vers l'est).
-- **Boucle des bateaux, à sens unique** (sens inverse des aiguilles d'une montre) : voie ouest x −136 vers le sud, voie de la
-  plage z 44 vers l'est (au nord des barques amarrées, ≥ 2 u), voie est x −102 vers le nord (le long des chalutiers), sortie
-  au nord de z 16. Barques : glissement latéral de la voie de la plage à leur place ; chalutiers et thonier : glissement depuis
-  la voie est. Coins arrondis (rayon 4 à 6), aucune rotation sur place.
-- **Coins de pêche** (cercle de dérive de 1,6 u) : barques (−126 ; 14), (−116 ; 6), (−130 ; 2), (−120 ; −4) ; chalutiers
-  (−140 ; −12), (−128 ; −20) ; thonier (−160 ; −28). Arrivée d'un bateau neuf (en fondu, hors du cadrage de l'acte 0) :
-  barques (−138 ; −10), chalutiers (−142 ; −20), thonier (−150 ; −30).
+du golfe (`GULF_WEST` : (−132 ; 60) → (−148 ; 54) → (−166 ; 36) → (−182 ; 8)). Hors du bassin des conteneurs ; les bateaux
+restent au sud de z −35 : **≥ 40 u du mouillage et de l'arrivée des cargos**, **≥ 60 u du chenal** (contrôlé dans `run_all`).
+- **Le ponton des places** (lot G1, modèle `pontoon`, module 6 × 1,6, plancher à −0,55) : un seul ponton le long de la plage à
+  **z 48,4**, de x −140 vers l'est, 2 modules au départ (réparation, 0 $), 6 au plus (x −140…−104) : il s'allonge aux niveaux
+  de Places **3, 4, 6, 7** (`PLACES_MODULES`), un taquet (`cleat`) par place ; passerelle de 2 modules vers la plage en x −130 ;
+  état d'avant : `pontoon_ruin` en (−134 ; 48,4). **9 places de barques** (étrave à l'est) à z 46,6, x −138 … −106 au pas de 4 u
+  (niveau 1 = 2 barques, puis une par niveau).
+- **Quai des chalutiers** (50 $) : le long du cap, x −95,6, z 16…46 ; chalutiers (étrave au nord) en (−98 ; 40,5) et (−98 ; 31,5).
+- **Grande jetée** (90 $, `pier_long` 14 × 2,5, béton sur pieux) : axe z en (−96 ; 7), z 0…14 ; passerelle (`pontoon`) vers le
+  flanc en (−92 ; 1) ; **thonier** sur son flanc ouest en (−99,5 ; 7), étrave au nord.
+- **Marina** (150 / 180 / 240 $, modules `marina_pontoon` 10 × 1,8, axe z, 8 anneaux) dans l'intérieur de la boucle des bateaux
+  (jamais traversé) : (−125 ; 36), puis (−125 ; 26), puis (−113 ; 36) ; voiliers (`sailboat_a` 3,5 u, `sailboat_b` 4,5 u) des deux
+  côtés, étrave au ponton (x ±3,5), 6 → 12 → 20.
+- **Services à quai** (paliers nommés) : criée `fish_hall` en (−99 ; 55,5) (niveau 1) et sa **route du mareyeur** x −102…−96,
+  z 59…96 jusqu'à la rue du village ; pompe `fuel_pump` en (−107 ; 54) (niveau 3) ; aire de lavage `wash_bay` en (−118 ; 59,5)
+  (niveau 6) ; fabrique de glace `ice_plant` en (−88,5 ; 28), tournée de 90° (niveau 9). Cabane d'Odette `odette_hut` en
+  (−127 ; 62,5) (toujours là). Marcel (`marcel`, sinon `docker`) sur le ponton en (−133 ; 48,4). Camionnette `fish_van` garée en
+  (−97,5 ; 63,5).
+- **Boucle des bateaux, à sens unique** (sens inverse des aiguilles d'une montre) : voie ouest **x −146** vers le sud, voie de la
+  plage z 44 vers l'est (au nord des barques amarrées, ≥ 2 u), voie est x −102 vers le nord (le long des chalutiers), sortie au
+  nord de z 16 (le thonier remonte la voie est jusqu'à z 7, sort au nord de z −2). Glissement latéral à la place, coins arrondis
+  (rayon 4), aucune rotation sur place, ≤ 6 u/s.
+- **Coins de pêche** (cercle de dérive de 1,6 u) : barques (−126 ; 14), (−116 ; 6), (−130 ; 2), (−120 ; −4), (−136 ; 10),
+  (−112 ; −2), (−124 ; −10), (−134 ; −6), (−142 ; 2) ; chalutiers (−150 ; −14), (−138 ; −22) ; thonier (−160 ; −20). Arrivée d'un
+  bateau neuf (en fondu, hors du cadrage) : barques (−148 ; −10), chalutiers (−152 ; −20), thonier (−160 ; −32).
+- **Caboteur de l'annonce** (8ᵉ minute, `ship_passing`, sinon `ship_coaster`) : traverse au large de (−226 ; 12) à (−134 ; −80)
+  à 7 u/s, dans le trou des nuages, et s'y efface.
 - **Caboteur de la bascule** : naît en (−150 ; −118), au large au nord-ouest, rejoint l'entrée du chenal (−33 ; −116) (point
   d'attente tant que le vieux quai n'est pas fini), puis le pilotage du premier navire (poste n°1).
-- Scatter (bosquets) : rien dans x −134…−88 × z 44…72 ni dans x −96…−80 × z 14…48.
+- **Nuages de la Crique** (`CLOUD_COVER` x −330…410, z −350…360 ; bancs 24 × 12 à y 11, dérive ±3 u) : tout est couvert sauf le
+  **trou** `CLOUD_HOLE` : la plage et l'anse x −200…−84, z 0…74 ; le large x −215…−84, z −80…0 ; la route du mareyeur x −106…−92,
+  z 72…106. Sous les bancs, une **nappe continue** à y 6,5 (cellules de 12 u, découpées en 3 × 3 au bord du trou) : rien ne se
+  voit entre les bancs à aucun zoom. Dissolution à la Concession (3,5 s, nappe comprise), jamais recréés.
+- **Caméra pendant la Crique** (`CameraRig.set_crique_bounds`) : centre x −128…−104, z 18…46 ; zoom ≤ 72. Cadrage d'intro
+  (−116 ; 30), largeur 72 ; cadrage de la Crique `ANSE_LOOK` (−117 ; 40), largeur 62 ; annonce (−128 ; 18), largeur 72.
+- Scatter (bosquets) : rien dans x −142…−84 × z 44…72, x −96…−80 × z 14…48 ni x −100…−80 × z −2…16.
 
 ## 6. Non fait (lot D)
 **Gate est au palier 3** : non faite. La simulation n'a qu'une file de camions et un débit de gate ; `TrafficView` ne montre
