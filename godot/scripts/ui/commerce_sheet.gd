@@ -368,7 +368,7 @@ func refresh() -> void:
 			"contract":
 				var c: Dictionary = r.c
 				(r.bar as RoundBar).value = float(c.progress) / float(c.target)
-				(r.bar as RoundBar).text = "%s / %s EVP" % [Fmt.num(minf(float(c.progress), float(c.target))), Fmt.num(float(c.target))]
+				(r.bar as RoundBar).text = "%s / %s conteneurs" % [Fmt.num(minf(float(c.progress), float(c.target))), Fmt.num(float(c.target))]
 				(r.time as Label).text = "Reste " + Fmt.duration(maxf(0.0, float(c.deadline) - s.time))
 
 

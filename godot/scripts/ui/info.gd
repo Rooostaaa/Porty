@@ -20,7 +20,7 @@ const BUILDING_SHORT := {
 	"quay_ext": "ALLONGEMENT DU QUAI", "gravel2": "FRICHE", "customs1": "BUREAU DE DOUANE", "supply": "PONTON",
 	"crane2": "DEUXIÈME GRUE", "dredge1": "DRAGAGE DU CHENAL", "gravel3": "EXTENSION DU PARC", "berth2": "QUAI N°2",
 	"repair": "ATELIER DE RÉPARATION", "asphalt": "PARC BITUMÉ", "gate2": "DEUXIÈME VOIE", "parking1": "AIRE D'ATTENTE",
-	"sts1": "PORTIQUE STS", "tug2": "DEUXIÈME REMORQUEUR", "reefer": "PÔLE FROID", "quickmoor": "BOLLARDS",
+	"sts1": "GRANDE GRUE STS", "tug2": "DEUXIÈME REMORQUEUR", "reefer": "PÔLE FROID", "quickmoor": "BOLLARDS",
 	"parking2": "EXTENSION DE L'AIRE", "ewindow": "GUICHET UNIQUE", "scanner1": "SCANNER MOBILE", "berth3": "QUAI PROFOND N°3",
 	"lng": "SOUTAGE GNL", "imo": "ZONE IMO", "rail": "TERMINAL RAIL", "rtg": "PORTIQUES DE COUR", "berth4": "QUAI PROFOND N°4",
 	"oog": "AIRE HORS-GABARIT", "scanner2": "SCANNER À PORTIQUE", "rpilot": "PILOTAGE À DISTANCE", "vacmoor": "AMARRAGE AUTOMATIQUE",
@@ -125,7 +125,7 @@ static func mission_icon(m: Dictionary) -> String:
 
 
 static func per_min(v: float) -> String:
-	return Fmt.num(v * 60.0) + " conteneurs/min"
+	return Fmt.num(v * 60.0) + " cont./min"
 
 
 ## Effet principal d'un département au niveau courant (ou avec `extra` niveaux de plus).

@@ -113,11 +113,11 @@ const ZONES := [
 		 "poly": [Vector2(36, 5), Vector2(48, 5), Vector2(48, 30), Vector2(36, 30)],
 		 "sign": Vector3(42, 0, 17), "landmark": "racks frigorifiques",
 		 "desc": "Des prises pour conteneurs frigorifiques : la cargaison Frigo (×2,5)."},
-	{"id": 8, "name": "Deuxième voie de gate", "icon": "gate", "tier": 2, "open": "gate2", "key": "gate2", "ground": "concrete_dark", "discreet": true,
+	{"id": 8, "name": "Deuxième voie de sortie", "icon": "gate", "tier": 2, "open": "gate2", "key": "gate2", "ground": "concrete_dark", "discreet": true,
 		 # lot E-Flux : réduite à la voie élargie (x −18…−12) et aux parkings, grise « discrète » (elle couvrait 24 × 72 u d'herbe)
 		 "poly": [Vector2(-18, 36), Vector2(-12, 36), Vector2(-12, 54), Vector2(6, 54), Vector2(6, 108), Vector2(-18, 108)],
 		 "sign": Vector3(-9, 0, 57), "landmark": "guérite et totem P",
-		 "desc": "Une deuxième voie de sortie à la gate et l'aire d'attente des poids lourds."},
+		 "desc": "Une deuxième voie de sortie et l'aire d'attente des poids lourds."},
 	# lot D (revue B2) : le pôle nautique sur le cap, face à la passe — tour VTS, pilotage, atelier avec sa cale sur la crique.
 	# « discreet » : tant qu'elle est grise, elle se distingue à peine du cap (cadrage du tutoriel).
 	{"id": 9, "name": "Pôle nautique", "icon": "harbor", "tier": 2, "open": "t2", "key": "", "ground": "grass_lime", "discreet": true,
@@ -180,7 +180,7 @@ const ZONE_SAY := {
 	5: "Le chenal est dragué et balisé : les feeders peuvent entrer.",
 	6: "Voici le quai n°2 : un deuxième poste, sa grue et le parc bitumé.",
 	7: "Le pôle froid est branché : place aux conteneurs frigorifiques.",
-	8: "Une deuxième voie de sortie à la gate : les camions chargés ne font plus la queue.",
+	8: "Une deuxième voie de sortie : les camions chargés ne font plus la queue.",
 	9: "Sur le cap, la tour VTS veille sur la passe et sur tout le port.",
 	10: "La mer devient terre : voici le terre-plein et ses quais profonds !",
 	11: "Au bout du terre-plein, loin du village : le GNL et les matières dangereuses.",

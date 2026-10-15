@@ -10,7 +10,7 @@
    "text": "Un engin du parc a rendu l'âme.", "target_choices": ["cranes", "yard_ops", "gate"],
    "mods": [{"stat": "$target", "mult": 0.5}],
    "pay": {"label": "Réparer tout de suite", "income_seconds": 15, "end": true}},
-  {"id": "strike", "name": "Grève à la gate", "icon": "strike", "weight": 0.6, "tier": 2, "duration": 40,
+  {"id": "strike", "name": "Grève à la sortie", "icon": "strike", "weight": 0.6, "tier": 2, "duration": 40,
    "text": "Les agents de porte réclament une prime : plus aucun camion ne sort.",
    "mods": [{"stat": "gate_rate", "mult": 0.0}],
    "pay": {"label": "Négocier la prime", "income_seconds": 40, "end": true}},

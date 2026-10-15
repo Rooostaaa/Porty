@@ -178,11 +178,11 @@ func _build_stats() -> void:
 	content.add_child(c)
 	c.add_child(UI.vbox(18))
 	_stat_bar("gain", "Gain moyen par escale", UI.MONEY)
-	_stat_bar("per_evp", "Gain moyen par EVP", UI.MONEY)
+	_stat_bar("per_evp", "Gain moyen par conteneur", UI.MONEY)
 	_stat_bar("serving", "Navires en cours de service", UI.INFO)
 	_stat_bar("capacity", "Capacité de traitement", UI.INFO)
 	_stat_bar("yard", "Remplissage du parc", UI.BAD)
-	_stat_bar("gate", "Voies de gate saturées", UI.BAD)
+	_stat_bar("gate", "Sortie camions saturée", UI.BAD)
 	_stat_bar("queue", "File moyenne en rade", UI.INFO)
 	_stat_bar("wait", "Attente moyenne en rade", UI.BAD)
 	_stat_bar("truck", "Passage d'un camion", UI.BAD)
@@ -213,7 +213,7 @@ func _build_stats() -> void:
 	var v4 := UI.vbox(10)
 	c4.add_child(v4)
 	v4.add_child(UI.label("Panier du port", 40, UI.VIOLET))
-	v4.add_child(UI.wrap_label("Ce que rapporte un EVP selon sa cargaison (licences et palier compris), et sa part dans les déchargements.", 26))
+	v4.add_child(UI.wrap_label("Ce que rapporte un conteneur selon sa cargaison (licences et palier compris), et sa part dans les déchargements.", 26))
 	cargo_lines.clear()
 	for ci in PortSim.NCARGO:
 		var hc := UI.hbox(12)
@@ -279,7 +279,7 @@ func _refresh_stats() -> void:
 			serving += 1
 	_set_bar("serving", float(serving) / float(s.berths.size()), "%d / %d" % [serving, s.berths.size()])
 	var cap := s.sustainable_flow() * 60.0
-	_set_bar("capacity", clampf(s.evp_per_min() / maxf(1.0, cap), 0, 1), Fmt.num(cap) + " EVP/min")
+	_set_bar("capacity", clampf(s.evp_per_min() / maxf(1.0, cap), 0, 1), Fmt.num(cap) + " cont./min")
 	_set_bar("yard", s.yard_fill(), Fmt.pct(s.yard_fill()))
 	_set_bar("gate", float(s.trucks_waiting()) / float(s.db.cfg("truck_queue_max")), "%d camions" % s.trucks_waiting())
 	_set_bar("queue", float(s.waiting_ships()) / float(s.rade_places()), "%d / %d" % [s.waiting_ships(), s.rade_places()])
@@ -301,7 +301,7 @@ func _refresh_stats() -> void:
 	for ci in cargo_lines:
 		var ok: bool = s.unlocked[ci] == 1 and shares[ci] > 0.0005
 		(cargo_lines[ci].row as Control).modulate = Color.WHITE if ok else Color(1, 1, 1, 0.45)
-		(cargo_lines[ci].val as Label).text = "%s/EVP · %s" % [Fmt.money(s.stat("value", ci)), Fmt.pct(shares[ci])] if ok \
+		(cargo_lines[ci].val as Label).text = "%s/conteneur · %s" % [Fmt.money(s.stat("value", ci)), Fmt.pct(shares[ci])] if ok \
 			else ("—" if s.unlocked[ci] == 1 else "verrouillée")
 	if s.time - _tags_at >= 1.0 or s.time < _tags_at:
 		_tags_at = s.time
@@ -645,8 +645,8 @@ func _refresh_port() -> void:
 				pbtn.disabled = false
 				UI.style_button(pbtn, UI.BAD if _prestige_confirm else UI.MONEY)
 			else:
-				var why := "Traite encore des EVP pour gagner au moins 1 point de Renom." if s.finished \
-					else "Se débloque avec la Concession nationale (fin du palier T3). Plus tu traites d'EVP, plus tu gagnes de Renom."
+				var why := "Traite encore des conteneurs pour gagner au moins 1 point de Renom." if s.finished \
+					else "Se débloque avec la Concession nationale (fin du palier T3). Plus tu traites de conteneurs, plus tu gagnes de Renom."
 				(r.prestige_txt as Label).text = "%s\n%s" % [now, why]
 				pbtn.text = "VERROUILLÉ"
 				pbtn.disabled = true

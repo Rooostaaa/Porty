@@ -178,7 +178,7 @@ static func generated_mission(i: int) -> Dictionary:
 			return {"id": "g%d" % i, "text": "Accueillir %s escales au total" % Fmt.num(n1), "counter": "ships", "target": n1, "amber": amber, "career": true}
 		2:
 			var n2 := 5000.0 * pow(2.0, k)
-			return {"id": "g%d" % i, "text": "Faire sortir %s camions par la gate" % Fmt.num(n2), "counter": "trucks", "target": n2, "amber": amber, "career": true}
+			return {"id": "g%d" % i, "text": "Faire sortir %s camions" % Fmt.num(n2), "counter": "trucks", "target": n2, "amber": amber, "career": true}
 	var n3 := 5.0 + 4.0 * float(k)
 	return {"id": "g%d" % i, "text": "Réussir %d contrats au total" % int(n3), "counter": "contracts_done", "target": n3, "amber": amber, "career": true}
 
