@@ -1949,3 +1949,15 @@ Captures après (`docs/captures/g2_revue_*.png`, mêmes sauvegardes que la QA, r
 « Goulot : le tampon · TOUCHE LA CABANE ») ; `g2_revue_paul` (« EMBAUCHER PAUL · 60 $ ») ; `g2_revue_t2` (« Quai n°2 · 150K $ »
 à gauche du bouton Heures sup) ; `g2_revue_upgrades` (« 2,66K cont./min → 2,77K cont./min » sur une ligne) ; `g2_revue_manage`
 (Stats et Services sans « EVP » ni « gate »). Avant : `/tmp/claude-0/qa/{g2_tampon,g2_leon,g2_paul,g2_t2,t1_upgrades,t1_manage}.png`.
+
+## Lot H1 — « La Crique : services sur l'eau, anneau de service, pêche et plaisance séparées » (16/10)
+
+Ordre `docs/ORDRE_H1_CRIQUE.md` (retour de l'utilisateur, points 2, 4, 5). Base : G2 + revue (`run_all` 247, `ui_smoke` 181).
+
+### Étape 0 — Note (avant code)
+- Sonde de la Crique **avant** (`crique_probe`, une graine par processus) : tranquille 17 min 10 / 17 min 09 / 17 min 09 /
+  16 min 58 ; pressé 14 min 57 / 14 min 51 / 14 min 57 / 14 min 57 ; Marcel 5 min 08 (g1–g3), 4 min 49 (g4) ; pompe (Services 3)
+  à 6 min 30–6 min 34 en tranquille ; le pressé ne dépasse pas Services 2 (sauf g3 : 5) ; R₀ 4,2 $/s.
+- Choix : un seul ponton de service sur la voie ouest (le retour de **tous** les bateaux), amarré à une jetée qui sépare la
+  marina (à l'ouest) de la pêche ; le service se fait au retour, avant la place ; file à un poste d'attente, sinon le bateau
+  passe son tour ; durée qui baisse avec le niveau de Services ; service payé à la fin de l'anneau. Détails : l'ordre.

@@ -20,6 +20,7 @@ signal feature_unlocked(id: String)          # une fonction de jeu se révèle (
 signal ship_class_first(ship: Ship)          # premier navire d'une nouvelle classe : moment marquant
 signal fish_landed(boat_i: int, amount: float, manual: bool)   # lot F3/G1 : un bateau de pêche repart (vue : caisses) ; montant encaissé par Marcel
 signal fish_event(kind: String)
+signal fish_served(boat_i: int, station: String, amount: float)   # lot H1 : fin d'un service au ponton de service (l'anneau)
 signal manager_offered(dept: String)         # lot G2 : un responsable du port se présente (après 5 gestes)
 signal gesture_done(kind: String, amount: float)   # lot G2 : tampon (« stamp ») ou camion servi (« pass ») d'un toucher              # lot G1 : « marcel_offer », « announce », « rent_lost », « rent_paid »
 
@@ -49,6 +50,7 @@ var truck_wait_t := 0.0                # s d'attente du camion en tête (régime
 var _class_first_wait: Array[Ship] = []   # premiers navires d'une classe arrivés pendant la minute qui suit un palier (non sauvegardé)
 var _fish_earn_cb: Callable
 var _fish_land_cb: Callable
+var _fish_serve_cb: Callable
 
 # --- état du joueur ---
 var time: float = 0.0
@@ -142,6 +144,7 @@ func _init(data: DataDB = null, seed_value: int = -1) -> void:
 	rng.seed = seed_value if seed_value >= 0 else int(db.cfg("seed", 1))
 	_fish_earn_cb = func(a: float) -> void: _earn(a, "fish")
 	_fish_land_cb = func(i: int, a: float, h: bool) -> void: fish_landed.emit(i, a, h)
+	_fish_serve_cb = func(i: int, st: String, a: float) -> void: fish_served.emit(i, st, a)
 	reset()
 	_spawn_initial()
 
@@ -749,7 +752,7 @@ func step(dt: float) -> void:
 	# lot F3/G1 : pendant la Crique, seule la pêche tourne (le port est fermé, son horloge arrêtée)
 	if fishing.act0:
 		_live_t += dt
-		fishing.step(dt, _fish_earn_cb, _fish_land_cb, boost_mult())
+		fishing.step(dt, _fish_earn_cb, _fish_land_cb, boost_mult(), _fish_serve_cb)
 		_flush_fish_events()
 		_buckets(dt)
 		return
@@ -765,7 +768,7 @@ func step(dt: float) -> void:
 	_inspect(dt)
 	_gate(dt)
 	_fees_and_costs(dt)
-	fishing.step(dt, _fish_earn_cb, _fish_land_cb, boost_mult())      # lot G1 : la pêche continue (loyers par Marcel, marina)
+	fishing.step(dt, _fish_earn_cb, _fish_land_cb, boost_mult(), _fish_serve_cb)      # lot G1 : la pêche continue (loyers par Marcel, marina)
 	_flush_fish_events()
 	_buckets(dt)
 	_second_timer += dt

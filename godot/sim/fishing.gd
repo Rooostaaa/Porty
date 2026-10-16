@@ -6,10 +6,13 @@ extends RefCounted
 ## deux extensions, la Concession du terre-plein) et un responsable, Marcel. **Argent = loyer par escale** : un bateau rentré paie
 ## `valeur(classe) × ticket` ; sans Marcel, le joueur l'encaisse à la main (bulle), sinon le bateau attend `rent_wait` s et
 ## repart sans payer ; avec Marcel, tout est encaissé. La marina paie un loyer continu par voilier. Plafond R₀ : tout au maximum.
-## Module léger possédé et sauvegardé par PortSim (clé « act0 », sauvegarde v7) ; données dans `config.json` › `fishing`.
+## Module léger possédé et sauvegardé par PortSim (clé « act0 », sauvegarde v9) ; données dans `config.json` › `fishing`.
 ## Les durées des phases sont fixes (croisière lente, pas de sprint) : la vue suit chaque bateau à vitesse constante.
+## Lot H1 — le service chronométré : dès la pompe (Services niv. 3), un bateau qui rentre passe aux stations du ponton de service
+## (carburant, lavage, glace : celles qui sont bâties), une à la fois ; chaque station sert un bateau à la fois (sinon le poste
+## d'attente, sinon le bateau passe son tour) ; le service dure `stations.dur × decay^(niveau − 3)` et se paie à la fin (l'anneau).
 
-enum Phase { OUT, FISH, BACK, LAND, WAIT }
+enum Phase { OUT, FISH, BACK, LAND, WAIT, QUEUE, SERVE, MOVE, DOCK }
 
 var cfg: Dictionary = {}
 var act0 := false            # la Crique en cours : le port à conteneurs est fermé (PortSim.time ne tourne pas)
@@ -23,7 +26,12 @@ var rents_manual := 0        # loyers encaissés à la main
 var rents_lost := 0          # bateaux repartis sans payer
 var announced := false       # annonce du port (8ᵉ minute) faite
 var last_reveal := -1.0e9    # horloge de la dernière nouveauté (Marcel, annonce) : jamais deux à moins de `reveal_gap` s
-var boats: Array[Dictionary] = []    # {cls, slot, phase, t (s restantes), dur (s de la phase), paid, amount}
+var boats: Array[Dictionary] = []    # {cls, slot, phase, t (s restantes), dur (s de la phase), paid, amount, via, at, to, done}
+## Lot H1 — stations du ponton de service : id -> indice du bateau qui l'occupe ou l'a réservée (-1 libre) ; poste d'attente.
+var occ: Dictionary = {}
+var hold := -1
+var served := 0                      # services rendus (stations)
+var skipped := 0                     # bateaux qui ont passé leur tour (stations et attente prises)
 var clock := 0.0             # horloge de la pêche (s) : Crique et après
 var act0_time := 0.0         # durée de la Crique jouée (s)
 var landings := 0
@@ -191,6 +199,10 @@ func boat_count(cls: String) -> int:
 	return n
 
 
+static func _new_boat(cls: String, slot: int, phase: int, t: float, dur: float) -> Dictionary:
+	return {"cls": cls, "slot": slot, "phase": phase, "t": t, "dur": dur, "paid": false, "amount": 0.0, "via": false, "at": "", "to": "", "done": false}
+
+
 ## Ajoute des bateaux (ils rentrent de la pêche vers leur place, l'un après l'autre).
 func _add_boats(add: Dictionary, staggered: bool = true) -> void:
 	var k := 0
@@ -198,7 +210,7 @@ func _add_boats(add: Dictionary, staggered: bool = true) -> void:
 		for n in int(add[cls]):
 			var slot := boat_count(String(cls))
 			var first := 2.0 + 5.0 * float(k) if staggered else rng.randf_range(0.0, 20.0)
-			boats.append({"cls": String(cls), "slot": slot, "phase": Phase.FISH, "t": first, "dur": maxf(first, 0.1), "paid": false, "amount": 0.0})
+			boats.append(_new_boat(String(cls), slot, Phase.FISH, first, maxf(first, 0.1)))
 			k += 1
 
 
@@ -254,6 +266,8 @@ func migrate_done() -> void:
 	act0 = false
 	replay = false
 	boats.clear()
+	occ.clear()
+	hold = -1
 	places = 0
 	services = 0
 	built.clear()
@@ -276,40 +290,195 @@ func rent_of(bt: Dictionary) -> float:
 	return v * (1.0 + rng.randf_range(-j, j))
 
 
-## Phase suivante du bateau ; renvoie true quand il repart (fin de LAND payé, ou de WAIT).
-func _advance(bt: Dictionary) -> bool:
+# --- lot H1 : stations du ponton de service ---------------------------------------------------------------------------
+
+func st_cfg() -> Dictionary:
+	return cfg.get("stations", {})
+
+
+## Stations bâties, dans l'ordre de visite (carburant, lavage, glace) : les paliers nommés marqués « station » atteints.
+func stations() -> Array[String]:
+	var out: Array[String] = []
+	var named: Dictionary = cfg.get("services", {}).get("named", {})
+	var lvs: Array = named.keys().map(func(k: String) -> int: return int(k))
+	lvs.sort()
+	for lv in lvs:
+		var nl: Dictionary = named[str(lv)]
+		if bool(nl.get("station", false)) and services >= int(lv):
+			out.append(String(nl.id))
+	return out
+
+
+## Niveau de Services qui bâtit la première station (la pompe).
+func first_station_level() -> int:
+	var named: Dictionary = cfg.get("services", {}).get("named", {})
+	var best := 99
+	for k in named:
+		if bool(named[k].get("station", false)):
+			best = mini(best, int(k))
+	return best
+
+
+## Durée d'un service (s) : elle baisse à chaque niveau de Services (×`decay`), bornée à `min`.
+func service_dur(lv: int = -1) -> float:
+	var sc := st_cfg()
+	if lv < 0:
+		lv = services
+	var k := maxi(0, lv - first_station_level())
+	return maxf(float(sc.get("min", 2.0)), float(sc.get("dur", 6.0)) * pow(float(sc.get("decay", 0.88)), float(k)))
+
+
+## Ce que paie un service (avant Heures sup) : valeur du bateau × `fee` × ticket.
+func service_fee(cls: String) -> float:
+	return float(boat_def(cls).get("value", 0.0)) * float(st_cfg().get("fee", 0.2)) * ticket()
+
+
+func station_free(id: String) -> bool:
+	return int(occ.get(id, -1)) < 0
+
+
+## Indice du bateau servi (ou qui arrive) à une station, -1 sinon.
+func station_boat(id: String) -> int:
+	return int(occ.get(id, -1))
+
+
+func _next_station(cur: String) -> String:
+	var st := stations()
+	var k := st.find(cur)
+	return st[k + 1] if k >= 0 and k + 1 < st.size() else ""
+
+
+## Durées des trajets (s) : `back_g` (coin de pêche → point de décision), `dock` (station ou point de décision → place).
+func _leg(bt: Dictionary, kind: String) -> float:
 	var d := boat_def(String(bt.cls))
-	var ph := int(bt.phase)
-	var leaves := false
-	match ph:
-		Phase.OUT:
-			ph = Phase.FISH
-		Phase.FISH:
-			ph = Phase.BACK
-		Phase.BACK:
-			ph = Phase.LAND
-			bt.paid = false
-			bt.amount = rent_of(bt)
-		Phase.LAND:
-			if marcel or bool(bt.paid):
-				ph = Phase.OUT
-				leaves = true
-			else:
-				ph = Phase.WAIT
-		Phase.WAIT:
-			ph = Phase.OUT
-			leaves = true
+	var sc := st_cfg()
+	match kind:
+		"back_g":
+			return float(d.get("back_g", float(d.get("back", 20.0)) * 0.5))
+		"dock":
+			return float(d.get("dock", float(d.get("back", 20.0)) * 0.5))
+		"approach":
+			return float(sc.get("approach", 5.0))
+		"hold_in":
+			return float(sc.get("hold_in", 3.0))
+		"hold_out":
+			return float(sc.get("hold_out", 3.0))
+		"move":
+			return float(sc.get("move", 3.0))
+	return 3.0
+
+
+func _set_phase(bt: Dictionary, ph: int, dur: float) -> void:
 	bt.phase = ph
-	var dur := float(cfg.get("rent_wait", 20.0)) if ph == Phase.WAIT else float(d.get(["out", "fish", "back", "land"][ph], 5.0))
 	bt.dur = maxf(dur, 0.1)
 	bt.t = float(bt.t) + float(bt.dur)
-	return leaves
+
+
+func _enter_land(bt: Dictionary) -> void:
+	bt.paid = false
+	bt.amount = rent_of(bt)
+	bt.via = false
+	bt.at = "b"
+	bt.done = false
+	_set_phase(bt, Phase.LAND, float(boat_def(String(bt.cls)).get("land", 5.0)))
+
+
+## Au point de décision : la première station libre, sinon le poste d'attente, sinon le bateau passe son tour (vers sa place).
+func _at_gate(i: int, bt: Dictionary) -> void:
+	var st := stations()
+	bt.at = "g"
+	bt.done = false
+	if st.is_empty():
+		bt.to = "b"
+		_set_phase(bt, Phase.DOCK, _leg(bt, "dock"))
+		return
+	if station_free(st[0]):
+		occ[st[0]] = i
+		bt.to = st[0]
+		_set_phase(bt, Phase.MOVE, _leg(bt, "approach"))
+	elif hold < 0:
+		hold = i
+		bt.to = "h"
+		_set_phase(bt, Phase.MOVE, _leg(bt, "hold_in"))
+	else:
+		skipped += 1
+		bt.to = "b"
+		_set_phase(bt, Phase.DOCK, _leg(bt, "dock"))
+
+
+## Fin d'un service (ou attente de la station suivante) : la station suivante si elle est libre, la place sinon. Renvoie false
+## si le bateau garde son poste (station suivante occupée).
+func _after_serve(i: int, bt: Dictionary) -> bool:
+	var cur := String(bt.at)
+	var nx := _next_station(cur)
+	if nx != "":
+		if not station_free(nx):
+			return false
+		occ[nx] = i
+		occ[cur] = -1
+		bt.to = nx
+		bt.done = false
+		_set_phase(bt, Phase.MOVE, _leg(bt, "move"))
+		return true
+	occ[cur] = -1
+	bt.to = "b"
+	bt.done = false
+	_set_phase(bt, Phase.DOCK, _leg(bt, "dock"))
+	return true
+
+
+## Phase suivante du bateau ; renvoie true quand il repart (fin de LAND payé, ou de WAIT).
+func _advance(i: int, bt: Dictionary) -> bool:
+	var d := boat_def(String(bt.cls))
+	var ph := int(bt.phase)
+	match ph:
+		Phase.OUT:
+			bt.at = "sea"
+			_set_phase(bt, Phase.FISH, float(d.get("fish", 5.0)))
+		Phase.FISH:
+			# lot H1 : avec une station au moins, le retour passe par le point de décision du ponton de service
+			bt.via = not stations().is_empty()
+			bt.at = "sea"
+			bt.to = "g" if bool(bt.via) else "b"
+			_set_phase(bt, Phase.BACK, _leg(bt, "back_g") if bool(bt.via) else float(d.get("back", 20.0)))
+		Phase.BACK:
+			if bool(bt.via):
+				_at_gate(i, bt)
+			else:
+				_enter_land(bt)
+		Phase.MOVE:
+			bt.at = String(bt.to)
+			if String(bt.at) == "h":
+				bt.phase = Phase.QUEUE
+				bt.dur = 0.25
+				bt.t = 0.0
+			else:
+				_set_phase(bt, Phase.SERVE, service_dur())
+		Phase.SERVE:
+			# (le paiement du service est fait par `step`, qui connaît le multiplicateur et les rappels)
+			if not _after_serve(i, bt):
+				bt.done = true
+				bt.t = 0.0
+		Phase.DOCK:
+			_enter_land(bt)
+		Phase.LAND:
+			if marcel or bool(bt.paid):
+				bt.at = "sea"
+				_set_phase(bt, Phase.OUT, float(d.get("out", 5.0)))
+				return true
+			_set_phase(bt, Phase.WAIT, float(cfg.get("rent_wait", 20.0)))
+		Phase.WAIT:
+			bt.at = "sea"
+			_set_phase(bt, Phase.OUT, float(d.get("out", 5.0)))
+			return true
+	return false
 
 
 ## Un pas : chaque bateau avance dans son cycle ; la marina paie en continu. `mult` : Heures sup. `earn` reçoit (montant) ;
 ## `landed` reçoit (indice du bateau, montant, encaissé à la main ?). Les loyers encaissés par Marcel tombent à la fin de la
-## débarque ; ceux encaissés à la main tombent au toucher (`collect`).
-func step(dt: float, earn: Callable, landed: Callable = Callable(), mult: float = 1.0) -> void:
+## débarque ; ceux encaissés à la main tombent au toucher (`collect`). Lot H1 : `served_cb` reçoit (indice du bateau, station,
+## montant) à la fin de chaque service (l'anneau).
+func step(dt: float, earn: Callable, landed: Callable = Callable(), mult: float = 1.0, served_cb: Callable = Callable()) -> void:
 	if places <= 0:
 		return
 	clock += dt
@@ -319,15 +488,37 @@ func step(dt: float, earn: Callable, landed: Callable = Callable(), mult: float 
 	if sail > 0.0:
 		earned += sail
 		earn.call(sail)
+	var st := stations()
 	for i in boats.size():
 		var bt: Dictionary = boats[i]
+		var ph := int(bt.phase)
+		# lot H1 : attentes (poste d'attente, station suivante occupée) — on regarde à chaque pas
+		if ph == Phase.QUEUE:
+			if not st.is_empty() and station_free(st[0]):
+				occ[st[0]] = i
+				hold = -1
+				bt.to = st[0]
+				bt.t = 0.0
+				_set_phase(bt, Phase.MOVE, _leg(bt, "hold_out"))
+			continue
+		if ph == Phase.SERVE and bool(bt.done):
+			bt.t = 0.0
+			_after_serve(i, bt)
+			continue
 		bt.t = float(bt.t) - dt
 		var guard := 0
 		while float(bt.t) <= 0.0 and guard < 8:
 			guard += 1
 			var ph0 := int(bt.phase)
 			var paid0 := bool(bt.paid)
-			if _advance(bt):
+			if ph0 == Phase.SERVE and not bool(bt.done):
+				var fee := service_fee(String(bt.cls)) * mult
+				served += 1
+				earned += fee
+				earn.call(fee)
+				if served_cb.is_valid():
+					served_cb.call(i, String(bt.at), fee)
+			if _advance(i, bt):
 				landings += 1
 				var amount := 0.0
 				if ph0 == Phase.LAND and marcel and not paid0:
@@ -341,6 +532,8 @@ func step(dt: float, earn: Callable, landed: Callable = Callable(), mult: float 
 				bt.amount = 0.0
 				if landed.is_valid():
 					landed.call(i, amount, false)
+			if int(bt.phase) == Phase.QUEUE or (int(bt.phase) == Phase.SERVE and bool(bt.done)):
+				break
 	# l'annonce du port : à la 8ᵉ minute, la criée faite, à distance de la dernière nouveauté
 	if act0 and not announced and services >= 1 and clock >= float(cfg.get("announce_at", 480.0)) \
 			and clock - last_reveal >= float(cfg.get("reveal_gap", 45.0)):
@@ -392,17 +585,32 @@ func progress(i: int) -> float:
 
 # --- revenus --------------------------------------------------------------------------------------------------------
 
-## Revenu estimé de la pêche ($/s) : loyers moyens sur un cycle (loyers encaissés sans attente) + marina.
+## Revenu estimé de la pêche ($/s) : loyers moyens sur un cycle (loyers encaissés sans attente) + marina. Lot H1 : avec des
+## stations, le cycle compte les services (durée, trajets entre stations) et leur prix (sans file : estimation).
 func rate_estimate() -> float:
 	if places <= 0:
 		return 0.0
 	var r := float(cfg.get("sail_rent", 0.0)) * float(sails())
-	var tk := ticket()
 	for bt in boats:
-		var d := boat_def(String(bt.cls))
-		var cyc := float(d.get("out", 1)) + float(d.get("fish", 1)) + float(d.get("back", 1)) + float(d.get("land", 1))
-		r += float(d.get("value", 0.0)) * tk / maxf(1.0, cyc)
+		r += boat_rate(String(bt.cls))
 	return r
+
+
+## Revenu moyen d'un bateau de la classe ($/s) au niveau actuel (sans file d'attente).
+func boat_rate(cls: String, sv: int = -1) -> float:
+	var keep := services
+	if sv >= 0:
+		services = sv
+	var d := boat_def(cls)
+	var cyc := float(d.get("out", 1)) + float(d.get("fish", 1)) + float(d.get("back", 1)) + float(d.get("land", 1))
+	var gain := float(d.get("value", 0.0)) * ticket()
+	var n := stations().size()
+	if n > 0:
+		cyc += float(d.get("back_g", float(d.get("back", 20.0)) * 0.5)) + float(d.get("dock", float(d.get("back", 20.0)) * 0.5)) \
+			- float(d.get("back", 1)) + float(st_cfg().get("approach", 5.0)) + float(n) * service_dur() + float(n - 1) * float(st_cfg().get("move", 3.0))
+		gain += float(n) * service_fee(cls)
+	services = keep
+	return gain / maxf(1.0, cyc)
 
 
 ## Revenu hors-ligne ($/s) : Marcel encaisse à son rythme ; sans lui, rien (le monde se fige).
@@ -418,13 +626,15 @@ func cap_rate() -> float:
 	return f.rate_estimate()
 
 
-# --- sauvegarde (v7) -------------------------------------------------------------------------------------------------
+# --- sauvegarde (v9 ; v7/v8 lues sans perte : pas de stations en cours) -------------------------------------------------------------------------------------------------
 
 func to_dict() -> Dictionary:
 	var bl: Array = []
 	for bt in boats:
-		bl.append({"cls": bt.cls, "slot": bt.slot, "phase": bt.phase, "t": bt.t, "dur": bt.dur, "paid": bt.paid, "amount": bt.amount})
-	return {"v": 7, "on": act0, "replay": replay, "places": places, "services": services, "built": built.duplicate(), "marcel": marcel,
+		bl.append({"cls": bt.cls, "slot": bt.slot, "phase": bt.phase, "t": bt.t, "dur": bt.dur, "paid": bt.paid, "amount": bt.amount,
+			"via": bt.via, "at": bt.at, "to": bt.to, "done": bt.done})
+	# lot H1 (v9) : stations du ponton de service (occupées ou réservées), poste d'attente, compteurs
+	return {"v": 9, "occ": occ.duplicate(), "hold": hold, "served": served, "skipped": skipped, "on": act0, "replay": replay, "places": places, "services": services, "built": built.duplicate(), "marcel": marcel,
 		"marcel_offered": marcel_offered, "rents_manual": rents_manual, "rents_lost": rents_lost, "announced": announced,
 		"last_reveal": last_reveal, "boats": bl, "clock": clock, "act0_time": act0_time, "landings": landings, "earned": earned,
 		"rng_state": str(rng.state)}
@@ -470,9 +680,26 @@ func from_dict(d: Dictionary) -> void:
 	boats.clear()
 	for b in d.get("boats", []):
 		if b is Dictionary and cfg.get("boats", {}).has(String(b.get("cls", ""))):
-			boats.append({"cls": String(b.cls), "slot": int(b.get("slot", 0)), "phase": clampi(int(b.get("phase", 0)), 0, 4),
-				"t": float(b.get("t", 1.0)), "dur": maxf(0.1, float(b.get("dur", 1.0))), "paid": bool(b.get("paid", false)),
-				"amount": float(b.get("amount", 0.0))})
+			var nb := _new_boat(String(b.cls), int(b.get("slot", 0)), clampi(int(b.get("phase", 0)), 0, Phase.DOCK),
+				float(b.get("t", 1.0)), maxf(0.1, float(b.get("dur", 1.0))))
+			nb.paid = bool(b.get("paid", false))
+			nb.amount = float(b.get("amount", 0.0))
+			nb.via = bool(b.get("via", false))
+			nb.at = String(b.get("at", ""))
+			nb.to = String(b.get("to", ""))
+			nb.done = bool(b.get("done", false))
+			boats.append(nb)
+	# lot H1 : stations (v9) ; une sauvegarde v7/v8 n'en a pas (aucun bateau n'y est engagé : phases 0–4)
+	occ.clear()
+	var od: Dictionary = d.get("occ", {}) if d.get("occ") is Dictionary else {}
+	for k in od:
+		var bi := int(od[k])
+		occ[String(k)] = bi if bi >= 0 and bi < boats.size() else -1
+	hold = int(d.get("hold", -1))
+	if hold >= boats.size():
+		hold = -1
+	served = int(d.get("served", 0))
+	skipped = int(d.get("skipped", 0))
 	# sauvegarde incohérente (bateaux perdus) : on les recrée d'après les achats
 	if boats.is_empty() and places > 0:
 		_add_boats({"dinghy": int(cfg.get("places", {}).get("start_boats", 2)) + places - 1}, false)
