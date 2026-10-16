@@ -18,7 +18,7 @@ var shown_dept := ""                  # service sur lequel la feuille s'est ouve
 
 
 func _init(dept: String = "") -> void:
-	super._init("Améliorations", ["Départements", "Cargaisons"] as Array[String])
+	super._init("Améliorations", ["Services", "Cargaisons"] as Array[String])
 	focus_dept = dept
 	half = true          # feuille mi-hauteur : on achète au-dessus du port qui vit (lot D-UI)
 
@@ -43,6 +43,13 @@ func _ready() -> void:
 		var gd := String(sim().shown_analysis().get("dept", ""))
 		d = gd if gd != "" and sim().feature("dept_" + gd) else best_dept
 	shown_dept = d
+	# lot G2 : la Sortie camions est la dernière carte (ordre du processus) — une marge en bas de la liste laisse la carte du
+	# goulot venir en haut de la feuille, même la dernière
+	if d != "" and content != null:
+		var pad := Control.new()
+		pad.custom_minimum_size.y = 420.0
+		pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		content.add_child(pad)
 	if Hud.main != null:
 		# sans goulot de service ni meilleur achat (« pas assez de navires ») : on cadre la grue, le cœur du port — jamais la
 		# mer vide du cadrage de départ au-dessus de la feuille
@@ -89,8 +96,17 @@ func build() -> void:
 		_build_fishing(s)
 		return
 	if tab == 0:
-		help("upg_depts", "Le département qui limite le flux porte la pastille rouge GOULOT. Touche « i » pour voir les étapes et le « pourquoi ». Garde le doigt sur AMÉLIORER pour acheter en rafale.")
-		var next_locked := _next_locked_dept(s)
+		var any_dept := false
+		for d0 in CARD_ORDER:
+			any_dept = any_dept or s.feature("dept_" + d0)
+		if s.g2 and not any_dept:
+			# lot G2 : la friche — pas encore de service, le terre-plein se bâtit pièce par pièce
+			help("upg_g2", "Le terre-plein se bâtit pièce par pièce : le prochain bâtiment est toujours en tête de cette liste. Les services arriveront avec leurs responsables.")
+		else:
+			help("upg_depts", "Le service qui limite le flux porte la pastille rouge GOULOT. Touche « i » pour voir les étapes et le « pourquoi ». Garde le doigt sur AMÉLIORER pour acheter en rafale.")
+		# (lot G2 : en partie jouée, pas de carte « à venir » — chaque service apparaît avec son responsable ou son bâtiment ;
+		# le prochain bâtiment, en tête, montre le chemin)
+		var next_locked := "" if s.g2 else _next_locked_dept(s)
 		# lot G2 : le prochain bâtiment en tête de liste (un seul achat à la fois tant que le terre-plein se bâtit)
 		if s.g2:
 			var nb := Zones.next_building(s)
@@ -107,7 +123,7 @@ func build() -> void:
 			content.add_child(title)
 			_fish_cards(s)
 	else:
-		help("upg_lic", "Les licences augmentent la valeur de chaque EVP traité. Chaque palier du port relève leur niveau maximal.")
+		help("upg_lic", "Les licences augmentent la valeur de chaque conteneur traité. Chaque palier du port relève leur niveau maximal.")
 		for ci in PortSim.NCARGO:
 			if s.feature("licences") or ci == 0:
 				_cargo_card(ci)
@@ -437,7 +453,7 @@ func refresh() -> void:
 			var lv2: int = s.licences[ci]
 			if room <= 0:
 				# plafond du palier : c'est le palier suivant du port qui le relève
-				(c.eff as Label).text = "%s/EVP" % Fmt.money(Info.cargo_value(s, ci))
+				(c.eff as Label).text = "%s/conteneur" % Fmt.money(Info.cargo_value(s, ci))
 				(c.bar as RoundBar).value = 1.0
 				(c.bar as RoundBar).text = "Plafond du palier T%d : niveau %d" % [s.tier, lv2]
 				b2.text = "PLAFOND\nniv. %d" % lv2
@@ -447,7 +463,7 @@ func refresh() -> void:
 				continue
 			var n2 := mini(room, _n_for(s.licence_max_affordable.bind(ci)))
 			var cost2 := s.licence_cost(ci, n2)
-			(c.eff as Label).text = "%s/EVP  →  %s" % [Fmt.money(Info.cargo_value(s, ci)), Fmt.money(Info.cargo_value(s, ci, n2))]
+			(c.eff as Label).text = "%s/conteneur  →  %s" % [Fmt.money(Info.cargo_value(s, ci)), Fmt.money(Info.cargo_value(s, ci, n2))]
 			# prochain palier de valeur, lu dans la config ([[niveau, mult], …])
 			var ms: Array = s.db.cfg("licence_milestones")
 			var nxt := Progression.next_step(lv2, ms)

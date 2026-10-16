@@ -7,3 +7,10 @@ docs/previews/_avant/
 # exports
 build/
 *.apk
+*.aab
+*.idsig
+# clés de signature : jamais dans le dépôt (docs/RELEASE.md)
+*.keystore
+*.jks
+export_credentials.cfg
+.claude/worktrees/

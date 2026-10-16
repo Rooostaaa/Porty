@@ -14,6 +14,7 @@ var save_horizon := 150.0                # secondes de revenu qu'on accepte d'é
 
 func _init(s: PortSim) -> void:
 	sim = s
+	_hrng.seed = s.rng.seed + 7
 
 
 func _mark(name: String) -> void:
@@ -28,9 +29,11 @@ func _bought(kind: String, id: String) -> void:
 		_mark("Premier achat (%s %s)" % [kind, id])
 
 
-## Lot G2 — délai humain : un geste n'est fait que `human_delay` s après être devenu possible (le joueur voit, puis touche).
+## Lot G2 — délai humain : un geste n'est fait que 1 à 3 s (tirage, moyenne `human_delay`) après être devenu possible (le
+## joueur voit, puis touche).
 var human_delay := 2.0
-var _ready_at: Dictionary = {}
+var _ready_at: Dictionary = {}           # geste -> instant où il sera fait
+var _hrng := RandomNumberGenerator.new()
 
 
 func _human(kind: String, possible: bool) -> bool:
@@ -38,8 +41,8 @@ func _human(kind: String, possible: bool) -> bool:
 		_ready_at.erase(kind)
 		return false
 	if not _ready_at.has(kind):
-		_ready_at[kind] = sim.time
-	if sim.time - float(_ready_at[kind]) >= human_delay:
+		_ready_at[kind] = sim.time + _hrng.randf_range(human_delay - 1.0, human_delay + 1.0)
+	if sim.time >= float(_ready_at[kind]):
 		_ready_at.erase(kind)
 		return true
 	return false

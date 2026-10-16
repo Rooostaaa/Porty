@@ -141,9 +141,12 @@ func setup(s: Ship, sim: PortSim) -> void:
 	cargo_mm = MultiMeshInstance3D.new()
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true          # (lot G2 : sans couleur d'instance, le rendu de compatibilité OpenGL dessine la cargaison en noir)
 	mm.use_custom_data = true
 	mm.mesh = Assets.mesh("container40")
 	mm.instance_count = slots.size()
+	for i in slots.size():
+		mm.set_instance_color(i, Color.WHITE)
 	mm.visible_instance_count = 0
 	cargo_mm.multimesh = mm
 	cargo_mm.material_override = Assets.tint_material

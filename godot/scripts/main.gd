@@ -29,11 +29,11 @@ func _ready() -> void:
 	if float(cheats.speed) > 0.0:
 		Sim.speed = float(cheats.speed)
 	# lot F2 : le départ (cartes d'intro, friche, chantiers du T1) se joue pour une partie neuve ; pas pour une partie trichée
-	# (palier, bâtiments), ni pour une capture, sauf si elle le demande (--start)
-	if GameState.sim.tier > 1 or not GameState.sim.built.is_empty() or (a.has("capture") and not a.has("start")) or a.has("no-start"):
+	# (palier, bâtiments au-delà des six pièces du départ, lot G2), ni pour une capture, sauf si elle le demande (--start)
+	if GameState.sim.tier > 1 or GameState.sim.built.size() > PortSim.STARTERS.size() or (a.has("capture") and not a.has("start")) or a.has("no-start"):
 		GameState.start_pending = false
 		# lot F3 : une partie trichée ou une capture sans départ a fait l'acte 0 (la pêche de l'anse tourne, passive)
-		if GameState.sim.fishing.level == 0 and not a.has("load-sim"):
+		if not GameState.sim.fishing.concession_done() and not a.has("load-sim"):
 			GameState.sim.fishing.migrate_done()
 	# --event=wind [--event-delay=3] : un aléa démarre après quelques secondes (captures, binaire de l'éditeur seulement ; lot E)
 	if a.has("event") and DebugArgs.allowed():

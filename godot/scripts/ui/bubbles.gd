@@ -3,7 +3,7 @@ extends RefCounted
 ## Géométrie des bulles de la surcouche monde, sans dépendance à l'interface (testable en --script) :
 ## point d'ancrage au-dessus d'un modèle (anchor_y) et décalage latéral anti-chevauchement.
 
-const GAP := 6.0            # écart entre deux bulles décalées
+const GAP := 12.0           # écart entre deux bulles décalées (lot G2, revue : 6 → 12, des bulles se touchaient)
 
 
 ## Point d'ancrage d'une bulle au-dessus d'un modèle posé en `base` : hauteur `anchor_y` du modèle

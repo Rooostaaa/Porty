@@ -1,4 +1,4 @@
-# Plan coté définitif — « La baie et le terre-plein » (13/10/2026, réorganisé au lot D le 14/10, flux du lot E le 14/10 au soir, anse des pêcheurs au lot F3 le 15/10)
+# Plan coté définitif — « La baie et le terre-plein » (13/10/2026, réorganisé au lot D le 14/10, flux du lot E le 14/10 au soir, anse des pêcheurs au lot F3 le 15/10, départ du terre-plein au lot G2 le 15/10)
 
 Source unique des cotes : `godot/scripts/world/layout.gd` (constantes citées entre parenthèses). Repère du jeu : **x vers l'est**
 (droite-bas de l'écran), **z vers le sud** (gauche-bas), mer en z négatif, bord des quais à **z = −6**. Captures de validation :
@@ -124,19 +124,38 @@ herbe du cap, pointillés très pâles) et un navire au mouillage n°1. À l'ouv
   - rue du village, origine (−126 ; 99), perdue en x −132 ;
   - voie ferrée, origine (175 ; 57), perdue en x 181 = `RAIL_TUNNEL_X`.
   - Plus de collines-tunnels (deux buttes boisées restent, en (162 ; 84) et (−110 ; 126)).
-- **Départ de rien** :
-  - pièces de départ (`STARTER`, éléments marqués « grp ») :
-    - `quay0`, 6 s : le quai n°1 x −36…−12, les musoirs ouest, la capitainerie, lampes, bouées, filets et caisses ;
-    - `crane0`, 3,5 s : la grue mobile ;
-    - `yard0`, 5 s : le parc gravier x −36…0 × z 0…18, le hangar, les tonneaux ;
-    - `gate0`, 4 s : la route d'accès x −24…−18, la voie des camions z 30…36, les barrières, le marquage, le panneau.
+- **Départ de rien** (lot G2 : plus de pièces de départ ni de séquence automatique — `Layout.STARTER` est vide ; les éléments
+  marqués « grp » appartiennent aux six bâtiments du terre-plein, achetés un à un dans AMÉLIORER, chacun avec son chantier) :
+    - `platform` **Terrassement**, 6 s (`excavator`, poussière) : case x −36…0 × z 1,5…18 (`LOTS.platform`, centre (−18 ; 9,75),
+      36 × 16,5) ; la friche devient une plateforme de terre battue : 5 × 3 dalles `ground_platform` (8 × 8, posées à
+      7,2 × 6) sur `Layout.PLATFORM_RECT` (−36 ; 0) → (0 ; 18), tant que le parc de stockage n'est pas bâti ; les conteneurs
+      posés y attendent (orange : à tamponner, blancs à étiquette verte : dédouanés ; blocs du parc de base `BLOCKS`, zone 0) ;
+    - `quay1` **Quai n°1**, 6 s (grue de chantier) : quai x −36…−12 (case centre (−24 ; −3,25), 24 × 6,5), les musoirs ouest
+      (−45 et −39), la capitainerie (−43 ; 6), lampes, bouées, filets ; le caboteur de Corsaire & Fils se présente au mouillage
+      à la fin du chantier ; tant qu'il n'y a pas de grue mobile, il décharge avec sa **grue de bord** (`coaster_crane` posée sur
+      le pont en `BOARD_CRANE_POS` (3,6 ; 0) du repère du navire, flèche et crochet animés) ;
+    - `hut` **Cabane de douane**, 3 s (échafaudage) : `customs_hut` en (−28,5 ; 40,5), douanier `customs_officer` en
+      (−25,2 ; 38,6) ; même case que le Bureau de douane (`customs1`), qui la remplace ; zone 3 ouverte avec la cabane ;
+      cible du toucher « tamponner » (rayon de la barrière) ;
+    - `track` **Piste et barrière**, 4 s (palissade, engin) : la route d'accès x −24…−18, la voie des camions z 30…36, le
+      marquage, le panneau ; piste `track_dirt` (modules de 8 u) sur `TRACK_RUNS` (−21 ; 33) → (−1 ; 33) et (−21 ; 37) →
+      (−21 ; 69) tant que la deuxième voie (gate2) n'est pas bâtie ; `barrier_post` en (−21 ; 44), bras `arm` levé quand un
+      camion passe (cible du toucher « laisser passer », `Layout.GATE`) ;
+    - `crane_mobile` **Grue mobile**, 3,5 s : la grue mobile du poste n°1 (−26 ; −1,6) ; la grue de bord ne sert plus ;
+    - `yard` **Parc de stockage**, 5 s : le parc gravier x −36…0 × z 0…18 (remplace les dalles de la plateforme), le hangar,
+      les tonneaux, les engins.
   - État d'avant de la friche : l'estacade ruinée `jetty_ruin` en (−24 ; −7,2), devant le quai ; des rochers et des
     broussailles sur le parc, la capitainerie et la gate.
   - Cases à acheter : rochers et broussailles dans l'empreinte (`Layout.before_state`) ; rien sur l'eau, un quai, une route
     ou le terre-plein.
   - Pas de musoir sur la case d'un quai pas encore construit (allongement x −12…0, quai n°2 x 0…36) : la berge nue.
-- **Premier navire du T1** : il naît dans le chenal, voie d'entrée, tronçon 1 (≈ (−36 ; −72), hors champ), et file vers le
-  poste n°1 (`first_ship_path`) sans passer par le mouillage.
+- **Premier navire du T1** (lot G2) : il naît à la fin du chantier du quai n°1 (escale initiale de la simulation) et arrive au
+  mouillage comme les suivants ; il n'accoste que touché (« Touche pour accoster ») tant que Léon n'est pas embauché.
+- **Bulles du terre-plein** (lot G2) : « Touche pour accoster » au-dessus du navire en rade ; « À tamponner : N » au-dessus de
+  la cabane ; « Camion : touche la barrière » au-dessus de la barrière (rouge, avec compte à rebours, 6 s avant que le camion
+  reparte) ; « Il faut une sortie ! » au-dessus du parc (`YARD_CENTER`) quand la plateforme est pleine ; « Léon / Paul / Tonio se
+  présente » au poste du responsable (`MANAGER_POS`). Pas de bulle « en rade » avant les Arrivées (quai n°2).
+- **Cadrage de la friche** après la cérémonie de la Concession : (−24 ; 14), largeur 72 (`Hud.G2_FRICHE_LOOK`).
 - **Anse des pêcheurs** : cotes de l'acte 0 au § 5 ter (lot F3).
 
 ## 5 ter. L'anse des pêcheurs (lots F3 et G1, `Layout` « Lot F3/G1 », `FishingView`, `CloudLayer`)

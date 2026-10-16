@@ -68,10 +68,10 @@ func build() -> void:
 	c3.add_child(v3)
 	v3.add_child(UI.label("Comment jouer", 40, UI.VIOLET))
 	for line in [
-		"• Les navires attendent en rade, accostent, sont déchargés par les grues, puis les conteneurs vont au parc et sortent par la gate.",
+		"• Les navires attendent en rade, accostent, sont déchargés par les grues, puis les conteneurs vont au parc et sortent en camion.",
 		"• Le maillon le plus lent est le goulot : anneau rouge dans le port, pastille rouge sur sa carte, conseil en haut de l'écran.",
-		"• Améliore le goulot, un autre apparaîtra. Les licences augmentent la valeur de chaque EVP.",
-		"• Touche un navire en rade pour le faire accoster en priorité (tant que la Capitainerie n'a pas de responsable).",
+		"• Améliore le goulot, un autre apparaîtra. Les licences augmentent la valeur de chaque conteneur.",
+		"• Touche un navire en rade pour le faire accoster en priorité (tant que Léon, le chef de quai, n'est pas embauché).",
 	]:
 		v3.add_child(UI.wrap_label(line, 28, UI.TEXT))
 	if DebugArgs.allowed():      # ligne réservée à la version de débogage

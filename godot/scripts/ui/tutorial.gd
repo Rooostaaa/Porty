@@ -463,10 +463,12 @@ const REV6_ALIAS := {"a0_boat": "a0_rent", "a0_hall": "a0_rent"}
 ## express) n'existent plus — un joueur arrêté sur l'une reprend à l'étape suivante.
 const REV7_ORDER := ["a0_pontoon", "a0_rent", "a0_places", "a0_hall", "a0_marcel", "a0_mission", "a0_concession", "welcome", "ship", "crane", "quay", "buy", "goulot", "goulot_fix", "parc", "manager", "building", "gate", "mission", "commerce", "contracts"]
 const REV7_ALIAS := {"crane": "quay", "gate": "mission"}
+## Version 8 (lot G2) : sans la grue mobile ni le parc entre « laisser passer » et la suite (version 9 : « t_crane », « t_yard »).
+const REV8_ORDER := ["a0_pontoon", "a0_rent", "a0_places", "a0_hall", "a0_marcel", "a0_mission", "a0_concession", "welcome", "t_platform", "t_quay", "ship", "t_hut", "t_stamp", "t_track", "t_pass", "quay", "buy", "goulot", "goulot_fix", "parc", "manager", "building", "mission", "commerce", "contracts"]
 
 
 func _from_old_index(old: int, rev: int = 1) -> int:
-	var order: Array = REV7_ORDER if rev == 7 else REV6_ORDER if rev == 6 else (REV5_ORDER if rev == 5 else (REV4_ORDER if rev == 4 else (REV3_ORDER if rev == 3 else (REV2_ORDER if rev == 2 else OLD_ORDER))))
+	var order: Array = REV8_ORDER if rev == 8 else REV7_ORDER if rev == 7 else REV6_ORDER if rev == 6 else (REV5_ORDER if rev == 5 else (REV4_ORDER if rev == 4 else (REV3_ORDER if rev == 3 else (REV2_ORDER if rev == 2 else OLD_ORDER))))
 	if old >= order.size():
 		return steps.size()
 	var want := String(REV6_ALIAS.get(order[old], order[old])) if rev == 6 else (String(REV7_ALIAS.get(order[old], order[old])) if rev == 7 else String(order[old]))

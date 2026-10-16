@@ -29,14 +29,28 @@ Ports d'origine fictifs : Nordhaven, Sakura Bay, Port Aurore, Cap Zéphyr, Rio V
   repassera » ; la première mission du jeu, « Signer la Concession du terre-plein », désigne l'achat (500 $, dès la marina : de loin l'achat
   le plus cher de la Crique).
 - **La Concession du terre-plein** : l'acte de l'État qui livre la friche d'Odette, de l'autre côté du cap. Sa signature lève les
-  nuages, la caméra passe le cap, et les chantiers du vieux quai commencent (chapitre 2, lot G2).
+  nuages, la caméra passe le cap, et la friche nue attend (chapitre 2 « Le Terre-plein », lot G2).
 - **La narratrice** : Capitaine Mathilde Roche. Elle tenait la capitainerie « du temps où il y avait un quai ». Elle lit la
-  lettre, présente les voisins, puis lance les chantiers.
+  lettre, présente les voisins, puis tient le fil du premier navire, un geste à la fois.
 - **Le départ** (lots F2, F3, G1) : trois cartes d'intro (`tiers.json`, palier 0 : la lettre, l'anse, « répare le ponton »),
   la Crique dans l'anse (15 à 20 min, 12 à 17 pour un joueur pressé), l'annonce du port à la 8ᵉ minute, puis la bascule à la
-  Concession : les nuages se dissolvent, le caboteur de Corsaire & Fils revient du large, la cérémonie « Palier 1 — Le Vieux
-  Quai », et la friche se bâtit sous nos yeux en une douzaine de secondes (le vieux quai et sa capitainerie, la grue mobile, le
-  parc et son hangar, la route et la gate, chantiers qui se chevauchent). Le caboteur entre au port.
+  Concession : les nuages se dissolvent, la narratrice, la cérémonie « Palier 1 — Le Vieux Quai », et la friche **nue**.
+
+### Le Terre-plein : le premier navire à la main (chapitre 2, lot G2)
+- On bâtit **une pièce à la fois** (AMÉLIORER n'en propose qu'une, en tête) : le **terrassement** (une plateforme de terre
+  battue), le **quai n°1** (béton neuf, la capitainerie de Mathilde), la **cabane de douane** (un douanier et son tampon), la
+  **piste et la barrière** (une piste en terre jusqu'à la route de la criée, une barrière à bascule).
+- Le caboteur de **Corsaire & Fils** se présente dès que le quai est là. On le **touche pour qu'il accoste** ; il décharge
+  lentement **avec sa propre grue de bord**, conteneur par conteneur, sur la plateforme. Les conteneurs posés (étiquette
+  orange) attendent le **tampon** : on touche la cabane, ils passent au vert. Un camion se présente à la barrière : on la
+  **touche, il charge, paie en passant** et repart sous les arbres. Si l'on tarde, le navire perd patience, le camion repart
+  à vide, la plateforme se remplit (« il faut une sortie »).
+- Après cinq gestes, le métier a son homme : **Léon** (accoster), **Paul** (tamponner), **Tonio** (laisser passer et
+  encaisser) se présentent, un à la fois. Embauché, un responsable **remplace** le geste — même quand on est parti (avant le
+  premier d'entre eux, le port se fige quand on quitte le jeu ; Marcel, lui, encaisse toujours la Crique). Chacun ouvre la
+  carte de son service ; la grue mobile ouvre le Déchargement, le parc de stockage le Stockage, le quai n°2 les Arrivées.
+- Les services portent des **noms de métier** : Arrivées (la capitainerie garde son nom dans le décor), Accostage,
+  Déchargement, Douane, Stockage, Sortie camions.
 
 ## La vie d'un navire (fil rouge)
 1. **Rade** (Capitainerie) — le navire annonce son escale et attend. Patience limitée. 😊 → 😐 → 😠 → départ furieux.
@@ -79,12 +93,12 @@ Le joueur ne corrompt, ne juge, ne saisit jamais. Il finance la capacité d'insp
 | Responsable | Département | Palier |
 |---|---|---|
 | Marcel, patron pêcheur | La Crique (loyers de la pêche) | T0 |
-| Capitaine Mathilde Roche | Capitainerie | T1 |
-| Léon « Gros-Bras » Barbier | Quais | T1 |
-| Yasmine Okafor | Portiques | T1 |
-| Inspecteur Paul Delmas | Douane | T2 |
-| Nadia Benali | Parc et manutention | T2 |
-| Tonio Ferrer | Gate | T2 |
+| Léon « Gros-Bras » Barbier, chef de quai | Accostage (après 5 accostages à la main) | T1 |
+| Inspecteur Paul Delmas, douanier | Douane (après 5 tampons) — passé du T2 au T1 au lot G2 | T1 |
+| Tonio Ferrer, chef de la sortie | Sortie camions (après 5 camions laissés passer) | T1 |
+| Yasmine Okafor, cheffe des grutiers | Déchargement (niveau 10, après la grue mobile) | T1 |
+| Capitaine Mathilde Roche | Arrivées (le bâtiment reste « la capitainerie ») | T1 |
+| Nadia Benali, cheffe de cour | Stockage | T2 |
 
 (Dr Inès Lambert — qualité/sanitaire, Ingénieur Kenji Mori — IT : réservés T3+/T4.)
 
@@ -92,7 +106,7 @@ Le joueur ne corrompt, ne juge, ne saisit jamais. Il finance la capacité d'insp
 | Palier | Nom | Récit |
 |---|---|---|
 | T0 | La Crique | l'anse des pêcheurs sous un ciel bouché partout ailleurs : loyers à la main puis Marcel, places, services, chalutiers, jetée, marina ; la Concession du terre-plein lève les nuages (chapitre 1, lot G1) |
-| T1 | Le Vieux Quai | rebâtir la friche derrière le cap : vieux quai, grue mobile, parc en gravier, gate ; douane en cabane |
+| T1 | Le Vieux Quai | la friche derrière le cap : terrassement, quai n°1, cabane de douane, piste et barrière ; le premier navire à la main, puis Léon, Paul, Tonio ; grue mobile, parc en gravier (chapitre 2, lot G2) |
 | T2 | Port régional | quai 2, premier portique STS, parc bitumé, gate, frigo |
 | T3 | Terminal national | quais 3–4, scanner, zone IMO, rail, contrats nationaux |
 

@@ -42,7 +42,7 @@
   {
     "id": "customs", "name": "Douane", "icon": "customs",
     "desc": "Le tampon de la douane : formalités plus courtes, conteneurs dédouanés plus vite.",
-    "stat": "inspect_rate", "stat_label": "Inspection", "unit": "EVP/min", "base": 3.0,
+    "stat": "inspect_rate", "stat_label": "Inspection", "unit": "cont./min", "base": 3.0,
     "cost": 120, "growth": 1.15,
     "manager": {"name": "Inspecteur Paul Delmas", "title": "Douanier en chef", "cost": 60, "legacy_cost": 400000, "legacy_tier": 2, "amber": 15, "tier": 1, "gesture": "stamp",
                 "perk": "Tamponne les conteneurs à ta place, même quand tu es parti ; douane ×2"},
@@ -62,7 +62,7 @@
   {
     "id": "cranes", "name": "Déchargement", "icon": "crane",
     "desc": "Grutiers et grues : les navires se vident plus vite.",
-    "stat": "crane_rate", "stat_label": "Déchargement / grue", "unit": "EVP/min", "base": 3.0,
+    "stat": "crane_rate", "stat_label": "Déchargement / grue", "unit": "cont./min", "base": 3.0,
     "cost": 80, "growth": 1.15,
     "manager": {"name": "Yasmine Okafor", "title": "Cheffe des grutiers", "cost": 450, "amber": 6, "tier": 1,
                 "perk": "Déchargement ×2"},
@@ -82,7 +82,7 @@
   {
     "id": "yard_ops", "name": "Stockage", "icon": "yard",
     "desc": "Engins qui rangent les conteneurs du quai au parc, et empilent plus haut.",
-    "stat": "transfer_rate", "stat_label": "Transfert", "unit": "EVP/min", "base": 4.5,
+    "stat": "transfer_rate", "stat_label": "Transfert", "unit": "cont./min", "base": 4.5,
     "cost": 100, "growth": 1.15,
     "manager": {"name": "Nadia Benali", "title": "Cheffe de cour", "cost": 250000, "amber": 15, "tier": 2,
                 "perk": "Transfert ×2"},
@@ -102,7 +102,7 @@
   {
     "id": "gate", "name": "Sortie camions", "icon": "gate",
     "desc": "Agents de la barrière et dispatcheurs : les camions chargent et repartent plus vite.",
-    "stat": "gate_rate", "stat_label": "Sortie", "unit": "EVP/min", "base": 5.5,
+    "stat": "gate_rate", "stat_label": "Sortie", "unit": "cont./min", "base": 5.5,
     "cost": 100, "growth": 1.15,
     "manager": {"name": "Tonio Ferrer", "title": "Chef de la sortie", "cost": 80, "legacy_cost": 900000, "legacy_tier": 2, "amber": 15, "tier": 1, "gesture": "pass",
                 "perk": "Laisse passer et encaisse les camions à ta place, même quand tu es parti ; sortie ×2"},
