@@ -2076,6 +2076,95 @@ avec cadenas et prix, la prochaine en or, la parcelle de départ bornée aussi ;
   de la brume (`cloud_layer.gd` ; la parcelle 1 se révèle bornée à la fin de la dissolution ; toucher la brume au-dessus du
   terminal ouvre la Concession).
 
+### H2-0 — Le plan seul (16/10, fait ; arrêt pour validation sur captures)
+- Base : branche `claude/jolly-meitner-1h4twd`, commit `1002c80` (H1 et brume fusionnés). **Rien dans le jeu** : le plan est
+  une copie, `godot/tests/h2/layout_h2.gd` (sans `class_name`, mêmes noms qu'au futur `Layout`), lue par
+  `tests/h2/plan_h2.tscn` (plan coté vu de dessus, `--tier=1|2|3`), `tests/h2/iso_h2.tscn` (maquette 3D avec les vrais modèles,
+  l'eau et l'angle de la caméra du jeu) et `tests/h2/h2_check.gd` (contrôles géométriques, **hors `run_all`** : les compteurs
+  ne bougent pas ; 63 contrôles, 0 échec). `git diff` : seulement `godot/tests/h2/`, les captures et ce journal.
+- **Contrôle de dégagement des coques** (nouveau, pur) : la coque (rectangle L × l à proue abattue, échelles du jeu) est
+  échantillonnée tous les 1 u le long de chaque trajet, cap = sens du trajet (ou son opposé en marche arrière, cap tenu au
+  glissement) ; obstacles = terre selon `built` (côte, bouchons, brise-lames) + navires amarrés aux autres postes de la darse.
+  Seuils : 2 u en route et en recul, 0,5 u au glissement (0,6 au quai), 1 u au bout du recul (le panamax est à 1,4 u du fond).
+
+#### Cotes corrigées par rapport à l'ordre (toutes trouvées par le contrôle, chiffres avant → après)
+1. **Brise-lames est (T3) retiré.** Entre lui (face sud z −42) et le front (z −6), il reste 36 u d'eau ; un panamax (45,2 u)
+   ne peut s'y aligner sur l'axe de D3 : pour pivoter, sa poupe doit être sortie de la darse (les deux postes de D3 ne laissent
+   que 3,5 u de chaque côté), donc son centre en z ≤ −29,6 et son étrave en −52,2. Avec l'ordre (voie z −16, quart de tour
+   jusqu'à z −26) : étrave à −48,6 dans le brise-lames, et la poupe balaie le musoir de F3 (−1,36 u). La passe est s'ouvre
+   en grand entre la tête du brise-lames ouest (42 ; −44) et l'angle de F3 (186 ; −6), feu rouge à l'angle (187,5 ; −7,5).
+   *Autre choix possible* : le reculer au nord (z ≈ −60) — il faut alors déplacer deux places du mouillage, (66 ; −66) et
+   (116 ; −66).
+2. **D1 et D2 : arrivée par un recul en quart de cercle.** L'ordre faisait faire demi-tour devant la darse (D1) ou un quart de
+   tour (D2) pour finir cap au nord, puis reculer tout droit. Mesuré : la **poupe** d'un feeder (33,8 u) qui tourne balaie le
+   musoir de F0 (−36 ; −6) (−1,75 u) ou celui de F1 (34 ; −6) (0,94 u) ; et un feeder cap au nord sur l'axe de D1 (x −21) a
+   l'étrave dans la tête du brise-lames ouest et son feu rouge (−21 ; −44). Nouveau trajet : sortie du chenal, virage à gauche
+   (R 8) sur la **voie d'arrivée z −20 vers l'est**, arrêt **10 u à l'est de l'axe**, cap à l'est (point d'attente) ; puis
+   **marche arrière en quart de cercle** (R 10 : la poupe entre dans la darse, le remorqueur à la proue fait pivoter l'étrave
+   vers le nord) et recul droit sur l'axe jusqu'au poste. Dégagement minimal 2,67 u (arrivée), 3,57 u (recul). C'est toujours
+   l'évitage à l'arrivée (règle F1) : le navire est amarré étrave au large et repart en marche avant.
+3. **D2, départ** : virage à gauche R 12 dès z −18 (la poupe est encore dans l'entrée), voie de départ **z −30** vers l'ouest
+   (ordre : z −32 après un virage R 8 depuis z −24 : l'étrave touchait la tête est du brise-lames ouest, −0,68 u) ; 3,26 u.
+   À l'ouest on circule à droite : arrivée z −20 vers l'est (au sud), départ z −30 vers l'ouest (au nord), 10 u d'entraxe.
+4. **D3** : voie d'arrivée **z −26** vers l'ouest (ordre : −16), quart de tour à droite R 10 jusqu'au point d'attente
+   **(123 ; −36)** cap au nord, poupe hors de la darse (4,06 u) ; recul droit (3,53 u). Départ : nord, virage à droite R 10,
+   voie **z −46** vers l'est, (176 ; −46) → (206 ; −64) → (215 ; −90) → `EXIT`. L'arrivée (vers l'ouest, au sud) et le départ
+   (vers l'est, au nord) se croisent forcément (le mouillage est à l'ouest, la sortie à l'est) : fenêtre « est »
+   Rect2(100, −46, 106, 40).
+5. **Grues et allées** : les cotes de l'ordre (grue mobile 1,6, allée 3,4) étaient des z absolus du jeu actuel ; comptées
+   depuis le bord d'eau : grue mobile **4,4**, STS 3, allée de tablier **9,4**, conteneurs du tablier 6,9. Grues du poste 1 en
+   z **−1 / 9 / 22** (ordre 4 / 14 / 26) : la deuxième grue s'achète avant l'Allongement, elle doit tenir sur le quai n°1
+   (z −6…14).
+6. **Blocs** (pour laisser l'allée de tablier devant eux) : F1 x 5…14 et 18…27 (allée centrale **x 16**) ; F2 blocs de
+   **5 rangées**, x 77…84,5 et 87,5…95 (allée x 86, entre les allées de tablier 75,4 et 96,6) ; F3 x 151…160 et 163…172
+   (allée **x 161,5**).
+7. **Parcelles** : les bords qui longent l'eau sont à 0,6 u dans les terres (x 33,4, 105,4, 185,4 ; z −5,4) ; les cordes
+   sont coupées aux darses par morceaux à terre (échantillons de 0,25 u) : aucun piquet sur l'eau (118 / 105 / 90 piquets au
+   T1 / T2 / T3, pas de 6 u).
+8. **Arrière-port** (Δ = +18) : bureaux (zone 13) rognés à x −56 (maisons du village en x −62, z 72 et 84) ; route de la
+   logistique **z 114…120 → 128…134** (les parkings reculés vont jusqu'à z 126) ; gare : zone 12 x 106…186 × z 56…82, voie
+   z 75, bâtiment (150 ; 70), liaison sur l'allée de F3. À déplacer en H2-a : la butte (162 ; 84) et l'entrée de la voie
+   ferrée sous les arbres `FOREST_ROADS.rail_e` (175 ; 57), toutes deux sur le nouveau tracé du rail.
+- Temps de recul à l'écran (2,4 u/s) : D1 et D2 44 u (18 s), D3 54 u (22 s) ; T1 quai n°1 seul 30 u (12 s), Allongement
+  36 u (15 s). À mesurer en H2-a contre le seuil de l'ordre (+10 s sur « accostage simulé → navire à quai »).
+
+#### Contrôles du plan (`tests/h2/h2_check.gd`, 63 ok)
+Fond de D1 14 / 26 / 42 ; bouchons ; chaque poste à pleine profondeur contient son plus grand navire (feeder : 7,1 u à
+l'entrée et au fond ; panamax : 1,4 u) ; deux panamax dans D3 : 15,6 u entre les coques (≥ 13,0) ; pour chaque poste et
+chaque palier (et T1 au quai n°1 seul, à l'Allongement) : arrivée depuis 3 ou 4 places du mouillage, fin au point d'attente
+au bon cap, recul, glissement, départ en marche avant — dégagements ci-dessus ; parcelles disjointes, aucun piquet sur l'eau,
+corde dorée présente au T1 et au T2, absente au T3 ; chaque case du front dans une seule parcelle, jamais d'un palier plus
+haut que son bâtiment ; arrêts des camions seulement devant un doigt ; engins dans leur doigt, jamais sur la voie ; tabliers,
+allées et blocs sans chevauchement.
+(Hors périmètre, non compté : le premier bord de la place n°2 (16 ; −66) vers les postes 3–4 longe la tête du brise-lames ouest
+— trajet `_pilot_east` inchangé depuis le lot D.)
+
+#### Littéraux à reculer de 18 u (H2-a ; inventaire par script : z 28…137, hors Crique et village)
+`layout.gd` : `ZONES` 3, 4, 8, 12, 13 (≈ 30) ; `HEDGES` (17) ; `LOTS` de l'arrière-port (hut, customs1, track, scanner1/2,
+gate2, parking1/2, ewindow, ecustoms, tos, rail : 12) ; `GROUNDS` (18 : route d'accès, voie des camions, parkings, rue des
+bureaux, gare) ; `PROPS` (≈ 40 : douane, gate, scanners, bureaux, cônes, gare, panneaux) ; `STAGE_PROPS` customs et gate
+(16) ; `GATE`, `GATE_ISLAND`, `CUSTOMS_HUT`, `CUSTOMS_OFFICE`, `CUSTOMS_TAP`, `GATE_TAP`, `MANAGER_POS` (customs, gate),
+`TRACK_RUNS`, `RAIL_SHUTTLE`, `RAIL_Z`, `FOREST_ROADS.rail_e` ; scalaires `LANE_BAND`, `LANE_A_Z`, `LANE_B_Z`, `LOAD_STOP_Z`,
+`LOAD_EDGE_Z`, `GATE_IN_Z`, `GATE_OUT_Z`, `QUEUE_Z0`, `CUSTOMS_YARD`, `LOT_ROW0`, rectangles d'exclusion du `scatter`.
+Ailleurs : `world_overlay.gd` `PARKING_PILL` (−3 ; 5 ; 64) ; `hud.gd` `G2_FRICHE_LOOK` ; `data/tutorial.json` (cadrages).
+Le reste des correspondances du script (Crique, anse, interface en pixels) ne bouge pas.
+
+#### Captures (`docs/captures/h2_*.png`, toutes regardées)
+- `h2_plan_t1/t2/t3.png` (1600 × 1100, paysage pour la lisibilité) : plan coté vu de dessus — terre, bouchons et darses à
+  creuser, postes et navires à quai, grues, parcs, arrivée (bleu), recul (cyan) et départ (magenta) avec les coques
+  échantillonnées, fenêtres de croisement, camions (arrêts devant les doigts en épais), engins (jaune), arrière-port reculé,
+  village, parcelles (brun clair, corde blanche, corde dorée de la prochaine, piquets, cadenas et prix 11 K$ / 15 M$).
+- `h2_iso_t1/t2/t3.png` (540 × 960, angle et zooms du jeu, 92 / 122 / 130 u) : maquette 3D — T1 : D1 creusée, feeder à quai,
+  deux grues mobiles, caboteur au point d'attente (cap à l'est), parcelle 2 en brun clair avec corde dorée et cadenas ambre
+  « 11K $ » ; T2 : D2, feeder en marche arrière entrant dans D2 avec le remorqueur à la proue, parcelle 3 à vendre ; T3 :
+  D3, panamax à quai au poste 4 (deux portiques) et panamax en marche arrière au poste 3, RTG, GNL, gare au bout du terminal.
+  (Cadenas et prix : étiquettes 3D de la maquette ; dans le jeu, la surcouche 2D.)
+
+#### Tests
+- `run_all` **254 / 254**, `ui_smoke` **183 / 183** (lancés seuls, l'un après l'autre) : aucun fichier du jeu n'a changé, aucun
+  contrôle recalé. Sonde : non relancée à ce palier (la simulation et le monde du jeu sont intacts par construction : le
+  diff ne touche que `godot/tests/h2/`, les captures et ce journal) ; elle le sera à H2-a.
+- Prochain : **H2-a** après validation des captures par l'utilisateur.
 ### H1 — Échec intermittent `ui_smoke` « F1 : navires à l'écran au T3 » (vérification du chef de projet, 16/10)
 - Symptôme : 1 navire déchargé à quai (seuil ≥ 2), 1 encaissement, en lançant le test seul. Reproduit ici 1 fois sur 16 passages avec H1.
 - **Ce n'est pas une régression H1.** Le contrôle s'exécute **avant** tout le code H1 de `ui_smoke` (ligne 654, la Crique vient

@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://tests/h2/iso_h2.gd" id="1"]
+
+[node name="IsoH2" type="Node3D"]
+script = ExtResource("1")
