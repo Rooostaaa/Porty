@@ -2075,3 +2075,20 @@ avec cadenas et prix, la prochaine en or, la parcelle de départ bornée aussi ;
 - **Ordre de passage** : H2-a et H2-b après la fusion de H1 (mêmes fichiers : `layout.gd`, `world_overlay.gd`, `hud.gd`) et
   de la brume (`cloud_layer.gd` ; la parcelle 1 se révèle bornée à la fin de la dissolution ; toucher la brume au-dessus du
   terminal ouvre la Concession).
+
+### H1 — Échec intermittent `ui_smoke` « F1 : navires à l'écran au T3 » (vérification du chef de projet, 16/10)
+- Symptôme : 1 navire déchargé à quai (seuil ≥ 2), 1 encaissement, en lançant le test seul. Reproduit ici 1 fois sur 16 passages avec H1.
+- **Ce n'est pas une régression H1.** Le contrôle s'exécute **avant** tout le code H1 de `ui_smoke` (ligne 654, la Crique vient
+  après). H1 ne touche ni aux navires, ni aux aléas, ni au diorama du port. Sur la base d'avant H1 (commit 4ee554e, rejouée dans
+  une copie), sur 5 passages, le même contrôle donne 2, 5, 3, 4 et 4 navires à quai : déjà au ras du seuil (2). Avec H1, sur
+  15 passages : de 1 à 5. C'est la même distribution.
+- Cause : l'état de la partie au T3 dépend du temps réel des contrôles précédents (cadence des images). La mesure, elle, dure
+  150 s de jeu, à peine plus qu'un cycle par poste (le voyage mouillage → quai prend 70 à 150 s). En plus, les **aléas du port**
+  tombent au hasard dans cette fenêtre : brouillard (pilotage à 0 pendant 30 s), vent fort (grues à 0 pendant 25 s). L'échec observé
+  ici avait une panne en cours, et les 15 passages diagnostiqués montrent un aléa différent à chaque fois.
+- Correction (dans le test, sans toucher au seuil) : la mesure suspend les aléas. L'aléa en cours se termine
+  (`Hazards.end_event`), le suivant est repoussé après la fenêtre, puis l'échéance revient (au plus tôt 60 s après). Le contrôle
+  mesure la chorégraphie du diorama, pas la météo.
+- Après correction : `ui_smoke` 182/182 sur 3 passages seuls (4, 5 et 3 navires à quai). `run_all` 254/254.
+- Reste : l'alignement de la fenêtre sur les cycles des postes varie toujours d'un passage à l'autre (3 au plus bas, observé
+  après correction). Allonger la fenêtre rendrait le test plus robuste ; ce n'est pas fait, faute de mesure au-delà de ces passages.
