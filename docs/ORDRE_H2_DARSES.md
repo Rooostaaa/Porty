@@ -329,3 +329,8 @@ derrière les fonds de darse ; engins sur un doigt.
 
 À valider seulement sur capture (pas de question) : le navire qui **recule** dans la darse (évitage à l'arrivée, règle du lot
 F1) ; la teinte du brun clair à côté du violet des parcs ; les seuils de fondu (80/110 u).
+
+## Décisions de l'utilisateur (16/10/2026)
+- **Q1 — postes** : on **garde 4 postes** (économie inchangée) ; les berges libres des darses sont des quais de service. 6 postes pourront venir plus tard comme un lot d'équilibrage.
+- **Q2 — parcelles** : **option A**, seul le **front du port** (darses, quais, parcs, douane, barrière) est découpé en parcelles à piquets et corde ; l'arrière-port (bureaux, parkings, gare) reste hors parcelles, ses bâtiments apparaissent sur leurs emplacements comme aujourd'hui. « On fait A pour le moment, après on verra. »
+- Style de délimitation : **(b) piquets et corde** ; forme : **darses en peigne** ; brume de la Crique : variante A, dense et animée.
