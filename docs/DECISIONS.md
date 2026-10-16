@@ -811,3 +811,19 @@ leur instant ne l'est pas : une fonction chargée compte comme révélée « dep
   noirs.
 - Tutoriel **version 9** (bienvenue, terrassement, quai, accoster, cabane, tamponner, piste, laisser passer, grue mobile, parc,
   puis la suite). Contrôle « bandeaux autour du T2 » mesuré sur la partie jouée, plafond 8 (le dégraissage G3 doit le ramener à 4).
+
+## Brume de la Crique (lot H, variante A du « voile ») — 16/10
+- Les bancs de nuages opaques et leur nappe (`CloudLayer`, modèles `cloud_bank` / `cloud_puff`, `Layout.CLOUD_Y`,
+  `CLOUD_BANK`) sont remplacés par **une brume** : un plan unique sur `Layout.CLOUD_COVER` à 1,5 u, shader non éclairé et
+  translucide (sans test de profondeur, un seul appel de rendu, aucune particule). Opacité par distance aux rectangles de
+  `CLOUD_HOLE` : **0 dans l'anse** (nette), fondu sur 12 u, 0,58 au sortir du fondu → **0,72 au cœur** (à 36 u) ; le sol devine
+  encore ses formes. `CloudLayer.veil_alpha` en est le miroir sans bruit (tests, cadenas).
+- **Animation** : deux nappes de bruit de valeur (2 octaves) en coordonnées monde, motifs de 38 u à ≈ 1,2 u/s et de 22 u à
+  ≈ 0,9 u/s (≥ 20 s pour qu'un motif passe, directions croisées), opacité modulée ±24 %, filaments plus clairs (crêtes de la
+  petite nappe), bord de l'anse irrégulier mais nul dans le trou.
+- **Cadenas** (`WorldOverlay._draw_lock`) : pastille cadenas + « Concession · <prix de `config.json`> » sur la parcelle de la
+  Concession si elle est à l'écran, sinon au barycentre (au sol, lissé) de la brume dense visible ; toucher → AMÉLIORER (les
+  cartes de la Crique, la Concession en tête dès la marina) via `Diorama.lock_tapped`.
+- À la Concession : fondu + montée de 6 u + éclaircissement en `DISSOLVE_S` (3,5 s), cadenas retiré tout de suite ;
+  `clouds_on()`, bornes de caméra et sauvegarde inchangés. Captures `docs/captures/h_brume_*.png`. Les modèles `cloud_bank` /
+  `cloud_puff` restent livrés mais ne sont plus utilisés par le jeu.
