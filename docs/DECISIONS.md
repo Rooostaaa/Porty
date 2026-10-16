@@ -811,3 +811,34 @@ leur instant ne l'est pas : une fonction chargée compte comme révélée « dep
   noirs.
 - Tutoriel **version 9** (bienvenue, terrassement, quai, accoster, cabane, tamponner, piste, laisser passer, grue mobile, parc,
   puis la suite). Contrôle « bandeaux autour du T2 » mesuré sur la partie jouée, plafond 8 (le dégraissage G3 doit le ramener à 4).
+
+## Lot H1 « La Crique : services sur l'eau, anneau de service, pêche et plaisance séparées » — 16/10 (ordre `docs/ORDRE_H1_CRIQUE.md`, retour de l'utilisateur points 2, 4, 5, journal § « Lot H1 »)
+- **Services sur l'eau** (point 2) : la pompe à carburant et l'aire de lavage sont posées sur un **ponton de service flottant**
+  (radeau de 3 × 5 modules `pontoon`, 4,8 × 30 u), amarré au flanc est d'une jetée, à l'ouest de l'anse, au bord de la voie
+  ouest par laquelle tous les bateaux rentrent ; plus rien sur l'herbe. La criée reste à terre (inchangée) ; la fabrique de
+  glace reste à terre, déplacée **au pied de la passerelle** du ponton de service (le cap n'en a plus). Le palier nommé niv. 3
+  s'appelle « Ponton carburant » et bâtit la jetée, le radeau et la pompe.
+- **L'anneau du service** (point 4) : dès la pompe, un bateau qui rentre passe aux stations bâties dans l'ordre carburant →
+  lavage → glace, s'amarre (glissement latéral, étrave au sud), un **anneau** coloré (icône carburant, bulles, flocon) se remplit
+  au-dessus de la station, puis éclate en « +X $ » (pièces vers le compteur, son) : le service est **payé à la fin** (valeur du
+  bateau × 0,2 : 1 $ par barque, 3 $ par chalutier, 10 $ par thonier ; Heures sup comprises), puis le bateau gagne sa place (loyer
+  à la criée, inchangé). **Chaque niveau de Services raccourcit le service** : 5 s au niveau 3, ×0,88 par niveau, 2 s au plus
+  court (niveau 10) ; la carte Services l'affiche (« service 5 s → 4,4 s »). Les paliers nommés restent (1, 3, 6, 9).
+- **File simple** : une station sert un bateau à la fois (occupée ou réservée) ; au point de décision (−146 ; 14), première
+  station libre, sinon le **poste d'attente** (un bateau, au nord du radeau), sinon le bateau passe son tour et rentre à sa
+  place ; un bateau ne quitte son coin de pêche vers le ponton que si la file a de la place (au plus 3 bateaux engagés), sinon
+  il rentre droit (aucun détour). Pas de 2ᵉ poste : la vitesse du service suffit (Crique tranquille : 143–159 services, 0 à 2
+  tours passés ; pire cas du contrôle, pleine flotte au niveau 3 : 6 tours passés pour 61 services en 10 min). Sans station (Services < 3), le cycle est exactement celui de G1.
+- **Pêche et plaisance séparées** (point 5) : la **jetée de séparation** (4 segments `breakwater`, sans feu vert, x −157,2,
+  z −4 → 46) coupe l'anse ; à l'est la pêche (barques, chalutiers, thonier, criée, ponton de service, glace), à l'ouest la
+  **marina** (3 modules déplacés : (−166,1 ; 15), (−166,1 ; 4), (−178,1 ; −6)), que la boucle de pêche ne croise jamais ; elle
+  reste un revenu passif.
+- **Caméra de la Crique** : bornes élargies vers l'ouest et le nord (centre x −146…−104, z 10…46).
+- **Économie** : le service allonge le cycle d'un bateau ; son prix le compense (`stations.fee` 0,2, durées de trajet en
+  configuration). Crique (4 graines) : Marcel inchangé (5 min 08, 4 min 49), tranquille 17 min 32–17 min 44 (avant 16 min 58–
+  17 min 10), pressé 14 min 51–14 min 59 (avant 14 min 51–14 min 57) ; R₀ estimé 4,3 $/s (4,2). Sonde depuis la Concession :
+  T2 −3,7 %, T3 −2,2 %, fin +3,1 % en moyenne (chaque graine dans ±15 %).
+- **Sauvegarde v9** (`act0.v` = 9 : stations occupées, poste d'attente, état des bateaux aux stations, compteurs) ; une partie
+  v7/v8 se charge sans perte (stations libres).
+- Modèles : aucun nouveau (Blender exclu) ; la jetée réutilise `breakwater` (matériau sans vert), le radeau `pontoon` ; nouvelle
+  icône `wash.svg` (bulles) pour l'anneau du lavage.

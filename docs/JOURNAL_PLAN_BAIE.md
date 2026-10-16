@@ -1961,3 +1961,117 @@ Ordre `docs/ORDRE_H1_CRIQUE.md` (retour de l'utilisateur, points 2, 4, 5). Base 
 - Choix : un seul ponton de service sur la voie ouest (le retour de **tous** les bateaux), amarré à une jetée qui sépare la
   marina (à l'ouest) de la pêche ; le service se fait au retour, avant la place ; file à un poste d'attente, sinon le bateau
   passe son tour ; durée qui baisse avec le niveau de Services ; service payé à la fin de l'anneau. Détails : l'ordre.
+
+### H1 — Fait
+- **Simulation** (`sim/fishing.gd`, `config.json › fishing.stations`, `boats.*.back_g/dock`) : phases `QUEUE`, `SERVE`, `MOVE`,
+  `DOCK` ajoutées après celles de G1 ; stations = paliers nommés marqués `station` (carburant 3, lavage 6, glace 9) ;
+  `occ` (station → bateau qui l'occupe ou l'a réservée), `hold` (poste d'attente) ; `service_dur()` = 5 s × 0,88^(niv − 3), 2 s
+  au moins ; `service_fee()` = valeur × 0,2, payé à la fin du service (rappel `served_cb` → `PortSim.fish_served`) ;
+  `_room_for_one()` : un bateau ne part vers le ponton que si au plus 2 autres sont engagés (sinon retour direct, sans détour) ;
+  `boat_rate()` / `rate_estimate()` comptent le temps et le prix des services. Sans station : cycle de G1 à l'identique.
+  Sauvegarde **v9** (`Save.VERSION` 9, `act0.v` 9), lecture v7/v8 sans perte.
+- **Monde** (`Layout` « Lot H1 », `FishingView`) : jetée (4 `breakwater`, matériau sans vert), radeau (15 `pontoon`), passerelle,
+  3 taquets ; pompe et lavage posés sur le plancher du radeau (`float`) ; glace à terre au pied de la passerelle ; marina
+  déplacée à l'ouest de la jetée ; trajets `fish_path_back_g`, `fish_path_node` (glissements étrave au sud, `crab_yaw`) ;
+  `serving()`, `bursts`, signal `served` ; chantier de la pompe = jetée + radeau + passerelle (éclaboussures) ;
+  `anse_obstacles()` + jetée, radeau, passerelle ; bornes de la caméra de la Crique élargies (x −146…−104, z 10…46).
+- **Interface** : `WorldOverlay._draw_stations` (anneau de 40 px de rayon sur 1080 — ≈ 46 px de diamètre à 540 —, icône
+  carburant / bulles / flocon, éclatement 0,5 s) ; `Hud._on_fish_served` (« +X $ », son, 3 pièces vers le compteur si la station
+  est à l'écran) ; carte Services : « service 4,4 s → 3,9 s » ; aide de la Crique ; textes des paliers (« Ponton carburant ») et
+  de la marina ; icône `wash.svg`. `Capture` : `--capture-ring=fuel|wash|ice|any` (attend un anneau à moitié rempli).
+- **Bot / sondes** : gains des achats de la Crique par `boat_rate()` (identiques à G1 sans station) ; `crique_probe` affiche
+  services rendus et tours passés.
+
+### H1 — Contrôles
+- `run_all` **247 → 254** (aucun retiré) : + `test_h1` (7) « service » (point de décision, amarré, anneau qui monte, payé,
+  jamais deux bateaux à la pompe), « amélioration » (durée par niveau, durée mesurée), « file » (un bateau par station, un seul
+  à l'attente), « services sur l'eau » (pompe et lavage sur le radeau, postes sur l'eau, criée et glace à terre, jetée ancrée à
+  la plage), « pêche et plaisance séparées » (marina à l'ouest de la jetée, voiliers sur l'eau, 12 517 points de trajets de
+  pêche hors marina et hors du côté ouest), « trajets du ponton de service » (ni terre ni ouvrage ni nuages, ≤ 6 u/s : au plus
+  5,6), « sauvegarde v9 » (aller-retour station + attente, lecture v8). **Recalés** : « G1 sauvegarde v7 » (`act0.v` 7 → 9),
+  « G2 sauvegarde v8 » (`Save.VERSION` 8 → 9).
+- `ui_smoke` **181 → 182** (aucun retiré, aucun recalé) : + « H1 ponton de service » (chantiers, jetée 4 segments, radeau
+  15 modules, pompe et lavage flottants, voiliers à l'ouest de la jetée, anneau à l'écran 92 px sur 1080, service payé « +X $ »
+  avec pièces, à terre 0, sur un ouvrage 0, rotation sur place 0, vitesse ≤ 6,5 u/s). Passages seuls, sans autre processus.
+
+### H1 — Calage (4 graines, une par processus)
+Leviers : prix du service (0,2 × ticket → 0,3 → **0,2 fixe**), durée (6 → **5 s**), file (`engaged` 2 → **3**), durées de trajet
+(`back_g`/`dock` : la vitesse ≤ 6 u/s impose ≈ 5 s de plus qu'un retour direct).
+
+| Mesure | Avant (G2 revue) | H1 |
+|---|---|---|
+| Marcel | 5:08 · 5:08 · 5:08 · 4:49 | **inchangé** |
+| Crique tranquille | 17:10 · 17:09 · 17:09 · 16:58 | 17:41 · 17:32 · 17:44 · 17:39 (cible 15–20) |
+| Crique pressée | 14:57 · 14:51 · 14:57 · 14:57 | 14:58 · 14:51 · 14:59 · 14:59 (cible ≤ 15) |
+| Pompe · lavage · glace (tranquille) | — | 6:30–6:34 · 9:50–10:03 · 12:59–13:18 |
+| R₀ estimé | 4,2 $/s | 4,3 $/s |
+| Services rendus / tours passés (tranquille) | — | 143–159 / 0–2 |
+
+Sonde depuis la Concession (`pacing_probe`, base = commit 4ee554e rejoué ici) :
+
+| Graine | T2 avant → H1 | T3 avant → H1 | Fin avant → H1 | Premier camion |
+|---|---|---|---|---|
+| 1 | 12:43 → 12:26 (−2,2 %) | 41:56 → 42:18 (+0,9 %) | 1 h 19 → 1 h 17 (−2,5 %) | 4:17 → 4:08 |
+| 2 | 13:07 → 12:18 (−6,2 %) | 41:12 → 41:52 (+1,6 %) | 1 h 34 → 1 h 36 (+2,1 %) | 4:11 → 3:58 |
+| 3 | 12:52 → 12:33 (−2,5 %) | 43:53 → 40:58 (−6,6 %) | 1 h 31 → 1 h 35 (+4,4 %) | 4:18 → 3:59 |
+| 4 | 12:55 → 12:26 (−3,7 %) | 43:27 → 41:31 (−4,4 %) | 1 h 26 → 1 h 33 (+8,1 %) | 4:08 → 3:48 |
+| Moyenne | 12:54 → 12:26 (**−3,7 %**) | 42:37 → 41:40 (**−2,2 %**) | 1 h 27,5 → 1 h 30 (**+3,1 %**) | 4:14 → 3:58 |
+
+Dans ±5 % en moyenne et ±15 % par graine. Essai intermédiaire (prix 0,25) : T2 −4,7 %, fin −6,3 % — écarté.
+
+### H1 — Captures (`docs/captures/h1_*.png`, 540 × 960, rendu OpenGL sous Xvfb, toutes regardées)
+`h1_anse_debut.png` (ponton réparé, plus rien sur l'herbe : ni pompe ni lavage) ; `h1_carburant_anneau.png` (jetée et ponton
+de service, une barque à la pompe, anneau orange à moitié rempli, « +6,3 $ » de loyer au ponton des places) ;
+`h1_lavage.png` (pompe et lavage, deux anneaux en cours, un chalutier au carburant) ; `h1_glace.png` (anneau flocon au poste de
+glace, la fabrique à terre au pied de la passerelle) ; `h1_anse_complete.png` (zoom 72 : la marina et ses 20 voiliers derrière
+la jetée, la pêche de l'autre côté, anneau du carburant) ; `h1_ameliorer.png` (carte Services « service 4,4 s → 3,9 s », pièces
+d'un service qui volent vers le compteur). Corrigé après lecture : jetée qui s'arrêtait 0,2 u avant la plage (prolongée à
+z 46), bornes de la caméra qui ne laissaient pas voir le ponton de service, anneau agrandi (34 → 40 px), radeau absent des
+contrôles (taquets comptés comme bâtiments flottants).
+
+### H1 — Limites
+- Pas de 2ᵉ poste par station (non nécessaire à la mesure, voir le calage) ; pas d'évitement entre bateaux : un bateau qui
+  rentre droit peut frôler, dans le virage de la voie ouest, un bateau qui quitte la glace (rien de tel n'était géré avant).
+- Le service paie peu par barque (1 $) : l'économie de la Crique et R₀ ne laissent pas plus ; le gain se lit surtout dans la
+  vitesse (moins de temps au ponton = plus de loyers).
+- `rate_estimate()` ignore la file : ≈ 5 % au-dessus du réel à pleine flotte (hors-ligne de Marcel légèrement favorable).
+- La fabrique de glace est sur la rive ouest (sol sombre de la forêt), à 7 u du bout de la passerelle ; aucun modèle nouveau.
+- APK non réexporté (pas de SDK Android ici).
+
+## Lot H2 — « Les darses en peigne et les parcelles » (16/10)
+
+Ordre `docs/ORDRE_H2_DARSES.md`. Décisions de l'utilisateur : darses en peigne (« le port est généralement dans plusieurs
+couloirs et pas comme ça aligné sur la rive ») ; parcelles délimitées par piquets et corde, non acquises en terre brun clair
+avec cadenas et prix, la prochaine en or, la parcelle de départ bornée aussi ; la Crique garde sa brume (autre agent).
+
+### Lot H2 — étape 0 (étude, aucun code modifié)
+- **Matériaux lus** : maquette jetable `_maquette_port.gd` (worktree `agent-ae06c293ed5a1eec5`, forme 1 : darses 28 u, doigts
+  40 u, profondeur 72 u, navires à l'échelle 0,65 — d'où des proportions plus amples que dans le jeu) ; images `f1_t*`,
+  `parcelles.png` ; `layout.gd`, `diorama.gd`, `yard_view.gd`, `ship_view.gd`, `ship_rules.gd`, `traffic_view.gd`,
+  `crane_view.gd`, `camera_rig.gd`, `port_sim.gd` (postes, `tier_up`), `buildings.json`, `tiers.json`, `ships.json`.
+- **Contraintes trouvées** : la simulation a **4 postes** (`quay1` profondeur 1 → `quay_ext` 2 → `dredge1` 3 ; `berth2` 3 ;
+  `berth3`, `berth4` 4) ; navires à l'écran : mini 14 u, caboteur 22, feeder 33,8, panamax 45,2 × 8,6. Une darse de panamax
+  demande 48 u d'eau ; entre la rive (z −6) et la voie des camions actuelle (z 30) il n'y en a que 36. Tout le terminal suppose
+  une rive en x (`BERTHS` en intervalles x, `SEA` constant au nord, tabliers et allées des engins en z, grues en `crane_x`).
+- **Plan retenu** : front de mer droit z −6 de −48 à 186 (la baie est devient terre dès le départ : fin du terre-plein comblé
+  du T3), **trois darses** de 48 u (D1 −36…−6 dans l'axe du chenal, D2 34…66, D3 106…140), doigts F1 −6…34, F2 66…106,
+  F3 140…186 ; **arrière-port reculé de 18 u** (voie des camions z 48…54, douane, gate, bureaux, parkings, gare) ; postes :
+  1 sur D1 (fond creusé à 14, 26, puis 42 par Quai n°1, Allongement, Dragage), 2 sur D2, 3 et 4 face à face dans D3 ; deux
+  berges deviennent des quais de service. **Évitage à l'arrivée** (règle F1) : le navire s'aligne étrave au large, recule dans
+  la darse (remorqueur), glisse au quai, ressort en marche avant ; une fenêtre de croisement par darse.
+- **Postes orientés** : `BERTHS` = point de quai + normale côté eau + darse ; `DARSES` (fond selon `built`) ; `FINGERS` (allée
+  centrale, allée de tête, bord de chargement) ; côte = `COAST` + **bouchons** non creusés, eau mise en cache par état de
+  creusement ; `CraneView` inchangé (posé tourné) ; `ShipView` gagne une phase de recul ; `PortSim` inchangé.
+- **Parcelles** : acheter la parcelle suivante **= passer le palier** (parcelle 1 = Concession 500 $, 2 = T2 11 000 $,
+  3 = T3 15 M$, mêmes conditions). Sonde et bot intacts par construction, aucun champ de sauvegarde (possédées = palier),
+  aucune migration. Rendu : brun clair, piquets + corde en deux MultiMesh (corde blanche fondue de 80 à 110 u, or toujours
+  visible, un piquet sur deux au-delà de 100 u), cadenas + prix dans la surcouche, fiche d'achat au toucher ; le bouton
+  PALIER de Gestion et AGIR y mènent.
+- **Effort** : H2-0 plan seul 0,5 j ; H2-a peigne en jeu 3 j ; H2-b parcelles 1,5 j ; H2-c calage, captures, docs 1 j —
+  ≈ 6 j. Risque principal : le navire qui recule (nouveau dans `ShipView`) et le retard d'accostage à l'écran qu'il ajoute.
+- **Questions à l'utilisateur** : Q1 garder 4 postes (recommandé) ou passer à 6 (+2 postes dans la simulation, sonde recalée,
+  +1,5 à 2 j) ; Q2 parcelles limitées au front du port, l'arrière-pays (bureaux, parkings, gare) restant en zones grises
+  (recommandé).
+- **Ordre de passage** : H2-a et H2-b après la fusion de H1 (mêmes fichiers : `layout.gd`, `world_overlay.gd`, `hud.gd`) et
+  de la brume (`cloud_layer.gd` ; la parcelle 1 se révèle bornée à la fin de la dissolution ; toucher la brume au-dessus du
+  terminal ouvre la Concession).

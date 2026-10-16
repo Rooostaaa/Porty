@@ -37,10 +37,6 @@ static func schedule(node: Node) -> void:
 	print("CAPTURE ", path, " ", img.get_size(), " fps=", Engine.get_frames_per_second(),
 		" primitives=", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME),
 		" draws=", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))
-	for fv in node.get_tree().root.find_children("*", "FishingView", true, false):   # TMPDUMP
-		for i in (fv as FishingView).boats.size():   # TMPDUMP
-			var bt: Dictionary = (fv as FishingView).sim.fishing.boats[i]   # TMPDUMP
-			print("BOAT ", bt.cls, " ph", bt.phase, " ", bt.at, "→", bt.to, " pos ", ((fv as FishingView).boats[i].node as Node3D).position, " vis ", ((fv as FishingView).boats[i].node as Node3D).visible)   # TMPDUMP
 	var cams := node.get_tree().root.find_children("*", "CameraRig", true, false)
 	if not cams.is_empty():
 		print("CAMERA target=", cams[0].target, " zoom=", cams[0].zoom)

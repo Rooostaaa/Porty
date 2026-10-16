@@ -30,6 +30,7 @@ func _init() -> void:
 			print("g%d %-8s %s · revenu à la Concession %s/s · argent %s · places %d, services %d, bâtiments %s · Marcel %s · %d escales, %d loyers à la main, %d perdus · annonce %s" % [
 				sd, mode, Fmt.duration(d), Fmt.num(bot.act0_end_rate), Fmt.money(sim.money), f.places, f.services, str(f.built), f.marcel,
 				f.landings, f.rents_manual, f.rents_lost, f.announced])
+			print("     ponton de service (lot H1) : %d services rendus, %d tours passés, service %s s" % [f.served, f.skipped, Fmt.num(f.service_dur())])
 			if verbose or true:
 				print("     " + " · ".join(bot.act0_buys))
 	print("moyenne tranquille %s · pressé %s" % [Fmt.duration(float(tot.calm) / float(seeds.size())), Fmt.duration(float(tot.hurry) / float(seeds.size()))])

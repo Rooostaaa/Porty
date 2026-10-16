@@ -1,4 +1,4 @@
-# Plan coté définitif — « La baie et le terre-plein » (13/10/2026, réorganisé au lot D le 14/10, flux du lot E le 14/10 au soir, anse des pêcheurs au lot F3 le 15/10, départ du terre-plein au lot G2 le 15/10)
+# Plan coté définitif — « La baie et le terre-plein » (13/10/2026, réorganisé au lot D le 14/10, flux du lot E le 14/10 au soir, anse des pêcheurs au lot F3 le 15/10, départ du terre-plein au lot G2 le 15/10, ponton de service et marina séparée au lot H1 le 16/10)
 
 Source unique des cotes : `godot/scripts/world/layout.gd` (constantes citées entre parenthèses). Repère du jeu : **x vers l'est**
 (droite-bas de l'écran), **z vers le sud** (gauche-bas), mer en z négatif, bord des quais à **z = −6**. Captures de validation :

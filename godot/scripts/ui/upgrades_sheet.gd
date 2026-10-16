@@ -619,7 +619,7 @@ func _build_fishing(s: PortSim) -> void:
 	if tab != 0:
 		help("upg_lic0", "Les licences de cargaison viendront avec le port à conteneurs, de l'autre côté du cap.")
 		return
-	help("upg_fish", "La crique d'Odette : chaque bateau rentré paie sa place et les services du quai. Touche-le pour encaisser, ou confie ça à Marcel. Une place de plus = une barque de plus.")
+	help("upg_fish", "La crique d'Odette : chaque bateau rentré paie sa place. Touche-le pour encaisser, ou confie ça à Marcel. Une place de plus = une barque de plus. Dès le ponton carburant, il passe d'abord au ponton de service : l'anneau se remplit, le service se paie ; chaque niveau de Services le rend plus rapide.")
 	_fish_cards(s)
 
 
