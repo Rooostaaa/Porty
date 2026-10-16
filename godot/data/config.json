@@ -15,22 +15,23 @@
     "places": {"name": "Places au ponton", "max": 8, "cost": 11, "growth": 1.33, "start_boats": 2, "dur": 3.0, "icon": "berth",
                "text": "Chaque place louée, c'est une barque de plus qui rentre et paie son loyer."},
     "services": {"name": "Services à quai", "max": 10, "cost": 6, "growth": 1.27, "named_mult": 3.0, "icon": "money",
-                 "text": "Chaque niveau rend l'escale plus chère : +10 % de loyer par bateau rentré.",
+                 "text": "Chaque niveau rend l'escale plus chère (+10 % de loyer) et le service plus rapide au ponton : carburant, lavage, glace.",
                  "named": {"1": {"id": "hall", "name": "La criée", "model": "fish_hall", "dur": 4.5,
                                  "text": "La halle à marée : le mareyeur vient chercher le poisson en camionnette."},
-                           "3": {"id": "fuel", "name": "Pompe à carburant", "model": "fuel_pump", "dur": 3.5,
-                                 "text": "Les bateaux font le plein chez toi."},
-                           "6": {"id": "wash", "name": "Aire de lavage", "model": "wash_bay", "dur": 4.0,
-                                 "text": "Coques lavées, pêcheurs fidèles."},
-                           "9": {"id": "ice", "name": "Fabrique de glace", "model": "ice_plant", "dur": 4.5,
-                                 "text": "De la glace pour la cale : le poisson vaut plus cher."}}},
+                           "3": {"id": "fuel", "name": "Ponton carburant", "model": "fuel_pump", "dur": 4.0, "station": true,
+                                 "text": "Un ponton flottant, amarré à une jetée : les bateaux qui rentrent y font le plein."},
+                           "6": {"id": "wash", "name": "Aire de lavage", "model": "wash_bay", "dur": 4.0, "station": true,
+                                 "text": "Sur le ponton de service : coques lavées, pêcheurs fidèles."},
+                           "9": {"id": "ice", "name": "Fabrique de glace", "model": "ice_plant", "dur": 4.5, "station": true,
+                                 "text": "Au pied du ponton de service : de la glace pour la cale, le poisson vaut plus cher."}}},
+    "stations": {"dur": 6.0, "decay": 0.88, "min": 2.0, "fee": 0.2, "approach": 5.0, "hold_in": 3.0, "hold_out": 3.5, "move": 3.0},
     "buildings": [
       {"id": "trawler", "name": "Quai des chalutiers", "cost": 50, "boats": {"trawler": 2}, "dur": 5.0, "icon": "ship",
        "text": "Deux chalutiers s'amarrent le long du cap : ils paient trois fois le loyer d'une barque."},
       {"id": "pier", "name": "Grande jetée", "cost": 90, "boats": {"tuna": 1}, "dur": 6.0, "icon": "berth",
        "text": "Une jetée en béton pour le thonier du large : il paie dix fois le loyer d'une barque."},
       {"id": "marina", "name": "Marina", "cost": 150, "sail": 6, "dur": 5.0, "icon": "ship",
-       "text": "Des pontons flottants : six voiliers paient leur anneau, sans que tu lèves le petit doigt."},
+       "text": "Des pontons flottants de l'autre côté de la jetée, loin des bateaux de pêche : six voiliers paient leur anneau, sans que tu lèves le petit doigt."},
       {"id": "marina2", "name": "Marina — extension 1", "cost": 180, "sail": 12, "dur": 4.0, "icon": "ship",
        "text": "Un deuxième ponton : douze voiliers."},
       {"id": "marina3", "name": "Marina — extension 2", "cost": 240, "sail": 20, "dur": 4.0, "icon": "ship",
@@ -39,9 +40,9 @@
        "text": "De l'autre côté du cap, la friche et la vieille estacade d'Odette : signe la concession, et bâtis un port à conteneurs."}
     ],
     "boats": {
-      "dinghy":  {"name": "Barque",    "value": 5,  "out": 18, "fish": 6,  "back": 22, "land": 6},
-      "trawler": {"name": "Chalutier", "value": 15, "out": 32, "fish": 8,  "back": 36, "land": 14},
-      "tuna":    {"name": "Thonier",   "value": 50, "out": 44, "fish": 10, "back": 50, "land": 16}
+      "dinghy":  {"name": "Barque",    "value": 5,  "out": 18, "fish": 6,  "back": 22, "land": 6,  "back_g": 14, "dock": 17},
+      "trawler": {"name": "Chalutier", "value": 15, "out": 32, "fish": 8,  "back": 36, "land": 14, "back_g": 18, "dock": 24},
+      "tuna":    {"name": "Thonier",   "value": 50, "out": 44, "fish": 10, "back": 50, "land": 16, "back_g": 22, "dock": 30}
     }
   },
 
