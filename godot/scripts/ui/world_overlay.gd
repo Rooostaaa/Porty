@@ -87,6 +87,7 @@ func _draw() -> void:
 	# les gains s'affichent ; après, les bulles de loyer restent (tant que Marcel n'est pas là)
 	if sim.fishing.act0:
 		_draw_fishing(top_y)
+		_draw_lock()
 		_draw_popups()
 		return
 	_draw_fishing(top_y)
@@ -437,3 +438,59 @@ func show_zone_info(zone_id: int, wp: Vector3) -> void:
 	elif String(z.open).begins_with("t"):
 		cond = "au palier T%s" % String(z.open).substr(1)
 	zone_info = {"p": Vector3(wp.x, 2.0, wp.z), "text": "%s : s'ouvre %s" % [String(z.name), cond], "t": 0.0, "id": zone_id}
+
+
+# ---------------------------------------------------------------------------
+# Brume de la Crique : le cadenas « Concession · prix » sur la zone verrouillée (CloudLayer ; toucher → AMÉLIORER)
+# ---------------------------------------------------------------------------
+var _lock_w := Vector3.INF      # point du sol sous le cadenas (lissé : il suit la caméra sans sauter)
+var _lock_goal := Vector3.INF
+var _lock_t := -1.0
+
+
+## Où poser le cadenas : la parcelle de la Concession si elle est à l'écran, sinon le barycentre (au sol) de la brume dense
+## visible ; Vector3.INF quand presque rien de verrouillé n'est à l'écran.
+func _lock_target() -> Vector3:
+	var u := useful if useful.has_area() else get_viewport_rect()
+	if u.grow(-90.0).has_point(_sp(CloudLayer.CONCESSION_AT)):
+		return CloudLayer.CONCESSION_AT
+	var acc := Vector3.ZERO
+	var n := 0
+	var ui := u.grow(-60.0)
+	for i in 10:
+		for j in 16:
+			var g := diorama.rig.screen_to_ground(ui.position + ui.size * Vector2((float(i) + 0.5) / 10.0, (float(j) + 0.5) / 16.0))
+			if CloudLayer.veil_alpha(Vector2(g.x, g.z)) >= 0.4:
+				acc += g
+				n += 1
+	return acc / float(n) if n >= 4 else Vector3.INF
+
+
+func _draw_lock() -> void:
+	var cl := diorama.clouds
+	if cl == null or not is_instance_valid(cl) or not diorama.clouds_on():
+		_lock_w = Vector3.INF
+		return
+	cl.lock_rect = Rect2()
+	if _t - _lock_t > 0.25:
+		_lock_t = _t
+		_lock_goal = _lock_target()
+	if _lock_goal == Vector3.INF:
+		_lock_w = Vector3.INF
+		return
+	_lock_w = _lock_goal if _lock_w == Vector3.INF else _lock_w.lerp(_lock_goal, 0.12)
+	var sp := _sp(_lock_w)
+	var r := 46.0
+	var disc := Rect2(sp - Vector2(r, r), Vector2(r, r) * 2.0)
+	if useful.has_area() and not useful.grow(-8.0).encloses(disc):
+		return
+	draw_circle(sp + Vector2(0, 5), r, Color(0, 0, 0, 0.18))
+	draw_circle(sp, r, Color(1, 1, 1, 0.96))
+	draw_arc(sp, r - 3.0, 0.0, TAU, 48, UI.AMBER, 5.0, true)
+	draw_texture_rect(UI.icon_tex("lock"), Rect2(sp - Vector2(28, 30), Vector2(56, 56)), false, UI.TEXT)
+	_placed.append(disc)
+	var price := Fmt.money(float(diorama.sim.fishing.concession_def().cost))
+	var pr := _pill(sp + Vector2(0, r + PILL_H * 0.5 + GAP), "Concession · " + price, Color("#2B2D42", 0.92), "", Color.WHITE, true, "lock")
+	cl.lock_rect = disc.merge(pr)
+	frame_rects["lock_disc"] = disc
+

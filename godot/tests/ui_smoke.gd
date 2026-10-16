@@ -2529,13 +2529,15 @@ func _f2_checks(hud: Hud) -> void:
 		await get_tree().process_frame
 		_f3_track(hud)
 	var dissolving := dio.clouds != null and is_instance_valid(dio.clouds) and dio.clouds.dissolving and not hud.story_active() and dio.first_view == null
+	var lock_gone := not hud.overlay.frame_rects.has("lock") and not hud.overlay.frame_rects.has("lock_disc")
 	var guard0 := Time.get_ticks_msec()
 	while ((dio.clouds != null and is_instance_valid(dio.clouds)) or not hud.story_active()) and Time.get_ticks_msec() - guard0 < 8000:
 		await get_tree().process_frame
 		_f3_track(hud)
 	var no_clouds := dio.clouds == null or not is_instance_valid(dio.clouds)
 	var widened := not dio.rig.crique and dio.rig.bounds != Layout.CRIQUE_BOUNDS
-	check(dissolving and no_clouds and widened and s.fishing.act0, "G1 Concession : les nuages se dissolvent d'abord (%s), puis disparaissent (%s) et les bornes de la caméra s'élargissent (%s), port encore fermé" % [dissolving, no_clouds, widened])
+	lock_gone = lock_gone and not hud.overlay.frame_rects.has("lock")
+	check(dissolving and lock_gone and no_clouds and widened and s.fishing.act0, "G1 Concession : la brume se dissout d'abord (%s, cadenas retiré : %s), puis disparaît (%s) et les bornes de la caméra s'élargissent (%s), port encore fermé" % [dissolving, lock_gone, no_clouds, widened])
 	for k in 6:
 		await get_tree().process_frame
 		_f3_track(hud)
@@ -3022,10 +3024,13 @@ func _f3_act0(hud: Hud, s: PortSim) -> void:
 	tu._refresh_card(true)
 	await _wait(3)
 	_f3_track(hud)
-	# les nuages sont posés, la caméra bornée à l'anse ; au zoom le plus large, depuis chaque coin des bornes, les coins de l'écran
-	# tombent dans le monde habillé et au moins deux sur quatre sous les nuages
+	# la brume est posée (un plan, transparente dans l'anse, dense sur la friche), la caméra bornée à l'anse ; au zoom le plus
+	# large, depuis chaque coin des bornes, les coins de l'écran tombent dans le monde habillé et au moins deux sur quatre sous
+	# une brume dense
 	var rg := dio.rig
-	var clouds_on := dio.clouds_on() and dio.clouds.bank_count >= 100 and dio.clouds.sheet_tris >= 1000 and rg.crique and rg.bounds == Layout.CRIQUE_BOUNDS and rg.zoom_max <= Layout.CRIQUE_ZOOM_MAX
+	var veil_ok := dio.clouds_on() and dio.clouds.veil != null and dio.clouds.veil.is_visible_in_tree() \
+		and CloudLayer.veil_alpha(Vector2(-122, 44)) == 0.0 and CloudLayer.veil_alpha(Vector2(-24, 20)) >= 0.65
+	var clouds_on := veil_ok and rg.crique and rg.bounds == Layout.CRIQUE_BOUNDS and rg.zoom_max <= Layout.CRIQUE_ZOOM_MAX
 	var vsz := hud.get_viewport_rect().size
 	var cam0 := [rg.target, rg.goal, rg.zoom, rg.zoom_goal]
 	var edge_bad := 0
@@ -3039,7 +3044,7 @@ func _f3_act0(hud: Hud, s: PortSim) -> void:
 			var g := rg.screen_to_ground(sp)
 			if not Layout.CLOUD_COVER.has_point(Vector2(g.x, g.z)):
 				edge_bad += 1
-			if not Layout.in_cloud_hole(Vector2(g.x, g.z)):
+			if CloudLayer.veil_alpha(Vector2(g.x, g.z)) >= 0.5:
 				n_under += 1
 		under = mini(under, n_under) if under > 0 else n_under
 	rg.target = cam0[0]
@@ -3047,8 +3052,38 @@ func _f3_act0(hud: Hud, s: PortSim) -> void:
 	rg.zoom = float(cam0[2])
 	rg.zoom_goal = float(cam0[3])
 	check(clouds_on and edge_bad == 0 and under >= 2 and s.fishing.act0,
-		"G1 nuages : %d bancs posés et une nappe continue dessous, caméra bornée à l'anse (zoom ≤ %d) ; au zoom le plus large, coins de l'écran dans le monde habillé (%d hors), au moins deux sous les nuages (%d)" % [
-		dio.clouds.bank_count if dio.clouds != null else 0, int(rg.zoom_max), edge_bad, under])
+		"G1 brume : un plan posé, nul dans l'anse et dense sur la friche (%s), caméra bornée à l'anse (zoom ≤ %d) ; au zoom le plus large, coins de l'écran dans le monde habillé (%d hors), au moins deux sous la brume dense (%d)" % [
+		veil_ok, int(rg.zoom_max), edge_bad, under])
+	# le cadenas « Concession · prix » est posé sur la brume, à l'écran ; le toucher ouvre AMÉLIORER (la liste de la Crique)
+	# (caméra au coin sud-est des bornes, zoom le plus large : la friche à l'écran au-dessus de la carte du tutoriel ; sa place est
+	# recalculée tous les quarts de seconde, puis lissée)
+	rg.target = Vector3(rg.bounds.end.x, 0, rg.bounds.end.y)
+	rg.goal = rg.target
+	rg.zoom = rg.zoom_max
+	rg.zoom_goal = rg.zoom_max
+	rg._apply()
+	var guard_l := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - guard_l < 1200:
+		await get_tree().process_frame
+	var lock_r: Rect2 = dio.clouds.lock_rect if dio.clouds_on() else Rect2()
+	var lock_pill: Rect2 = hud.overlay.frame_rects.get("lock", Rect2())
+	var lock_g := rg.screen_to_ground(lock_r.position + Vector2(lock_r.size.x * 0.5, 46.0)) if lock_r.has_area() else Vector3.INF
+	var lock_on := lock_r.has_area() and lock_pill.has_area() and hud.useful_rect().encloses(lock_r) and lock_g != Vector3.INF \
+		and CloudLayer.veil_alpha(Vector2(lock_g.x, lock_g.z)) >= 0.4
+	var lock_sheet := false
+	if lock_on:
+		dio._on_tapped(lock_g, lock_r.get_center())
+		await _wait(2)
+		lock_sheet = hud.current_sheet() is UpgradesSheet
+		if hud.current_sheet() != null:
+			hud.current_sheet().close()
+		await _wait(30)
+	rg.target = cam0[0]
+	rg.goal = cam0[1]
+	rg.zoom = float(cam0[2])
+	rg.zoom_goal = float(cam0[3])
+	check(lock_on and lock_sheet, "G1 brume : cadenas « Concession · %s » visible sur la brume (%s), son toucher ouvre AMÉLIORER (%s)" % [
+		Fmt.money(float(f.concession_def().cost)), lock_on, lock_sheet])
 	var t_pont := tu.idx == _tuto_index("a0_pontoon") and tu._card.visible and String(tu.steps[tu.idx].get("target", "")) == "ctl:upgrade"
 	hud.open_upgrades("")
 	await _wait(4)

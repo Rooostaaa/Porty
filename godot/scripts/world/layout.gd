@@ -1999,12 +1999,10 @@ static func _fish_building(cfg: Dictionary, id: String) -> Dictionary:
 	return {}
 
 
-## Lot G1 — les nuages de la Crique : tout le rectangle habillé du monde est couvert, sauf le trou de l'anse (la plage, le
+## Lot G1 — la brume de la Crique (CloudLayer) : tout le rectangle habillé du monde est couvert, sauf le trou de l'anse (la plage, le
 ## ponton, la cabane, la criée et sa route jusqu'à la forêt, la mer au nord où passe le caboteur de l'annonce).
 const CLOUD_COVER := Rect2(-330, -350, 740, 710)
 const CLOUD_HOLE := [Rect2(-200, 0, 116, 74), Rect2(-236, -80, 152, 80), Rect2(-106, 72, 14, 34)]
-const CLOUD_Y := 11.0
-const CLOUD_BANK := Vector2(24.0, 12.0)
 ## Caboteur de l'annonce (8ᵉ minute) : il traverse au large, dans le trou des nuages, vers l'est.
 const PASSING_SHIP_PATH := [Vector3(-226, 0, 12), Vector3(-134, 0, -80)]
 ## Cadrage de l'annonce (dans les bornes de la Crique, zoom le plus large) : le large au nord-ouest, en haut de l'écran.

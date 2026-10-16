@@ -10,6 +10,7 @@ signal assist_done(pos: Vector3, amount: float)     # coup de main donné à une
 signal ship_prioritized(ship_id: int)               # accostage en priorité demandé
 signal lot_tapped(bid: String)                      # empreinte du prochain bâtiment (ou pancarte de la zone prochaine) touchée
 signal zone_tapped(zone_id: int, pos: Vector3)      # zone grise touchée : une bulle d'information (2 s)
+signal lock_tapped()                                # cadenas de la brume de la Crique touché : la feuille AMÉLIORER (la Concession)
 signal zone_opened(zone_id: int)                    # temps fort d'une ouverture de zone (repère, son grave, narratrice)
 signal gesture_done(pos: Vector3, text: String, evp: float)       # geste optionnel du parc ou de la gate (EVP déplacés)
 ## Un navire a terminé son escale (il quitte son poste) : position du navire, montant encaissé pour cette escale (droits
@@ -91,7 +92,7 @@ var fish_rents_shown := 0             # (tests) loyers encaissés d'un toucher
 var stamps_shown := 0                 # (tests, lot G2) tampons d'un toucher
 var passes_shown := 0                 # (tests, lot G2) camions laissés passer d'un toucher
 var board_cranes := 0                 # (tests, lot G2) grues de bord montrées sur un navire à quai
-var clouds: CloudLayer                # lot G1 : nuages de la Crique (null quand il n'y en a pas, ou plus)
+var clouds: CloudLayer                # lot G1 : brume de la Crique (null quand il n'y en a pas, ou plus)
 var edge_root: Node3D                 # rives du golfe, forêt, rive d'en face, routes sous les arbres (construits une fois)
 ## Pièces de départ du T1 (Layout.STARTER) : "pending" (friche : état d'avant), "building" (chantier), "done".
 ## Partie chargée, test, capture : tout est "done" (rien ne se rejoue).
@@ -236,12 +237,12 @@ func _ensure_clouds() -> void:
 		_apply_bounds()
 
 
-## Lot G1 : les nuages de la Crique sont-ils posés (caméra bornée à l'anse) ?
+## Lot G1 : la brume de la Crique est-elle posée (caméra bornée à l'anse) ?
 func clouds_on() -> bool:
 	return clouds != null and is_instance_valid(clouds) and not clouds.dissolving
 
 
-## La Concession : les nuages se dissolvent (3,5 s), puis les bornes de la caméra s'élargissent au palier.
+## La Concession : la brume se dissout (3,5 s), puis les bornes de la caméra s'élargissent au palier.
 func dissolve_clouds() -> void:
 	_clouds_done = true
 	if clouds != null and is_instance_valid(clouds):
@@ -2955,6 +2956,9 @@ func _sync_weather(delta: float) -> void:
 func _on_tapped(wp: Vector3, _sp: Vector2) -> void:
 	# une ouverture de zone en cours se passe d'un toucher
 	if skip_opening():
+		return
+	if clouds_on() and clouds.lock_rect.grow(10.0).has_point(_sp):
+		lock_tapped.emit()
 		return
 	var pick := pick_tap(wp)
 	match String(pick.get("kind", "")):

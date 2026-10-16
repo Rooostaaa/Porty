@@ -2812,7 +2812,20 @@ func test_f3(db: DataDB) -> void:
 		if Layout.in_cloud_hole(q):
 			hole_bad.append("port/cap/village visible " + str(q))
 	var cover_ok := Layout.CLOUD_COVER.encloses(Rect2(-320, -340, 720, 690))
-	check(hole_bad.is_empty() and cover_ok, "G1 nuages : le trou contient l'anse et rien du port ni du cap (%s) ; couverture sur tout le monde habillé (%s)" % [str(hole_bad.slice(0, 4)), cover_ok])
+	# la brume (plan unique) : nulle sur tout le trou de l'anse, dense (≥ 0,45) sur le port, le cap et le village, ≈ 0,72 au cœur
+	for r in Layout.CLOUD_HOLE:
+		var rr := r as Rect2
+		for i in 9:
+			for j in 9:
+				var q := rr.position + rr.size * Vector2(float(i) / 8.0, float(j) / 8.0)
+				if CloudLayer.veil_alpha(q) > 0.0:
+					hole_bad.append("brume dans l'anse " + str(q))
+	for q in [Vector2(-24, -7), Vector2(-20, 10), Vector2(-21, 45), Vector2(-62, -16), Vector2(-30, -60), Vector2(-120, 110), Vector2(-60, 60)]:
+		if CloudLayer.veil_alpha(q) < 0.45:
+			hole_bad.append("brume trop claire " + str(q))
+	if absf(CloudLayer.veil_alpha(Vector2(200, 200)) - CloudLayer.DENSITY) > 0.001 or CloudLayer.DENSITY < 0.65 or CloudLayer.DENSITY > 0.75:
+		hole_bad.append("brume au cœur %.2f" % CloudLayer.veil_alpha(Vector2(200, 200)))
+	check(hole_bad.is_empty() and cover_ok, "G1 brume : le trou contient l'anse et rien du port ni du cap, brume nulle dans l'anse et dense ailleurs (%s) ; couverture sur tout le monde habillé (%s)" % [str(hole_bad.slice(0, 4)), cover_ok])
 	# 11. forêt profonde ramenée à ≈ 1,3 × les arbres du village (hauteur du plus grand pin d'un bloc / plus grand arbre du village)
 	var deep_s := 0.0
 	var n_deep := 0

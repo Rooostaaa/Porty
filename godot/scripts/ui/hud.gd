@@ -123,6 +123,7 @@ func _ready() -> void:
 	diorama.place_tapped.connect(func(d: String) -> void: open_upgrades(d))
 	diorama.lot_tapped.connect(open_building)
 	diorama.zone_tapped.connect(func(zid: int, pos: Vector3) -> void: overlay.show_zone_info(zid, pos))
+	diorama.lock_tapped.connect(func() -> void: open_upgrades(""))
 	diorama.zone_opened.connect(_on_zone_opened)
 	diorama.gesture_done.connect(_on_gesture)
 	# lot F3/G1 : loyer encaissé par Marcel (« +X $ ») ; loyer encaissé d'un toucher (pièces qui sautent vers le compteur)
