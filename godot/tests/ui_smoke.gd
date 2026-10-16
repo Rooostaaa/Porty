@@ -2187,6 +2187,13 @@ func _f1_ship_checks(hud: Hud) -> void:
 	var paid0 := dio.ships_paid
 	var reps0 := dio.berth_reps
 	var cap := s.rade_places() + 4 * s.berths.size() + 8
+	# (lot H1, corrigé : aléas suspendus pendant la mesure — brouillard (pilotage à 0, 30 s) et vent fort (grues à 0, 25 s)
+	# tombaient au hasard dans la fenêtre de 150 s et vidaient à eux seuls le débit à quai ; on mesure ici la chorégraphie du
+	# diorama, pas les aléas. Ils reprennent ensuite.)
+	if not s.active_event.is_empty():
+		Hazards.end_event(s)
+	var nea0 := s.next_event_at
+	s.next_event_at = s.time + 1.0e6
 	# mise en route (2 min) : le premier voyage mouillage → quai dure 70 à 150 s, la fenêtre observée commence port rempli
 	for i in 1200:
 		s.step(dt)
@@ -2212,6 +2219,7 @@ func _f1_ship_checks(hud: Hud) -> void:
 			if n_in > Diorama.INBOUND_MAX or n_at > 1:
 				too_many += 1
 		max_views = maxi(max_views, dio.fleet.size() + dio.parting.size())
+	s.next_event_at = maxf(nea0, s.time + 60.0)
 	check(missing == 0 and too_many == 0 and max_views <= cap and moored_seen.size() >= 2 and dio.ships_paid > paid0,
 		"F1 : navires à l'écran au T3 — escales en rade sans vue %d, postes surchargés %d, %d vues au plus (≤ %d), %d navires déchargés à quai, %d encaissements, %d envois de la file" % [
 		missing, too_many, max_views, cap, moored_seen.size(), dio.ships_paid - paid0, dio.berth_reps - reps0])
