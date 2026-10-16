@@ -8,6 +8,8 @@ extends RefCounted
 
 ## Goulots qui se règlent par un bâtiment (voir `Hud.BUILD_KEYS`).
 const BUILD_KEYS := ["yard_space", "berth_count", "min_time", "attract"]
+const GESTURE_LABEL := {"berths": "TOUCHE LE NAVIRE", "customs": "TOUCHE LA CABANE", "gate": "TOUCHE LA BARRIÈRE"}
+const GESTURE_WHO := {"berths": "LÉON", "customs": "PAUL", "gate": "TONIO"}
 
 ## Action proposée par la carte Goulot : quoi, combien, et possible tout de suite ou non (revue D-UI, phase 1).
 ## {kind : "build" | "dept" | "tier" | "campaign" | "commerce" | "", id, cost, can, label}. Pour un goulot qui se règle
@@ -23,6 +25,13 @@ static func hint_action(s: PortSim) -> Dictionary:
 		if sb != "" and s.db.building_by_id.has(sb):
 			var sc := float(s.db.building_by_id[sb].cost)
 			return {"kind": "build", "id": sb, "cost": sc, "can": sc <= s.money and s.building_state(sb) == "available", "label": "%s · %s" % [Info.building_short(s, sb), Fmt.money(sc)]}
+	if key == "gesture":
+		# lot G2 (revue) : un geste à faire (service pas encore ouvert) ; son responsable s'est présenté : l'embaucher
+		var gd := String(a.get("gesture", ""))
+		if s.mgr_offered.has(gd) and not bool(s.managers.get(gd, false)):
+			var mc := s.manager_cost(gd)
+			return {"kind": "hire", "id": gd, "cost": mc, "can": mc <= s.money, "label": "EMBAUCHER %s · %s" % [String(GESTURE_WHO.get(gd, "")), Fmt.money(mc)]}
+		return {"kind": "gesture", "id": gd, "cost": 0.0, "can": true, "label": String(GESTURE_LABEL.get(gd, "TOUCHE !"))}
 	if key == "fog":
 		# brouillard : rien à acheter qui aide (le pilotage est suspendu), on attend qu'il se lève
 		return {"kind": "", "id": "", "cost": 0.0, "can": false, "label": "PATIENTER"}

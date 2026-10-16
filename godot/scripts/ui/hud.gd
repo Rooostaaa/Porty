@@ -165,6 +165,7 @@ func _apply_column() -> void:
 
 
 func bind(s: PortSim) -> void:
+	_g2_framed.clear()
 	if _bound != null:
 		for c in [["notify", _on_notify], ["revenue", _on_revenue], ["tier_changed", _on_tier], ["event_started", _on_event], ["mission_ready", _on_mission], ["feature_unlocked", _on_feature], ["ship_class_first", _on_first_class], ["purchased", _on_purchased], ["fish_event", _on_fish_event]]:
 			if _bound.is_connected(c[0], c[1]):
@@ -851,10 +852,12 @@ func _process(delta: float) -> void:
 	# en attente patiente (elle masquerait l'interface sous la feuille).
 	diorama.fx_paused = full or _npopups() > 0 or ceremony_active() or (half and not diorama.opening_queue.is_empty())
 	_sync_start()
+	_g2_first_frames()
 	_sync_opening(delta)
 	# la surcouche monde est « top_level » : elle passerait sur les écrans plein cadre ; pendant une ouverture de zone, rien
 	# lot E : ni sous une fenêtre (la bulle « en rade » passait au-dessus de la fenêtre du palier)
-	overlay.visible = not full and not diorama.opening_active() and not ceremony_active() and _npopups() == 0
+	# (lot G2, revue : ni sous la carte de la narratrice — les bulles « X se présente » la recouvraient)
+	overlay.visible = not full and not diorama.opening_active() and not ceremony_active() and _npopups() == 0 and not story_active() and not intro_active()
 	_sync_toasts()
 	# argent : le compteur monte en douceur, et chute d'un coup quand on dépense
 	if _money_disp < 0.0 or s.money < _money_disp or absf(s.money - _money_disp) < 0.5:
@@ -1024,6 +1027,8 @@ static func hint_title_for(s: PortSim) -> String:
 	if String(s.shown_analysis().get("alert", "")) == "exit":
 		return "Il faut une sortie !"
 	match key:
+		"gesture":
+			return String({"berths": "Goulot : l'accostage", "customs": "Goulot : le tampon", "gate": "Goulot : la barrière"}.get(String(s.shown_analysis().get("gesture", "")), "Goulot"))
 		"starter":
 			var sb := String(s.shown_analysis().get("building", ""))
 			return "Prochaine étape : " + (String(s.db.building_by_id[sb].name) if s.db.building_by_id.has(sb) else "bâtir")
@@ -1411,6 +1416,20 @@ func _on_hint_pressed() -> void:
 	var kind := String(act.kind)
 	if kind == "dept":
 		open_upgrades(String(act.id))
+		return
+	if kind == "hire":          # lot G2 (revue) : le responsable du geste s'est présenté
+		_on_manage_btn()
+		return
+	if kind == "gesture":       # lot G2 (revue) : la caméra va sur le lieu du geste
+		var gp: Vector3 = {"customs": Layout.CUSTOMS_HUT, "gate": Layout.GATE}.get(String(act.id), Vector3.INF)
+		if String(act.id) == "berths":
+			for sh in GameState.sim.ships:
+				if sh.state == Ship.State.ANCHORED and diorama.ship_views.has(sh.id):
+					gp = (diorama.ship_views[sh.id] as ShipView).position
+					break
+		if gp != Vector3.INF:
+			Sfx.play("click")
+			diorama.rig.focus(gp)
 		return
 	if kind == "build" or (kind == "manage" and key in BUILD_KEYS):
 		# Gestion n'apparaît qu'au chapitre 3 : avant, le bouton ouvre la fiche du bâtiment, sur son emplacement doré
@@ -2429,6 +2448,29 @@ func _bascule_ship() -> void:
 		_bascule_ceremony()
 	else:
 		_show_story(card, _bascule_ceremony)
+
+
+## Lot G2 (revue) : la première fois qu'un geste du terre-plein attend (tampon, camion à la barrière), la caméra cadre la cabane,
+## la barrière et le quai ensemble (sans tutoriel, la cabane restait hors champ et sa bulle invisible). Une fois par partie.
+var _g2_framed: Dictionary = {}
+var g2_frames_done := 0          # (tests) recadrages faits
+
+
+func _g2_first_frames() -> void:
+	var s := GameState.sim
+	if s == null or not s.g2 or s.fishing.act0 or diorama == null or diorama.rig == null or diorama.rig.locked:
+		return
+	if any_sheet_open() or story_active() or ceremony_active() or _npopups() > 0:
+		return
+	for g in [["stamp", s.stamp_ready() and s.counter("stamps") == 0.0], ["pass", s.pass_ready() and s.counter("passes") == 0.0]]:
+		if bool(g[1]) and not _g2_framed.has(g[0]):
+			_g2_framed[g[0]] = true
+			g2_frames_done += 1
+			_frame(G2_GESTURE_LOOK, G2_GESTURE_ZOOM)
+
+
+const G2_GESTURE_LOOK := Vector3(-24.0, 0.0, 20.0)      # quai (z −3), plateforme, cabane (z 40,5) et barrière (z 44)
+const G2_GESTURE_ZOOM := 66.0
 
 
 ## Lot G2 : cadrage de la friche après la Concession (le quai, la plateforme, la cabane et la barrière à venir).

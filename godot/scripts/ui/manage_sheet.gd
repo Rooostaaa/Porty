@@ -191,7 +191,7 @@ func _build_stats() -> void:
 	content.add_child(c2)
 	var v2 := UI.vbox(14)
 	c2.add_child(v2)
-	v2.add_child(UI.label("Départements", 40, UI.VIOLET))
+	v2.add_child(UI.label("Services", 40, UI.VIOLET))
 	for d in PortSim.DEPTS:
 		var h := UI.hbox(14)
 		var b := UI.badge("1", Info.DEPT_COLOR[d], 28)

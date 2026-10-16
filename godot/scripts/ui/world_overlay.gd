@@ -13,6 +13,7 @@ const GAP := 6.0            # écart entre le point d'ancrage et le bas de la bu
 var diorama: Diorama
 var popups: Array[Dictionary] = []      # {p: Vector3, text, t, col}
 var _t := 0.0
+var obstacles: Array[Rect2] = []        # lot G2 (revue) : contrôles du HUD posés sur le monde (bouton Heures sup)
 var _placed: Array[Rect2] = []          # rectangles déjà dessinés dans l'image courante (anti-chevauchement)
 var last_rects: Dictionary = {}         # clé -> Rect2 de la dernière bulle dessinée (tests)
 var frame_rects: Dictionary = {}        # idem, pour l'image courante seulement (tests : tout ce qui vient d'être dessiné)
@@ -48,6 +49,11 @@ func _process(delta: float) -> void:
 		useful = Hud.main.useful_rect()
 		position = useful.position
 		size = useful.size
+		# lot G2 (revue) : le bouton rond Heures sup flotte dans le rectangle utile — les bulles l'évitent
+		obstacles.clear()
+		var bb: Control = Hud.main.boost_btn
+		if bb != null and bb.is_visible_in_tree():
+			obstacles.append(bb.get_global_rect().grow(4.0))
 	for p in popups:
 		p.t += delta
 	popups = popups.filter(func(p: Dictionary) -> bool: return p.t < (2.4 if bool(p.get("big", false)) else 1.6))
@@ -70,6 +76,7 @@ func _draw() -> void:
 		return
 	var sim := diorama.sim
 	_placed.clear()
+	_placed.append_array(obstacles)
 	frame_rects.clear()
 	# rien n'est dessiné sous les cartes du haut (conseil, aléa, bandeau des missions) : un navire caché derrière reste caché
 	if Hud.main == null:

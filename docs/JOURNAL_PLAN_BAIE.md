@@ -1912,3 +1912,40 @@ OpenGL sous Xvfb (pas de Vulkan ici). `g2_friche.png` (la friche nue, estacade, 
 plus de bulle d'accostage) ; `g2_ameliorer_leon.png` (Grue mobile en tête, puis Accostage) ; `g2_ameliorer_plus_tard.png`
 (Allongement du quai en tête, puis les services). Corrigé après lecture : conteneurs **noirs** (rendu OpenGL, voir G2-b), carte
 Goulot sans titre, bulle « en rade » à la friche, aide « Le département… » à la friche.
+
+### Lot G2 › corrections de revue (16/10)
+Revue QA indépendante (preuves `/tmp/claude-0/qa/`). Corrigé :
+1. **Jargon au T1** : missions « Monter le Déchargement au niveau 10 », « Faire sortir 100 / 2 000 camions » (et les objectifs de
+   carrière) ; contrats « Décharger {n} conteneurs… » (`contracts.json`) et barre « x / y conteneurs » (`commerce_sheet.gd`) ;
+   Gestion › Stats : « Gain moyen par conteneur », « Sortie camions saturée », « cont./min », « /conteneur », Renom en
+   conteneurs (`manage_sheet.gd`) ; bâtiments « Deuxième voie de sortie », « Première grande grue de quai (STS) » (+ zone 8,
+   textes des aires d'attente, TOS, aléa « Grève à la sortie ») ; onglet et titre « Services » au lieu de « Départements ».
+   Identifiants inchangés.
+2. **Goulot vers un service pas encore ouvert** (`port_sim.gd › _compute_analysis`, `GESTURE_HINTS`, `Advice.hint_action`,
+   `Hud.hint_title_for`, `_on_hint_pressed`) : en partie jouée, si le goulot est l'Accostage, la Douane ou la Sortie camions sans
+   leur carte — ou si un geste est en souffrance (≥ 10 conteneurs à tamponner, camion à la barrière depuis 6 s, navire en rade
+   depuis 12 s) — la carte dit « Goulot : le tampon / la barrière / l'accostage », le conseil le geste (« touche la cabane. Paul
+   se présentera bientôt. ») et le bouton « TOUCHE LA CABANE » (la caméra y va) ; le responsable présenté : « EMBAUCHER PAUL ·
+   60 $ » (ouvre RESPONSABLES). Seuils dans `config.json › manual` (défauts dans le code).
+3. **Bulles par-dessus la carte de la narratrice** : la surcouche monde est masquée tant qu'une carte de la narratrice ou d'intro
+   est ouverte (`hud.gd`).
+4. **Revenu « +X $/s » gonflé après chargement** : la fenêtre du revenu réel est bornée par `clock()` (Crique comprise), une fois
+   la Crique chargée ; QA `t_hint.gd` : friche 5,2 $/s (avant ≈ 310) pour 4,2 $/s de pêche.
+5. **Cabane hors champ** : la première fois qu'un tampon ou un camion attend, la caméra cadre quai, plateforme, cabane et
+   barrière ((−24 ; 20), largeur 66), une fois par partie (`Hud._g2_first_frames`).
+6. **Bulles qui se recouvrent** : les bulles évitent le bouton rond Heures sup (`WorldOverlay.obstacles`) ; écart entre bulles
+   décalées 6 → 12 px (`Bubbles.GAP`).
+7. Aide des Réglages : « tant que Léon, le chef de quai, n'est pas embauché ».
+9. Unité des cartes : « cont./min » (une ligne).
+
+Contrôles ajoutés : `run_all` « G2 (revue) goulot d'un geste » (geste puis EMBAUCHER) et « G2 (revue) revenu affiché après
+chargement à la friche » ; `ui_smoke` « G2 Léon » exige la surcouche masquée sous la carte. **`run_all` 247/247**, **`ui_smoke`
+181/181** (un passage lancé en même temps que `run_all` a vu « à terre 1 » dans « G1 l'anse vivante », aléa de minutage à
+×6 ; vert seul). Sonde (4 graines) : premier camion 4:08–4:18, T2 12:54 en moyenne (+4,1 %), T3 +1,9 %, fin +1,7 % (graine 2 :
+fin +19 %, comme avant).
+
+Captures après (`docs/captures/g2_revue_*.png`, mêmes sauvegardes que la QA, regardées) : `g2_revue_tampon` (recadrage : cabane,
+« À tamponner : 6 » à distance de « Piste et barrière ») ; `g2_revue_leon` (« Léon se présente » écartée de l'anneau,
+« Goulot : le tampon · TOUCHE LA CABANE ») ; `g2_revue_paul` (« EMBAUCHER PAUL · 60 $ ») ; `g2_revue_t2` (« Quai n°2 · 150K $ »
+à gauche du bouton Heures sup) ; `g2_revue_upgrades` (« 2,66K cont./min → 2,77K cont./min » sur une ligne) ; `g2_revue_manage`
+(Stats et Services sans « EVP » ni « gate »). Avant : `/tmp/claude-0/qa/{g2_tampon,g2_leon,g2_paul,g2_t2,t1_upgrades,t1_manage}.png`.

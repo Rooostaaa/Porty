@@ -1885,6 +1885,22 @@ const HINTS := {
 	"tier": "Les quais tournent à plein régime : vise le palier suivant pour de plus gros navires.",
 }
 
+## Lot G2 (revue) : conseil d'un goulot qui se règle d'un geste (service pas encore ouvert).
+const GESTURE_HINTS := {
+	"berths": ["Les navires attendent en rade : touche-les pour qu'ils accostent. Léon se présentera bientôt.",
+		"Léon s'est présenté : embauche-le (RESPONSABLES), il accostera les navires pour toi."],
+	"customs": ["Les conteneurs attendent le tampon : touche la cabane. Paul se présentera bientôt.",
+		"Paul s'est présenté : embauche-le (RESPONSABLES), il tamponnera pour toi."],
+	"gate": ["Les camions attendent à la barrière : touche-la pour les laisser passer. Tonio se présentera bientôt.",
+		"Tonio s'est présenté : embauche-le (RESPONSABLES), il laissera passer les camions pour toi."],
+}
+
+
+func gesture_hint(d: String) -> String:
+	var h: Array = GESTURE_HINTS.get(d, ["", ""])
+	return String(h[1] if mgr_offered.has(d) else h[0])
+
+
 ## Lot G2 : conseils de la friche (une pièce du départ à la fois).
 const STARTER_HINTS := {
 	"platform": "La friche est nue : terrasse-la pour poser les conteneurs (AMÉLIORER).",
@@ -2025,6 +2041,26 @@ func _compute_analysis(exclude_harbor: bool = false) -> Dictionary:
 	var st := next_starter()
 	if st != "":
 		return {"key": "starter", "dept": "", "hint": String(STARTER_HINTS.get(st, "")), "caps": caps, "flow": bv, "building": st}
+	# lot G2 (revue) : le goulot est un geste dont le service n'est pas encore ouvert (pas de carte à améliorer) — le conseil
+	# dit le geste à faire, puis d'embaucher son responsable quand il s'est présenté
+	var gd := String(HINT_DEPT.get(key, ""))
+	if g2 and key in ["berths", "customs", "inspection", "gate"] and OFFER_ORDER.has(gd) and not feature("dept_" + gd) and not managers[gd]:
+		return {"key": "gesture", "dept": "", "gesture": gd, "hint": gesture_hint(gd), "caps": caps, "flow": bv, "building": ""}
+	# … ou un geste en souffrance, quel que soit le goulot théorique (la capacité d'un service sans responsable, c'est le joueur) :
+	# des conteneurs attendent le tampon, un camion attend à la barrière, un navire attend en rade
+	if g2:
+		var waiting := ""
+		if not managers.customs and has_hut and pending_total() >= float(db.cfg("manual").get("hint_pending", 10.0)):
+			waiting = "customs"
+		elif not managers.gate and pass_ready() and truck_wait_t >= float(db.cfg("manual").get("hint_wait", 6.0)):
+			waiting = "gate"
+		elif not managers.berths and not managers.harbor:
+			for sh in ships:
+				if sh.state == Ship.State.ANCHORED and not sh.priority and sh.wait_time >= float(db.cfg("manual").get("hint_wait", 6.0)) * 2.0:
+					waiting = "berths"
+					break
+		if waiting != "":
+			return {"key": "gesture", "dept": "", "gesture": waiting, "hint": gesture_hint(waiting), "caps": caps, "flow": bv, "building": ""}
 	# manque de navires : l'équipement qui en attire (quai plus long, douane, chenal…) passe avant la Capitainerie
 	if key == "harbor":
 		bid = traffic_building()
@@ -2731,7 +2767,9 @@ func from_dict(d: Dictionary) -> void:
 			evp_buckets = PackedFloat64Array(eb)
 		if sb.size() == 60:
 			ship_buckets = PackedFloat64Array(sb)
-		_live_t = minf(time, 60.0)          # la fenêtre d'une minute est pleine (seaux sauvegardés)
+		# la fenêtre d'une minute est pleine (seaux sauvegardés). Lot G2 (revue) : sur l'horloge de toute la partie — les seaux
+		# tournent aussi pendant la Crique ; avec `time` (horloge du port, ≈ 0 à la friche) le revenu affiché était gonflé ×70
+		_live_t = 60.0          # (borné ci-dessous, une fois la Crique chargée : clock() en dépend)
 	if not d.has("features"):
 		_upgrade_legacy_save()
 	if not d.has("owners_on"):
@@ -2752,6 +2790,8 @@ func from_dict(d: Dictionary) -> void:
 			boost_until += fishing.act0_time
 		if boost_ready_at > 0.0:
 			boost_ready_at += fishing.act0_time
+	if ib.size() == 60:
+		_live_t = minf(clock(), 60.0)
 	_clamp_licences()
 	rebuild_infra()
 	_bn_last = time          # pas de « temps de goulot » fantôme entre 0 et l'heure de la partie chargée (revue C7 C2)

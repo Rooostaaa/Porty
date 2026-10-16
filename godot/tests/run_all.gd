@@ -2981,6 +2981,38 @@ func test_g2(db: DataDB) -> void:
 	var names := ["harbor", "berths", "cranes", "customs", "yard_ops", "gate"].map(func(d: String) -> String: return String(db.dept_by_id[d].name))
 	check(names == ["Arrivées", "Accostage", "Déchargement", "Douane", "Stockage", "Sortie camions"],
 		"G2 noms de métier : %s" % ", ".join(names))
+	# (revue QA de G2) le goulot d'un geste dont le service n'est pas ouvert : le conseil dit le geste (« touche la cabane »),
+	# puis d'embaucher le responsable quand il s'est présenté — jamais « améliore la Douane » sans carte Douane
+	var gh := PortSim.new(db, 31)
+	gh.begin_act0()
+	gh.fishing.migrate_done()
+	gh.open_port()
+	gh.money = 5000.0
+	for b in PortSim.STARTERS:
+		gh.build(b)
+	gh.yard_pending[0] = 20.0
+	gh._refresh_analysis()
+	var ga1 := gh.shown_analysis()
+	var gk1 := String(Advice.hint_action(gh).kind)
+	gh.mgr_offered["customs"] = gh.time
+	gh._refresh_analysis()
+	var gk2 := String(Advice.hint_action(gh).kind)
+	check(String(ga1.key) == "gesture" and String(ga1.get("gesture", "")) == "customs" and String(ga1.dept) == "" and gk1 == "gesture" and gk2 == "hire"
+		and not gh.feature("dept_customs") and String(ga1.hint).contains("cabane"),
+		"G2 (revue) goulot d'un geste : « %s » (%s), puis EMBAUCHER quand Paul s'est présenté (%s)" % [String(ga1.hint), gk1, gk2])
+	# (revue QA de G2) revenu affiché après chargement à la friche : la fenêtre d'une minute compte le temps de la Crique
+	var gl := PortSim.new(db, 32)
+	gl.begin_act0()
+	gl.fishing.migrate_done()
+	gl.fishing.act0 = true
+	for k in 400:
+		gl.step(0.25)
+	gl.open_port()
+	var gl2 := PortSim.new(db)
+	gl2.from_dict(JSON.parse_string(JSON.stringify(gl.to_dict())))
+	var rr := gl2.real_income_rate()
+	check(rr > 0.0 and rr < gl.fishing.offline_rate() * 2.0,
+		"G2 (revue) revenu affiché après chargement à la friche : %s/s pour %s/s de pêche (avant : ×70)" % [Fmt.num(rr), Fmt.num(gl.fishing.offline_rate())])
 	# 11. le monde figé sans responsable du port (rien gagné, rien perdu ; la pêche de Marcel seule), puis la règle d'avant
 	var o := PortSim.new(db, 25)
 	o.begin_act0()

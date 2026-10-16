@@ -2757,7 +2757,7 @@ func _f2_checks(hud: Hud) -> void:
 	while not s.mgr_offered.has("berths") and Time.get_ticks_msec() - guard < 5000:
 		await get_tree().process_frame
 	await _wait(3)
-	var offer_card := hud.mgr_cards_shown == cards0 + 1 and hud.story_active()
+	var offer_card := hud.mgr_cards_shown == cards0 + 1 and hud.story_active() and not hud.overlay.visible      # (revue : aucune bulle par-dessus la carte)
 	if hud.story_active():
 		(hud.story_layer as Button).pressed.emit()
 	await _wait(2)
@@ -2790,7 +2790,7 @@ func _f2_checks(hud: Hud) -> void:
 		if hud.overlay.frame_rects.has("berth_gesture"):
 			pill_after = true
 	check(frozen and offer_card and offer_pill and mbtn and leon_row and s.managers.berths and acc_card and not pill_after,
-		"G2 Léon : monde figé sans responsable du port (%s) ; après 5 accostages il se présente (carte %s, bulle sur le quai %s, RESPONSABLES %s, fiche %s) ; embauché : carte Accostage dans AMÉLIORER (%s), plus de bulle d'accostage, Heures sup révélées (%s)" % [
+		"G2 Léon : monde figé sans responsable du port (%s) ; après 5 accostages il se présente (carte sans bulle par-dessus %s, bulle sur le quai %s, RESPONSABLES %s, fiche %s) ; embauché : carte Accostage dans AMÉLIORER (%s), plus de bulle d'accostage, Heures sup révélées (%s)" % [
 		frozen_txt, offer_card, offer_pill, mbtn, leon_row, str(dept_ids), s.feature("boost")])
 	# l'anse après l'acte 0 : la pêche est passive (revenu fixe), plus de carte ni de pastille, les bateaux vivent toujours
 	hud.open_upgrades("")

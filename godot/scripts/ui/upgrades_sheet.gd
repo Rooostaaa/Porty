@@ -18,7 +18,7 @@ var shown_dept := ""                  # service sur lequel la feuille s'est ouve
 
 
 func _init(dept: String = "") -> void:
-	super._init("Améliorations", ["Départements", "Cargaisons"] as Array[String])
+	super._init("Améliorations", ["Services", "Cargaisons"] as Array[String])
 	focus_dept = dept
 	half = true          # feuille mi-hauteur : on achète au-dessus du port qui vit (lot D-UI)
 
