@@ -3206,3 +3206,59 @@ func _f3_act0(hud: Hud, s: PortSim) -> void:
 		and int(obs.max_vis) >= 4 and fv.van_trips >= 1 and bool(obs.van_seen) and int(obs.van_off) == 0,
 		"G1 l'anse vivante : chalutiers, jetée, marina (%d chantiers, %d voiliers), la Concession en tête d'AMÉLIORER (« %s ») ; jusqu'à %d bateaux à l'écran, à terre %d, sur un ouvrage %d, rotation sur place %d, vitesse au plus %s u/s ; camionnette partie %d fois, hors de sa route %d" % [
 		sites_b, fv.sailboats.size(), conc_txt.replace("\n", " "), int(obs.max_vis), int(obs.land), int(obs.pontoon), int(obs.pivot), Fmt.num(spd), fv.van_trips, int(obs.van_off)])
+	# lot H1 — le ponton de service : la pompe et le lavage (Services 6) sur le radeau flottant amarré à la jetée ; un bateau
+	# rentré s'y amarre, l'anneau se remplit au-dessus de la station (lisible : ≥ 80 px de diamètre sur 1080), puis éclate en
+	# « +X $ » (pièces vers le compteur) ; la marina à l'ouest de la jetée ; mêmes invariants de trajet (ni terre ni ouvrage,
+	# aucune rotation sur place, ≤ 6,5 u/s)
+	st0 = dio.sites.started
+	var add_sv := 6 - f.services
+	s.money += f.services_cost(add_sv)
+	s.buy_fish_services(add_sv)
+	await _wait(2)
+	var sites_h := dio.sites.started - st0
+	var floating := 0
+	var jetty_n := 0
+	var raft_n := 0
+	for c in fv._static.get_children():
+		if c.is_queued_for_deletion() or not String(c.get_meta("site", "")).begins_with("fish_services_") or bool(c.get_meta("cleat", false)):
+			continue
+		var cp: Vector3 = (c as Node3D).position
+		if bool(c.get_meta("jetty", false)):
+			jetty_n += 1
+		elif bool(c.get_meta("raft", false)):
+			raft_n += 1
+		elif Layout.raft_rect().has_point(Vector2(cp.x, cp.z)) and cp.y > Layout.WATER_Y and cp.y < 0.0 and not Layout.any_land(Vector2(cp.x, cp.z)):
+			floating += 1
+	var sails_w := fv.sailboats.all(func(sb: Node3D) -> bool: return sb.position.x < Layout.jetty_rect().position.x and not Layout.any_land(Vector2(sb.position.x, sb.position.z)))
+	dio.rig.goal = Vector3(-140.0, 0.0, 28.0)
+	dio.rig.target = dio.rig.goal
+	dio.rig.zoom_goal = 50.0
+	dio.rig.zoom = 50.0
+	fv.speed_seen = {}
+	obs = {"land": 0, "pontoon": 0, "pivot": 0, "frames": 0, "last": {}, "max_vis": 0, "van_off": 0, "van_seen": false}
+	rects = Layout.anse_obstacles()
+	Engine.time_scale = 6.0
+	var ring_r := Rect2()
+	var ring_st := ""
+	var served0 := hud.fish_served_n
+	var pops1 := hud.overlay.popups_added
+	var shown0 := fv.services_shown
+	guard = Time.get_ticks_msec()
+	while (ring_st == "" or hud.fish_served_n <= served0) and Time.get_ticks_msec() - guard < 30000:
+		await get_tree().process_frame
+		_f3_track(hud)
+		_f3_observe(fv, obs, rects, get_process_delta_time())
+		for key in ["ring_fuel", "ring_wash"]:
+			if ring_st == "" and hud.overlay.frame_rects.has(key):
+				ring_r = hud.overlay.frame_rects[key]
+				ring_st = key
+	Engine.time_scale = 1.0
+	var spd2 := 0.0
+	for k in fv.speed_seen:
+		spd2 = maxf(spd2, float(fv.speed_seen[k]))
+	var vr2 := Rect2(Vector2.ZERO, hud.get_viewport_rect().size)
+	check(sites_h >= 2 and jetty_n == 4 and raft_n == 15 and floating == 2 and sails_w and ring_st != "" and ring_r.size.x >= 80.0 \
+		and vr2.encloses(ring_r) and hud.fish_served_n > served0 and fv.services_shown > shown0 and hud.overlay.popups_added > pops1 and f.served > 0 \
+		and int(obs.land) == 0 and int(obs.pontoon) == 0 and int(obs.pivot) == 0 and spd2 <= 6.5,
+		"H1 ponton de service : chantiers %d, jetée %d segments, radeau %d modules, pompe et lavage flottants (%d), voiliers à l'ouest de la jetée (%s) ; anneau « %s » à l'écran (%d px), service payé « +X $ » (%d, pièces %d) ; à terre %d, sur un ouvrage %d, rotation sur place %d, vitesse au plus %s u/s" % [
+		sites_h, jetty_n, raft_n, floating, sails_w, ring_st, int(ring_r.size.x), hud.fish_served_n - served0, hud.fish_served_coins, int(obs.land), int(obs.pontoon), int(obs.pivot), Fmt.num(spd2)])

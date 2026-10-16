@@ -407,23 +407,19 @@ var act0_end_rate := 0.0                 # revenu estimé de la pêche à la fin
 func _fish_options() -> Array[Dictionary]:
 	var f := sim.fishing
 	var out: Array[Dictionary] = []
-	var tk := f.ticket()
+	# (lot H1 : revenu d'un bateau au niveau actuel, stations comprises — sans station, la formule de G1)
 	if f.places < f.places_max():
-		var d := f.boat_def("dinghy")
-		var cyc := float(d.get("out", 1)) + float(d.get("fish", 1)) + float(d.get("back", 1)) + float(d.get("land", 1))
-		var g := float(d.get("value", 0.0)) * tk / cyc
-		out.append({"id": "places", "cost": f.places_cost(), "gain": g})
+		out.append({"id": "places", "cost": f.places_cost(), "gain": f.boat_rate("dinghy")})
 	if f.services < f.services_max():
-		var sail := float(f.cfg.get("sail_rent", 0.0)) * float(f.sails())
-		var g2 := (f.rate_estimate() - sail) * float(f.cfg.get("ticket_step", 0.15)) / tk
-		out.append({"id": "services", "cost": f.services_cost(), "gain": g2})
+		var g2 := 0.0
+		for bt in f.boats:
+			g2 += f.boat_rate(String(bt.cls), f.services + 1) - f.boat_rate(String(bt.cls))
+		out.append({"id": "services", "cost": f.services_cost(), "gain": maxf(0.0001, g2)})
 	var nb := f.next_building()
 	if not nb.is_empty():
 		var g3 := 0.0
 		for cls in nb.get("boats", {}):
-			var bd := f.boat_def(cls)
-			var cyc2 := float(bd.get("out", 1)) + float(bd.get("fish", 1)) + float(bd.get("back", 1)) + float(bd.get("land", 1))
-			g3 += float(nb.boats[cls]) * float(bd.get("value", 0.0)) * tk / cyc2
+			g3 += float(nb.boats[cls]) * f.boat_rate(cls)
 		g3 += float(f.cfg.get("sail_rent", 0.0)) * maxf(0.0, float(nb.get("sail", 0)) - float(f.sails()))
 		# la marina ouvre la Concession : pour un joueur pressé elle vaut autant qu'un bon achat
 		if String(nb.id) == "marina":

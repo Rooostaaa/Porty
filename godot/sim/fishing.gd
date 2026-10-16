@@ -328,9 +328,10 @@ func service_dur(lv: int = -1) -> float:
 	return maxf(float(sc.get("min", 2.0)), float(sc.get("dur", 6.0)) * pow(float(sc.get("decay", 0.88)), float(k)))
 
 
-## Ce que paie un service (avant Heures sup) : valeur du bateau × `fee` × ticket.
+## Ce que paie un service (avant Heures sup) : valeur du bateau × `fee` (le ticket des Services s'applique au loyer ; ici,
+## l'amélioration paie par la vitesse du service).
 func service_fee(cls: String) -> float:
-	return float(boat_def(cls).get("value", 0.0)) * float(st_cfg().get("fee", 0.2)) * ticket()
+	return float(boat_def(cls).get("value", 0.0)) * float(st_cfg().get("fee", 0.2))
 
 
 func station_free(id: String) -> bool:
@@ -340,6 +341,22 @@ func station_free(id: String) -> bool:
 ## Indice du bateau servi (ou qui arrive) à une station, -1 sinon.
 func station_boat(id: String) -> int:
 	return int(occ.get(id, -1))
+
+
+## Place dans la file du ponton de service pour un bateau de plus (bateaux en route vers le point de décision, au poste
+## d'attente, vers la première station ou à la première station : moins de `engaged`, 2 par défaut).
+func _room_for_one() -> bool:
+	var st := stations()
+	if st.is_empty():
+		return false
+	var n := 0
+	for bt in boats:
+		var ph := int(bt.phase)
+		if (ph == Phase.BACK and bool(bt.via)) or ph == Phase.QUEUE or (ph == Phase.MOVE and (String(bt.to) == "h" or String(bt.to) == st[0])):
+			n += 1
+		elif ph == Phase.SERVE and String(bt.at) == st[0]:
+			n += 1
+	return n < int(st_cfg().get("engaged", 2))
 
 
 func _next_station(cur: String) -> String:
@@ -436,8 +453,10 @@ func _advance(i: int, bt: Dictionary) -> bool:
 			bt.at = "sea"
 			_set_phase(bt, Phase.FISH, float(d.get("fish", 5.0)))
 		Phase.FISH:
-			# lot H1 : avec une station au moins, le retour passe par le point de décision du ponton de service
-			bt.via = not stations().is_empty()
+			# lot H1 : avec une station au moins, le retour passe par le point de décision du ponton de service — sauf si la
+			# file est déjà pleine (un bateau en route, au poste d'attente ou à la première station : au plus `engaged`) ; il
+			# rentre alors droit à sa place, sans détour
+			bt.via = _room_for_one()
 			bt.at = "sea"
 			bt.to = "g" if bool(bt.via) else "b"
 			_set_phase(bt, Phase.BACK, _leg(bt, "back_g") if bool(bt.via) else float(d.get("back", 20.0)))

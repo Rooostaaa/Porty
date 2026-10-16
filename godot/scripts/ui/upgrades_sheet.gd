@@ -708,7 +708,13 @@ func _refresh_fishing(s: PortSim) -> void:
 					if not f.named_level(k).is_empty():
 						nxt = "niv. %d : %s" % [k, String(f.named_level(k).name)]
 						break
-				pay.text = "Escale ×%s · niv. %d/%d%s" % [Fmt.num(f.ticket()), f.services, f.services_max(), (" · " + nxt) if nxt != "" else ""]
+				# lot H1 : chaque niveau raccourcit le service au ponton (l'anneau) — durée actuelle → après l'achat
+				var spd := ""
+				if not f.stations().is_empty() and f.services < f.services_max():
+					spd = " · service %s s → %s s" % [Fmt.num(f.service_dur()), Fmt.num(f.service_dur(f.services + n))]
+				elif not f.stations().is_empty():
+					spd = " · service %s s" % Fmt.num(f.service_dur())
+				pay.text = "Escale ×%s%s · niv. %d/%d%s" % [Fmt.num(f.ticket()), spd, f.services, f.services_max(), (" · " + nxt) if nxt != "" else ""]
 				if not nl.is_empty():
 					(c.eff as Label).text = "%s — %s" % [String(nl.name), String(nl.get("text", ""))]
 			_:

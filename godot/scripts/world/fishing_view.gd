@@ -10,6 +10,7 @@ extends Node3D
 ## est remplacé par une primitive Godot (`_prim`, signalée dans `primitives`).
 
 signal popup(pos: Vector3, text: String, big: bool)
+signal served(pos: Vector3, amount: float, station: String)      # lot H1 : fin d'un service au ponton (l'anneau éclate)
 
 const YAW_RATE := 1.4             # rad/s : rotation au plus
 const FISH_R := 1.6               # rayon du cercle de dérive au coin de pêche
@@ -48,6 +49,8 @@ var passings := 0                  # (tests) passages joués
 var sailboats: Array[Node3D] = []  # voiliers de la marina (roulis léger)
 var marcel_node: Node3D            # Marcel (ou le pêcheur voisin avant lui)
 var primitives: Array[String] = [] # (tests, rapport) modèles remplacés par une primitive
+var bursts: Array[Dictionary] = []  # lot H1 : anneaux qui éclatent {st, t} (surcouche)
+var services_shown := 0             # (tests) services payés montrés (« +X $ » au-dessus de la station)
 
 
 func _ready() -> void:
@@ -66,7 +69,10 @@ func bind(s: PortSim) -> void:
 		sim.purchased.disconnect(_on_purchased)
 	if sim != null and sim.fish_event.is_connected(_on_fish_event):
 		sim.fish_event.disconnect(_on_fish_event)
+	if sim != null and sim.fish_served.is_connected(_on_served):
+		sim.fish_served.disconnect(_on_served)
 	sim = s
+	sim.fish_served.connect(_on_served)
 	sim.fish_landed.connect(_on_landed)
 	sim.purchased.connect(_on_purchased)
 	sim.fish_event.connect(_on_fish_event)
@@ -233,10 +239,15 @@ func rebuild() -> void:
 		var bd: Dictionary = Layout.ANSE_BUILDINGS[String(nl.id)]
 		var n := _model(String(bd.m))
 		var p: Vector3 = bd.p
-		n.position = p + Vector3(0, Layout.ground_y(Vector2(p.x, p.z)), 0)
+		if bool(bd.get("float", false)):
+			n.position = Vector3(p.x, Layout.WATER_Y + float(Assets.meta("pontoon").get("deck_z", 0.45)), p.z)
+		else:
+			n.position = p + Vector3(0, Layout.ground_y(Vector2(p.x, p.z)), 0)
 		n.rotation.y = deg_to_rad(float(bd.get("ry", 0.0)))
 		n.set_meta("site", key)
 		_static.add_child(n)
+		if String(nl.id) == "fuel":
+			_service_raft(key)
 		if String(nl.id) == "hall":
 			var road := Layout.FISH_ROAD
 			var arr: Array = []
@@ -303,6 +314,39 @@ func rebuild() -> void:
 		add_child(van)
 	van.visible = false
 	_apply_hiding()
+
+
+## Lot H1 — la jetée de séparation (4 segments `breakwater`, sans feu vert), le ponton de service (radeau de 3 × 5 modules
+## `pontoon`, axe z) amarré à son flanc est et sa passerelle vers la plage : bâtis avec la pompe (palier nommé niv. 3).
+func _service_raft(site: String) -> void:
+	var seg := 12.53
+	for k in 4:
+		var j := Assets.instance("breakwater", Diorama._degreen_material())
+		j.position = Vector3(Layout.JETTY_X, -1.0, Layout.JETTY_Z.x + seg * (float(k) + 0.5))
+		j.rotation.y = PI * 0.5
+		j.set_meta("site", site)
+		j.set_meta("jetty", true)
+		_static.add_child(j)
+	var cols := 3
+	var w := (Layout.RAFT_X.y - Layout.RAFT_X.x) / float(cols)
+	var n := int(round((Layout.RAFT_Z.y - Layout.RAFT_Z.x) / 6.0))
+	for c in cols:
+		for k in n:
+			var m := Assets.instance("pontoon")
+			m.position = Vector3(Layout.RAFT_X.x + w * (float(c) + 0.5), Layout.WATER_Y, Layout.RAFT_Z.x + 6.0 * (float(k) + 0.5))
+			m.rotation.y = PI * 0.5
+			m.set_meta("site", site)
+			m.set_meta("raft", true)
+			_static.add_child(m)
+	_pontoon(Layout.RAFT_WALK, site)
+	# taquets au bord est, un par poste (carburant, lavage, glace)
+	for id in Layout.STATION_Z:
+		var cl := Assets.instance("cleat")
+		cl.position = Vector3(Layout.RAFT_X.y - 0.45, Layout.WATER_Y + 0.45, float(Layout.STATION_Z[id]) + 2.0)
+		cl.rotation.y = PI * 0.5
+		cl.set_meta("site", site)
+		cl.set_meta("cleat", true)
+		_static.add_child(cl)
 
 
 func _place(d: Dictionary, site: String) -> Node3D:
@@ -432,12 +476,19 @@ func _path(kind: String, cls: String, slot: int, fresh: bool) -> Dictionary:
 		var p: Dictionary
 		if kind == "out":
 			p = Layout.fish_path_out(cls, slot)
+		elif kind.begins_with("node:"):
+			# lot H1 : « node:<de>:<vers> » (ponton de service)
+			var parts := kind.split(":")
+			p = Layout.fish_path_node(cls, slot, parts[1], parts[2])
 		else:
+			var to_g := kind == "back_g"
 			if fresh:
-				p = Layout.fish_path_back(cls, slot, Layout.fish_sea_entry(cls))
+				var se := Layout.fish_sea_entry(cls)
+				p = Layout.fish_path_back_g(se) if to_g else Layout.fish_path_back(cls, slot, se)
 			else:
 				var ho: Vector3 = Layout.fish_path_at(_path("out", cls, slot, false), 1.0)[1]
-				p = Layout.fish_path_back(cls, slot, Layout.fish_ground(cls, slot), Vector2(ho.x, ho.z).normalized())
+				var lead := Vector2(ho.x, ho.z).normalized()
+				p = Layout.fish_path_back_g(Layout.fish_ground(cls, slot), lead) if to_g else Layout.fish_path_back(cls, slot, Layout.fish_ground(cls, slot), lead)
 		_paths[key] = Layout.fish_weigh(p)
 	return _paths[key]
 
@@ -459,6 +510,9 @@ func boat_pose(i: int) -> Dictionary:
 	match ph:
 		Fishing.Phase.LAND, Fishing.Phase.WAIT:
 			return {"p": berth, "yaw": Layout.fish_berth_yaw(cls), "crab": false, "visible": true}
+		Fishing.Phase.QUEUE, Fishing.Phase.SERVE:
+			# lot H1 : au poste d'attente ou à la station, étrave au sud
+			return {"p": Layout.station_pos(String(bt.at), cls), "yaw": Layout.STATION_YAW, "crab": false, "visible": true}
 		Fishing.Phase.FISH:
 			if bool(v.fresh):
 				var se := Layout.fish_sea_entry(cls)
@@ -473,16 +527,28 @@ func boat_pose(i: int) -> Dictionary:
 			var tan := (-u * sin(a) + h * cos(a)).normalized()
 			return {"p": p, "yaw": yaw_of(tan), "crab": false, "visible": true}
 		_:
-			var wp := _path("out" if ph == Fishing.Phase.OUT else "back", cls, slot, bool(v.fresh))
+			var kind := "out"
+			var fresh := bool(v.fresh)
+			match ph:
+				Fishing.Phase.BACK:
+					kind = "back_g" if bool(bt.via) else "back"
+				Fishing.Phase.MOVE, Fishing.Phase.DOCK:
+					kind = "node:%s:%s" % [String(bt.at), "b" if ph == Fishing.Phase.DOCK else String(bt.to)]
+					fresh = false
+			var wp := _path(kind, cls, slot, fresh)
 			var e := Layout.fish_profile(f, minf(0.25, Layout.FISH_RAMP_S / maxf(0.5, dur)))
 			var at := Layout.fish_path_at(wp, e)
 			var crab := bool(at[2])
-			var yaw := Layout.fish_berth_yaw(cls) if crab else yaw_of(at[1])
+			var cy: Dictionary = wp.get("crab_yaw", {})
+			var yaw := (float(cy[int(at[3])]) if cy.has(int(at[3])) else Layout.fish_berth_yaw(cls)) if crab else yaw_of(at[1])
 			return {"p": at[0], "yaw": yaw, "crab": crab, "visible": true}
 
 
 func sync(delta: float) -> void:
 	_t += delta
+	for b in bursts:
+		b.t = float(b.t) + delta
+	bursts = bursts.filter(func(b: Dictionary) -> bool: return float(b.t) < 0.5)
 	if sim == null:
 		return
 	var f := sim.fishing
@@ -504,7 +570,7 @@ func _sync_boat(i: int, delta: float) -> void:
 	var v: Dictionary = boats[i]
 	var n: Node3D = v.node
 	var ph := int(bt.phase)
-	if bool(v.fresh) and (ph == Fishing.Phase.LAND or ph == Fishing.Phase.WAIT):
+	if bool(v.fresh) and ph != Fishing.Phase.FISH and ph != Fishing.Phase.BACK:
 		v.fresh = false
 	var pose := boat_pose(i)
 	n.visible = bool(pose.visible)
@@ -581,6 +647,34 @@ func _on_landed(i: int, amount: float, _manual: bool) -> void:
 		var bt: Dictionary = sim.fishing.boats[i]
 		var b := Layout.fish_berth(String(bt.cls), int(bt.slot))
 		popup.emit(b + Vector3(0, 3.0, 0), "+%s" % Fmt.money(amount), false)
+
+
+## Lot H1 — un service rendu au ponton : l'anneau éclate en « +X $ » au-dessus de la station (pièces vers le compteur : HUD).
+func _on_served(_i: int, st: String, amount: float) -> void:
+	services_shown += 1
+	bursts.append({"st": st, "t": 0.0})
+	if bursts.size() > 6:
+		bursts.pop_front()
+	served.emit(Layout.station_ring_point(st), amount, st)
+
+
+## Lot H1 — stations en service, pour la surcouche : [{st, p (point de l'anneau), prog (0–1), cls}] ; une station dont le
+## bateau attend la suivante (service payé) n'a plus d'anneau.
+func serving() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if sim == null:
+		return out
+	var f := sim.fishing
+	for st in f.stations():
+		var bi := f.station_boat(st)
+		if bi < 0 or bi >= f.boats.size() or bi >= boats.size():
+			continue
+		var bt: Dictionary = f.boats[bi]
+		if int(bt.phase) != Fishing.Phase.SERVE or bool(bt.done) or String(bt.at) != st:
+			continue
+		var prog := minf(1.0, f.progress(bi) + sub_t / maxf(0.1, float(bt.dur)))
+		out.append({"st": st, "p": Layout.station_ring_point(st), "prog": prog, "cls": String(bt.cls)})
+	return out
 
 
 ## Bateaux rentrés dont le loyer attend (bulle « Loyer »), visibles ; vide avec Marcel.

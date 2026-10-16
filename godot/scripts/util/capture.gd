@@ -19,6 +19,17 @@ static func schedule(node: Node) -> void:
 		return
 	var delay := float(a.get("delay", "5"))
 	await node.get_tree().create_timer(delay).timeout
+	# lot H1 : --capture-ring=fuel|wash|ice|any — on attend (30 s au plus) qu'un anneau de service soit à moitié rempli
+	if a.has("capture-ring"):
+		var want := String(a["capture-ring"])
+		var t0 := Time.get_ticks_msec()
+		var found := false
+		while not found and Time.get_ticks_msec() - t0 < 30000:
+			await node.get_tree().process_frame
+			for fv in node.get_tree().root.find_children("*", "FishingView", true, false):
+				for sv in (fv as FishingView).serving():
+					if (want == "any" or want == "1" or String(sv.st) == want) and float(sv.prog) > 0.35 and float(sv.prog) < 0.8:
+						found = true
 	await RenderingServer.frame_post_draw
 	var img := node.get_viewport().get_texture().get_image()
 	var path := String(a.capture)

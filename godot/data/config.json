@@ -24,7 +24,7 @@
                                  "text": "Sur le ponton de service : coques lavées, pêcheurs fidèles."},
                            "9": {"id": "ice", "name": "Fabrique de glace", "model": "ice_plant", "dur": 4.5, "station": true,
                                  "text": "Au pied du ponton de service : de la glace pour la cale, le poisson vaut plus cher."}}},
-    "stations": {"dur": 6.0, "decay": 0.88, "min": 2.0, "fee": 0.2, "approach": 5.0, "hold_in": 3.0, "hold_out": 3.5, "move": 3.0},
+    "stations": {"dur": 5.0, "decay": 0.88, "min": 2.0, "fee": 0.25, "engaged": 3, "approach": 5.0, "hold_in": 3.0, "hold_out": 3.5, "move": 3.0},
     "buildings": [
       {"id": "trawler", "name": "Quai des chalutiers", "cost": 50, "boats": {"trawler": 2}, "dur": 5.0, "icon": "ship",
        "text": "Deux chalutiers s'amarrent le long du cap : ils paient trois fois le loyer d'une barque."},
@@ -40,9 +40,9 @@
        "text": "De l'autre côté du cap, la friche et la vieille estacade d'Odette : signe la concession, et bâtis un port à conteneurs."}
     ],
     "boats": {
-      "dinghy":  {"name": "Barque",    "value": 5,  "out": 18, "fish": 6,  "back": 22, "land": 6,  "back_g": 14, "dock": 17},
-      "trawler": {"name": "Chalutier", "value": 15, "out": 32, "fish": 8,  "back": 36, "land": 14, "back_g": 18, "dock": 24},
-      "tuna":    {"name": "Thonier",   "value": 50, "out": 44, "fish": 10, "back": 50, "land": 16, "back_g": 22, "dock": 30}
+      "dinghy":  {"name": "Barque",    "value": 5,  "out": 18, "fish": 6,  "back": 22, "land": 6,  "back_g": 11, "dock": 16},
+      "trawler": {"name": "Chalutier", "value": 15, "out": 32, "fish": 8,  "back": 36, "land": 14, "back_g": 12, "dock": 22},
+      "tuna":    {"name": "Thonier",   "value": 50, "out": 44, "fish": 10, "back": 50, "land": 16, "back_g": 14, "dock": 28}
     }
   },
 

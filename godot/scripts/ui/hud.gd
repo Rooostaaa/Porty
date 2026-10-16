@@ -131,6 +131,7 @@ func _ready() -> void:
 		Sfx.play("coin", 0.05)
 		overlay.add_popup(p, t, UI.AMBER if big else UI.MONEY, big))
 	diorama.fish_paid.connect(_on_fish_paid)
+	diorama.fish_served.connect(_on_fish_served)
 	if diorama.has_signal("ship_paid"):
 		diorama.connect("ship_paid", _on_ship_paid)
 	bind(GameState.sim)
@@ -776,6 +777,25 @@ func _on_fish_paid(pos: Vector3, amount: float) -> void:
 	if money_l != null and diorama != null:
 		Fx.coins(diorama.to_screen(pos), Fx.center_of(money_l), 6, flash_money)
 	diorama.rig.shake(0.08)
+
+
+## Lot H1 — un service rendu au ponton de service : l'anneau éclate en « +X $ » au-dessus de la station, des pièces volent
+## vers le compteur (si la station est à l'écran), son de pièce.
+var fish_served_n := 0           # (tests) services montrés
+var fish_served_coins := 0       # (tests) dont avec pièces vers le compteur
+
+
+func _on_fish_served(pos: Vector3, amount: float, _station: String) -> void:
+	fish_served_n += 1
+	if overlay == null or not overlay.visible:
+		return
+	overlay.add_popup(pos, "+%s" % Fmt.money(amount), UI.MONEY, false)
+	Sfx.play("coin", 0.15)
+	if money_l != null and diorama != null:
+		var sp := diorama.to_screen(pos)
+		if Rect2(Vector2.ZERO, get_viewport_rect().size).grow(-20.0).has_point(sp):
+			fish_served_coins += 1
+			Fx.coins(sp, Fx.center_of(money_l), 3, flash_money)
 
 
 ## Lot G2 — un responsable des gestes se présente (après 5 gestes) : la narratrice le présente, RESPONSABLES rebondit.

@@ -1611,7 +1611,9 @@ static func sample_path(path: Array, step: float) -> Array[Vector3]:
 const ANSE_LOOK := Vector3(-117.0, 0.0, 40.0)
 const ANSE_ZOOM := 62.0
 ## Lot G1 — bornes de la caméra pendant la Crique (centre), zoom le plus large : les nuages aux bords, jamais le bord du monde.
-const CRIQUE_BOUNDS := Rect2(-128.0, 18.0, 24.0, 28.0)
+## Lot H1 : élargies vers l'ouest et le nord (x −146…−104, z 10…46 ; G1 : x −128…−104, z 18…46) pour suivre le ponton de
+## service, la jetée et la marina, de l'autre côté de l'anse.
+const CRIQUE_BOUNDS := Rect2(-146.0, 10.0, 42.0, 36.0)
 const CRIQUE_ZOOM_MAX := 72.0
 ## Lot G1 — le ponton des places (modèle pontoon : module 6 × 1,6 le long de X, plancher à +0,45 au-dessus de la flottaison) :
 ## un seul ponton le long de la plage, à z 48,4, qui part de x −140 et s'allonge vers l'est ; 9 places (niveau 1 = 2 barques,
@@ -1623,12 +1625,13 @@ const PLACES_MODULES := {1: 2, 2: 2, 3: 3, 4: 4, 5: 4, 6: 5, 7: 6, 8: 6}
 const PLACES_GANGWAY := [{"c": Vector2(-130, 52.2), "n": 1, "axis": "z"}, {"c": Vector2(-130, 58.2), "n": 1, "axis": "z"}]
 ## Bâtiments de l'anse (modèle, position, rotation Y en degrés) : les paliers nommés des Services (criée, pompe, lavage, glace),
 ## la cabane d'Odette (toujours là), l'état d'avant du ponton (ponton pourri), la grande jetée des thoniers (lot G1) et sa
-## passerelle, les modules de la marina.
+## passerelle, les modules de la marina. Lot H1 : la pompe et le lavage sont sur le ponton de service flottant (« float » : posés
+## sur son plancher), la fabrique de glace à terre au pied de sa passerelle ; la criée ne bouge pas.
 const ANSE_BUILDINGS := {
 	"hall": {"m": "fish_hall", "p": Vector3(-99.0, 0.0, 55.5), "ry": 0.0},
-	"fuel": {"m": "fuel_pump", "p": Vector3(-107.0, 0.0, 54.0), "ry": 0.0},
-	"wash": {"m": "wash_bay", "p": Vector3(-118.0, 0.0, 59.5), "ry": 0.0},
-	"ice": {"m": "ice_plant", "p": Vector3(-88.5, 0.0, 28.0), "ry": 90.0},
+	"fuel": {"m": "fuel_pump", "p": Vector3(-152.4, 0.0, 23.0), "ry": 0.0, "float": true},
+	"wash": {"m": "wash_bay", "p": Vector3(-152.83, 0.0, 31.0), "ry": 90.0, "float": true},
+	"ice": {"m": "ice_plant", "p": Vector3(-151.0, 0.0, 58.0), "ry": 0.0},
 }
 const ODETTE_HUT := {"m": "odette_hut", "p": Vector3(-127.0, 0.0, 62.5), "ry": 0.0}
 const ANSE_RUIN := {"m": "pontoon_ruin", "p": Vector3(-134.0, -1.0, 48.4), "ry": 0.0}
@@ -1636,13 +1639,64 @@ const ANSE_RUIN := {"m": "pontoon_ruin", "p": Vector3(-134.0, -1.0, 48.4), "ry":
 const TRAWLER_QUAY := {"c": Vector2(-95.6, 31.0), "n": 5, "axis": "z"}
 const PIER := {"m": "pier_long", "p": Vector3(-96.0, 0.0, 7.0), "ry": 90.0, "size": Vector2(2.5, 14.0)}
 const PIER_GANGWAY := {"c": Vector2(-92.0, 1.0), "n": 1, "axis": "x"}
-## Marina : modules flottants 10 × 1,8 (axe z) dans l'intérieur de la boucle des bateaux (jamais traversé) ; 8 anneaux par
-## module, voiliers des deux côtés (longueur le long de x) ; la marina, puis ses deux extensions.
+## Marina : modules flottants 10 × 1,8 (axe z), 8 anneaux par module, voiliers des deux côtés (longueur le long de x) ; la
+## marina, puis ses deux extensions. Lot H1 : de l'autre côté de l'anse, à l'ouest de la jetée de séparation (la plaisance ne
+## croise jamais la boucle des bateaux de pêche) ; avant (G1) : dans l'intérieur de la boucle.
 const MARINA_MODULES := {
-	"marina": [{"c": Vector2(-125, 36), "n": 1, "axis": "z"}],
-	"marina2": [{"c": Vector2(-125, 26), "n": 1, "axis": "z"}],
-	"marina3": [{"c": Vector2(-113, 36), "n": 1, "axis": "z"}],
+	"marina": [{"c": Vector2(-166.1, 15), "n": 1, "axis": "z"}],
+	"marina2": [{"c": Vector2(-166.1, 4), "n": 1, "axis": "z"}],
+	"marina3": [{"c": Vector2(-178.1, -6), "n": 1, "axis": "z"}],
 }
+## Lot H1 — la jetée de séparation (4 segments `breakwater` de 12,53 u, axe z, sans feu vert) : de la plage ouest (z 46) vers le
+## nord (z −4) ; à l'est la pêche, à l'ouest la marina. Le ponton de service (radeau de 3 × 5 modules `pontoon`, 4,8 × 30 u) est
+## amarré le long de son flanc est, sa passerelle (1 module) rejoint la plage au pied de la fabrique de glace. Les bateaux de
+## pêche s'amarrent à l'est du radeau (postes `STATION_Z`), depuis la voie ouest (x −146) : point de décision `FISH_GATE`,
+## poste d'attente au nord du radeau, sur la ligne des postes (hors de la voie).
+const JETTY_X := -157.21
+const JETTY_Z := Vector2(-4.0, 46.12)
+const JETTY_W := 3.96
+const RAFT_X := Vector2(-155.23, -150.43)        # flancs ouest et est du radeau
+const RAFT_Z := Vector2(14.0, 44.0)
+const RAFT_WALK := {"c": Vector2(-151.23, 47.6), "n": 1, "axis": "z"}
+const STATION_Z := {"fuel": 23.0, "wash": 31.0, "ice": 39.0}
+const FISH_GATE_Z := 14.0
+const FISH_HOLD_Z := 14.0
+const STATION_GAP := 0.2                          # entre le radeau et la coque
+const FISH_BEAM := {"dinghy": 0.52, "trawler": 1.1, "tuna": 1.43}
+
+
+## Abscisse du centre d'un bateau amarré au radeau (poste de station ou d'attente).
+static func station_x(cls: String) -> float:
+	return RAFT_X.y + STATION_GAP + float(FISH_BEAM.get(cls, 1.0))
+
+
+## Poste d'un bateau : station (« fuel », « wash », « ice »), attente (« h ») ou point de décision (« g »).
+static func station_pos(id: String, cls: String) -> Vector3:
+	match id:
+		"g":
+			return Vector3(FISH_LANE_W, 0, FISH_GATE_Z)
+		"h":
+			return Vector3(station_x(cls), 0, FISH_HOLD_Z)
+	return Vector3(station_x(cls), 0, float(STATION_Z.get(id, 23.0)))
+
+
+## Point de l'anneau d'une station (au-dessus du bord du radeau, à côté du bateau servi).
+static func station_ring_point(id: String) -> Vector3:
+	return Vector3(RAFT_X.y - 0.6, 4.0, float(STATION_Z.get(id, 23.0)))
+
+
+## Cap d'un bateau au ponton de service : étrave au sud (il descend la voie ouest).
+const STATION_YAW := -PI * 0.5
+
+
+static func jetty_rect() -> Rect2:
+	return Rect2(JETTY_X - JETTY_W * 0.5, JETTY_Z.x, JETTY_W, JETTY_Z.y - JETTY_Z.x)
+
+
+static func raft_rect() -> Rect2:
+	return Rect2(RAFT_X.x, RAFT_Z.x, RAFT_X.y - RAFT_X.x, RAFT_Z.y - RAFT_Z.x)
+
+
 const MARINA_MODULE := Vector2(10.0, 1.8)
 ## Route du mareyeur (construite avec la criée) : de la criée à la rue du village, puis sous les arbres (village_w).
 const FISH_ROAD := Rect2(-102, 59, 6, 37)
@@ -1737,6 +1791,54 @@ static func fish_path_back(cls: String, slot: int, from: Vector2, lead := Vector
 	return {"pts": pts, "crab": [pts.size() - 2]}
 
 
+## Lot H1 — retour par le ponton de service : du coin de pêche (ou de l'arrivée du large) au point de décision `FISH_GATE` de la
+## voie ouest (mêmes premiers tronçons que `fish_path_back`).
+static func fish_path_back_g(from: Vector2, lead := Vector2.ZERO) -> Dictionary:
+	var raw: Array[Vector3] = [Vector3(from.x, 0, from.y)]
+	if lead != Vector2.ZERO:
+		raw.append(Vector3(from.x + lead.x * 6.0, 0, from.y + lead.y * 6.0))
+	raw.append(Vector3(FISH_LANE_W, 0, minf(from.y + 6.0, 10.0)))
+	raw.append(Vector3(FISH_LANE_W, 0, FISH_GATE_Z))
+	return {"pts": _round_corners(raw, 1, raw.size() - 1, FISH_TURN_R), "crab": []}
+
+
+## Lot H1 — trajet d'un nœud du ponton de service à un autre {pts, crab, crab_yaw} : « g » (point de décision), « h » (poste
+## d'attente), une station, « b » (la place). Glissements latéraux étrave au sud (cap tenu) pour s'amarrer au radeau et s'en
+## écarter ; d'une station à la suivante, le long du radeau ; vers la place, la voie ouest puis le trajet de retour habituel.
+static func fish_path_node(cls: String, slot: int, from_id: String, to_id: String) -> Dictionary:
+	var a := station_pos(from_id, cls)
+	var cy := {}
+	if to_id != "b":
+		var t := station_pos(to_id, cls)
+		var pts: Array[Vector3] = [a]
+		var crab: Array = []
+		if from_id == "g":
+			pts.append(Vector3(t.x, 0, a.z))
+			crab.append(0)
+			cy[0] = STATION_YAW
+		pts.append(t)
+		return {"pts": _dedup(pts), "crab": crab, "crab_yaw": cy}
+	var b := fish_berth(cls, slot)
+	var raw: Array[Vector3] = [a]
+	var crab2: Array = []
+	if from_id != "g":
+		raw.append(Vector3(FISH_LANE_W, 0, a.z))
+	raw.append(Vector3(FISH_LANE_W, 0, FISH_LANE_BEACH))
+	if cls == "dinghy":
+		raw.append(Vector3(b.x, 0, FISH_LANE_BEACH))
+	else:
+		raw.append(Vector3(FISH_LANE_E, 0, FISH_LANE_BEACH))
+		raw.append(Vector3(FISH_LANE_E, 0, b.z))
+	raw.append(b)
+	var i0 := 2 if from_id != "g" else 1
+	var pts2 := _round_corners(raw, i0, raw.size() - 2, FISH_TURN_R)
+	if from_id != "g":
+		crab2.append(0)
+		cy[0] = STATION_YAW
+	crab2.append(pts2.size() - 2)
+	return {"pts": pts2, "crab": crab2, "crab_yaw": cy}
+
+
 ## Arrondit les coins d'indices [i0, i1[ d'une polyligne (rayon r) ; les autres coins restent vifs (glissements).
 static func _round_corners(raw: Array[Vector3], i0: int, i1: int, r: float) -> Array[Vector3]:
 	var out: Array[Vector3] = []
@@ -1814,6 +1916,10 @@ static func anse_obstacles() -> Array[Rect2]:
 		for pd in anse_pontoons(id):
 			out.append(pontoon_rect(pd))
 	out.append(pier_rect())
+	# lot H1 : la jetée de séparation, le ponton de service et sa passerelle
+	out.append(jetty_rect())
+	out.append(raft_rect())
+	out.append(pontoon_rect(RAFT_WALK))
 	for id in MARINA_MODULES:
 		for md in MARINA_MODULES[id]:
 			out.append(marina_rect(md).grow_individual(5.4, 0.8, 5.4, 0.8))      # les voiliers des deux côtés (3,5 u, étrave au ponton)
@@ -1854,9 +1960,17 @@ static func anse_site_spec(key: String, cfg: Dictionary = {}) -> Dictionary:
 			w = d
 			d = tmp
 		var p: Vector3 = bd.p
-		rects.append([Rect2(p.x - w * 0.5, p.z - d * 0.5, w, d), "hoarding"])
-		machine = "excavator"
-		mp = Vector3(p.x + w * 0.5 + 3.0, 0, p.z + 2.0)
+		if bool(bd.get("float", false)):
+			# lot H1 : sur le ponton de service (sur l'eau : éclaboussures) ; la pompe amène la jetée, le radeau et sa passerelle
+			rects.append([Rect2(p.x - w * 0.5, p.z - d * 0.5, w, d), "water"])
+			if String(nl.id) == "fuel":
+				rects.append([jetty_rect(), "water"])
+				rects.append([raft_rect(), "water"])
+				rects.append([pontoon_rect(RAFT_WALK), "water"])
+		else:
+			rects.append([Rect2(p.x - w * 0.5, p.z - d * 0.5, w, d), "hoarding"])
+			machine = "excavator"
+			mp = Vector3(p.x + w * 0.5 + 3.0, 0, p.z + 2.0)
 		if String(nl.id) == "hall":
 			rects.append([FISH_ROAD, "none"])
 		dur = float(nl.get("dur", 4.5))
@@ -1928,7 +2042,7 @@ static func fish_weigh(p: Dictionary) -> Dictionary:
 		var k := FISH_CRAB_WEIGHT if crab.has(i) else 1.0
 		w.append(k)
 		cum.append(cum[-1] + (pts[i] as Vector3).distance_to(pts[i + 1]) * k)
-	return {"pts": pts, "crab": crab, "cum": cum, "w": w, "len": cum[-1]}
+	return {"pts": pts, "crab": crab, "cum": cum, "w": w, "len": cum[-1], "crab_yaw": p.get("crab_yaw", {})}
 
 
 ## Profil trapézoïdal (0–1 → 0–1) : rampes de `r` au départ et à l'arrivée, vitesse constante entre les deux.
@@ -1954,5 +2068,5 @@ static func fish_path_at(wp: Dictionary, e: float) -> Array:
 			var b: Vector3 = pts[i + 1]
 			var seg := float(cum[i + 1]) - float(cum[i])
 			var f := clampf((target - float(cum[i])) / maxf(0.0001, seg), 0.0, 1.0)
-			return [a.lerp(b, f), (b - a).normalized(), (wp.crab as Array).has(i)]
-	return [pts[-1], Vector3.RIGHT, false]
+			return [a.lerp(b, f), (b - a).normalized(), (wp.crab as Array).has(i), i]
+	return [pts[-1], Vector3.RIGHT, false, pts.size() - 2]

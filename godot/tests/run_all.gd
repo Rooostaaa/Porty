@@ -84,6 +84,7 @@ func _part3(db: DataDB) -> void:
 	test_f2(db)
 	test_f3(db)
 	test_g2(db)
+	test_h1(db)
 
 
 func test_format() -> void:
@@ -2726,10 +2727,11 @@ func test_f3(db: DataDB) -> void:
 	t1d.boost_ready_at = 100.0
 	var mg2 := PortSim.new(db)
 	mg2.from_dict(t1d)
-	check(int(vmap.get("VERSION", 0)) >= 7 and dd.has("act0") and int(dd.act0.get("v", 0)) == 7 and same and restart \
+	# (lot H1, recalé : la clé « act0 » passe en v9 — ponton de service ; la migration v6 reste)
+	check(int(vmap.get("VERSION", 0)) >= 7 and dd.has("act0") and int(dd.act0.get("v", 0)) == 9 and same and restart \
 		and not mg.fishing.act0 and mg.fishing.maxed() and mg.fishing.marcel and mg.fishing.has("concession") and mg.fishing.boats.size() == 12 and not mg.act0_ready() \
 		and not mg2.fishing.act0 and mg2.fishing.maxed() and is_equal_approx(mg2.boost_ready_at, 320.0) and mg2.fishing.act0_time == 220.0,
-		"G1 sauvegarde v7 : aller-retour en pleine Crique (niveau %d/%d, %d bateaux, même suite) ; v6 en cours d'acte 0 → la Crique recommence (%s) ; v6 au T1 → Crique finie (plafond, Marcel, Concession, Heures sup décalées)" % [
+		"G1 sauvegarde v7 (act0 v9 depuis H1) : aller-retour en pleine Crique (niveau %d/%d, %d bateaux, même suite) ; v6 en cours d'acte 0 → la Crique recommence (%s) ; v6 au T1 → Crique finie (plafond, Marcel, Concession, Heures sup décalées)" % [
 		sl.fishing.places, sl.fishing.services, sl.fishing.boats.size(), restart])
 	# 8. nouvelle concession : la pêche est reprise au plafond, la Crique ne se rejoue pas
 	var fin := PortSim.new(db, 2)
@@ -3041,8 +3043,8 @@ func test_g2(db: DataDB) -> void:
 	lg.from_dict(t1d)
 	var vre := RegEx.create_from_string("const VERSION := (\\d+)").search(FileAccess.get_file_as_string("res://autoload/save.gd"))
 	check(sl.g2 and sl.built == ["platform", "quay1"] and int(sl.gestures.berth) == 3 and sl.mgr_offered.has("berths") and sl.berths.size() == 1 \
-		and not lg.g2 and lg.built.slice(0, 6) == PortSim.STARTERS and lg.feature("dept_cranes") and vre != null and int(vre.get_string(1)) == 8,
-		"G2 sauvegarde v8 : régime manuel rechargé (friche, gestes, offres) ; partie d'avant G2 au T1 = port complet")
+		and not lg.g2 and lg.built.slice(0, 6) == PortSim.STARTERS and lg.feature("dept_cranes") and vre != null and int(vre.get_string(1)) == 9,
+		"G2 sauvegarde v8 (fichier v9 depuis H1) : régime manuel rechargé (friche, gestes, offres) ; partie d'avant G2 au T1 = port complet")
 	# 13. le bot joue le terre-plein : jalons depuis la Concession (premier camion, responsables, grue mobile, parc), sans perte
 	var jal: Array[String] = []
 	var bot_ok := true
@@ -3059,3 +3061,279 @@ func test_g2(db: DataDB) -> void:
 		bot_ok = bot_ok and ms.has("Premier camion") and ms.has("Responsable embauché : Tonio Ferrer") and ms.has("Bâtiment : Parc de stockage") \
 			and float(ms["Premier camion"]) < 300.0 and bs.managers_count() >= 3
 	check(bot_ok, "G2 bot : le premier navire à la main puis les responsables en 10 min (%s)" % "; ".join(jal))
+
+
+## Lot H1 — la Crique : services sur l'eau (ponton de service flottant amarré à une jetée), l'anneau du service (un bateau
+## qui rentre s'amarre à chaque station bâtie, le service dure puis se paie), l'amélioration qui raccourcit le service, la file
+## (un bateau à la fois par station, poste d'attente, tour passé), la marina séparée de la pêche par la jetée, la sauvegarde v9.
+func test_h1(db: DataDB) -> void:
+	print("[lot H1 — ponton de service, anneau, pêche et plaisance séparées]")
+	var fc: Dictionary = db.cfg("fishing")
+	# 1. un bateau rentré passe à la station : retour par le point de décision, amarré à la pompe, servi, payé, puis sa place
+	var s := PortSim.new(db, 11)
+	s.begin_act0()
+	s.money = 1.0e4
+	s.buy_fish_places(1)
+	s.buy_fish_services(3)
+	s.fishing.marcel_offered = true
+	s.hire_marcel()
+	var f := s.fishing
+	var seen := {}
+	var pays: Array = []
+	var both := 0
+	var prog_up := true
+	var last_prog := {}
+	s.fish_served.connect(func(i: int, st: String, a: float) -> void: pays.append([i, st, a]))
+	for k in 800:
+		s.step(0.25)
+		var at_fuel := 0
+		for i in f.boats.size():
+			var bt: Dictionary = f.boats[i]
+			var key := "%d|%s|%s" % [int(bt.phase), String(bt.at), String(bt.to)]
+			seen[key] = true
+			if int(bt.phase) == Fishing.Phase.SERVE and String(bt.at) == "fuel":
+				at_fuel += 1
+				var pr := f.progress(i)
+				if last_prog.has(i) and pr + 1e-6 < float(last_prog[i]) and pr > 0.0:
+					prog_up = false
+				last_prog[i] = pr
+			else:
+				last_prog.erase(i)
+		if at_fuel > 1:
+			both += 1
+	var via_ok := seen.has("%d|sea|g" % Fishing.Phase.BACK) and seen.has("%d|g|fuel" % Fishing.Phase.MOVE) and seen.has("%d|fuel|fuel" % Fishing.Phase.SERVE) \
+		and seen.has("%d|fuel|b" % Fishing.Phase.DOCK)
+	var fee0 := float(fc.boats.dinghy.value) * float(fc.stations.fee)
+	var paid_ok := pays.size() >= 3 and absf(float(pays[0][2]) - fee0) < 0.01 and String(pays[0][1]) == "fuel" and f.served == pays.size()
+	check(via_ok and paid_ok and both == 0 and prog_up and f.landings > 0,
+		"H1 service : un bateau rentré passe par le point de décision, s'amarre à la pompe, est servi (anneau qui monte : %s), paie %s à la fin (%d services, %s), puis gagne sa place ; jamais deux bateaux à la pompe (%d)" % [
+		prog_up, Fmt.money(fee0), pays.size(), via_ok, both])
+	# 2. l'amélioration rend le service plus rapide (durée par niveau, bornée) ; la durée mesurée d'un service la suit ; le
+	# service se paie au multiplicateur des Heures sup comme le loyer
+	var durs: Array[float] = []
+	for lv in range(3, 11):
+		durs.append(f.service_dur(lv))
+	var faster := true
+	for k in durs.size() - 1:
+		faster = faster and durs[k + 1] < durs[k] - 1e-6 or (durs[k + 1] <= float(fc.stations.min) + 1e-6)
+	var lv3 := f.service_dur(3)
+	var lv10 := f.service_dur(10)
+	var sv := PortSim.new(db, 11)
+	sv.begin_act0()
+	sv.money = 1.0e5
+	sv.buy_fish_places(1)
+	sv.buy_fish_services(10)
+	sv.fishing.marcel_offered = true
+	sv.hire_marcel()
+	var durs_seen: Array[float] = []
+	for k in 800:
+		sv.step(0.25)
+		for bt in sv.fishing.boats:
+			if int(bt.phase) == Fishing.Phase.SERVE and not bool(bt.done) and not durs_seen.has(float(bt.dur)):
+				durs_seen.append(float(bt.dur))
+	check(faster and absf(lv3 - float(fc.stations.dur)) < 0.01 and lv10 < lv3 * 0.6 and lv10 >= float(fc.stations.min) - 1e-6 \
+		and durs_seen.size() >= 1 and absf(durs_seen[0] - lv10) < 0.01 and sv.fishing.stations() == ["fuel", "wash", "ice"],
+		"H1 amélioration : le service raccourcit à chaque niveau (%s s au niv. 3 → %s s au niv. 10), durée mesurée %s s ; trois stations au niv. 10 (%s)" % [
+		Fmt.num(lv3), Fmt.num(lv10), Fmt.num(durs_seen[0] if not durs_seen.is_empty() else -1.0), str(sv.fishing.stations())])
+	# 3. la file : une station sert un bateau à la fois ; poste d'attente, sinon le bateau rentre droit (tour passé) ; jamais
+	# deux bateaux au même poste ; à pleine flotte et service lent, l'attente sert
+	var q := PortSim.new(db, 5)
+	q.begin_act0()
+	q.money = 1.0e5
+	q.buy_fish_places(8)
+	for bid in ["trawler", "pier"]:
+		q.buy_fish_building(bid)
+	q.buy_fish_services(3)
+	q.fishing.marcel_offered = true
+	q.hire_marcel()
+	var dbl := 0
+	var queued := 0
+	var hold_bad := 0
+	for k in 2400:
+		q.step(0.25)
+		var per := {}
+		var nq := 0
+		for i in q.fishing.boats.size():
+			var bt: Dictionary = q.fishing.boats[i]
+			if int(bt.phase) == Fishing.Phase.SERVE:
+				per[String(bt.at)] = int(per.get(String(bt.at), 0)) + 1
+			if int(bt.phase) == Fishing.Phase.QUEUE:
+				nq += 1
+		for st in per:
+			if int(per[st]) > 1:
+				dbl += 1
+		if nq > 1:
+			hold_bad += 1
+		queued = maxi(queued, nq)
+	check(dbl == 0 and hold_bad == 0 and queued == 1 and q.fishing.served > 50 and q.fishing.rents_lost == 0,
+		"H1 file : un bateau à la fois par station (%d doublons), un seul au poste d'attente (%d), l'attente sert (%d), %d services, %d tours passés en 10 min" % [
+		dbl, hold_bad, queued, q.fishing.served, q.fishing.skipped])
+	# 4. les stations sont sur l'eau : pompe et lavage posés sur le ponton de service (flottant, jamais sur la terre ferme), les
+	# postes des bateaux sur l'eau, le long du radeau ; la criée et la glace à terre, la glace au pied de la passerelle
+	var water_bad: Array[String] = []
+	for id in ["fuel", "wash"]:
+		var bd: Dictionary = Layout.ANSE_BUILDINGS[id]
+		var p: Vector3 = bd.p
+		var fp: Array = Assets.meta(String(bd.m)).get("footprint", [2.0, 2.0])
+		var w := float(fp[0])
+		var d := float(fp[1])
+		if absf(float(bd.ry)) > 45.0:
+			var tmp := w
+			w = d
+			d = tmp
+		var r := Rect2(p.x - w * 0.5, p.z - d * 0.5, w, d)
+		if not bool(bd.get("float", false)) or not Layout.raft_rect().grow(0.05).encloses(r):
+			water_bad.append(id + " hors du radeau")
+		for c in [r.position, r.end, Vector2(r.position.x, r.end.y), Vector2(r.end.x, r.position.y), r.get_center()]:
+			if Layout.any_land(c):
+				water_bad.append(id + " sur la terre ferme")
+	for c in [Layout.raft_rect().position, Layout.raft_rect().end, Layout.raft_rect().get_center()]:
+		if Layout.any_land(c):
+			water_bad.append("radeau à terre")
+	for cls in Layout.FISH_BEAM:
+		for st in ["fuel", "wash", "ice", "h"]:
+			var sp := Layout.station_pos(st, cls)
+			if Layout.any_land(Vector2(sp.x, sp.z)) or Layout.raft_rect().grow(float(Layout.FISH_BEAM[cls]) - 0.05).has_point(Vector2(sp.x, sp.z)):
+				water_bad.append("poste %s %s" % [st, cls])
+	var ice_p: Vector3 = Layout.ANSE_BUILDINGS.ice.p
+	var hall_p: Vector3 = Layout.ANSE_BUILDINGS.hall.p
+	var walk := Layout.pontoon_rect(Layout.RAFT_WALK)
+	var land_ok := Layout.any_land(Vector2(ice_p.x, ice_p.z)) and Layout.any_land(Vector2(hall_p.x, hall_p.z)) \
+		and Vector2(ice_p.x, ice_p.z).distance_to(Vector2(walk.get_center().x, walk.end.y)) < 12.0 and Layout.any_land(Vector2(Layout.JETTY_X, Layout.JETTY_Z.y - 0.5))
+	check(water_bad.is_empty() and land_ok,
+		"H1 services sur l'eau : pompe et lavage sur le ponton de service flottant, postes sur l'eau le long du radeau (%s) ; criée et glace à terre, la glace au pied de la passerelle, la jetée part de la plage (%s)" % [
+		str(water_bad.slice(0, 3)), land_ok])
+	# 5. pêche et plaisance séparées : la marina à l'ouest de la jetée (voiliers sur l'eau, jamais à terre), aucun trajet de pêche
+	# à l'ouest de la jetée ni près de la marina ; la jetée couvre la marina sur toute sa longueur côté sud
+	var jr := Layout.jetty_rect()
+	var sep_bad: Array[String] = []
+	var mrects: Array[Rect2] = []
+	for id in Layout.MARINA_MODULES:
+		for md in Layout.MARINA_MODULES[id]:
+			var mr := Layout.marina_rect(md).grow_individual(5.75, 0.8, 5.75, 0.8)
+			mrects.append(mr)
+			if mr.end.x > jr.position.x + 0.01:
+				sep_bad.append("%s à l'est de la jetée" % id)
+			for sl in Layout.marina_slots(md):
+				var sp: Vector3 = sl.p
+				for dx in [-2.3, 0.0, 2.3]:
+					if Layout.any_land(Vector2(sp.x + dx, sp.z)):
+						sep_bad.append("voilier à terre (%d, %d)" % [int(sp.x), int(sp.z)])
+	var near_m := INF
+	var n_pts := 0
+	for cls in Layout.FISH_BERTHS:
+		for slot in (Layout.FISH_BERTHS[cls] as Array).size():
+			var po: Array = Layout.fish_path_out(cls, slot).pts
+			var lead := Vector2((po[-1] as Vector3).x - (po[-2] as Vector3).x, (po[-1] as Vector3).z - (po[-2] as Vector3).z).normalized()
+			var paths := [Layout.fish_path_out(cls, slot), Layout.fish_path_back(cls, slot, Layout.fish_ground(cls, slot), lead),
+				Layout.fish_path_back_g(Layout.fish_ground(cls, slot), lead), Layout.fish_path_back_g(Layout.fish_sea_entry(cls))]
+			for a in ["g", "h", "fuel", "wash", "ice"]:
+				for b in ["h", "fuel", "wash", "ice", "b"]:
+					if a != b and not (a == "h" and b == "h"):
+						paths.append(Layout.fish_path_node(cls, slot, a, b))
+			for pth in paths:
+				for p in Layout.sample_path(pth.pts, 0.8):
+					n_pts += 1
+					var p2 := Vector2(p.x, p.z)
+					for mr in mrects:
+						near_m = minf(near_m, mr.grow(0.0).get_center().distance_to(p2) - mr.size.length() * 0.5)
+						if mr.grow(float(Layout.FISH_BEAM[cls])).has_point(p2):
+							sep_bad.append("%s %d dans la marina (%d, %d)" % [cls, slot, int(p.x), int(p.z)])
+					if p2.y > jr.position.y and p2.y < jr.end.y and p2.x < jr.end.x:
+						sep_bad.append("%s %d à l'ouest de la jetée (%d, %d)" % [cls, slot, int(p.x), int(p.z)])
+	var marina_z := Vector2(INF, -INF)
+	for mr in mrects:
+		marina_z = Vector2(minf(marina_z.x, mr.position.y), maxf(marina_z.y, mr.end.y))
+	check(sep_bad.is_empty() and jr.end.y >= marina_z.y and n_pts > 1000,
+		"H1 pêche et plaisance séparées : marina à l'ouest de la jetée, voiliers sur l'eau, aucun des %d points des trajets de pêche dans la marina ni à l'ouest de la jetée (%s) ; jetée jusqu'à z %d (marina z %d…%d)" % [
+		n_pts, str(sep_bad.slice(0, 3)), int(jr.end.y), int(marina_z.x), int(marina_z.y)])
+	# 6. trajets du ponton de service : ni terre ni ouvrage (hors des postes), dans le trou des nuages, ≤ 6 u/s aux durées de
+	# la configuration, cap tenu au sud quand le bateau glisse vers le radeau
+	var bad: Array[String] = []
+	var spd_max := 0.0
+	var spd_at := ""
+	var rects := Layout.anse_obstacles()
+	var sc: Dictionary = fc.stations
+	for cls in Layout.FISH_BERTHS:
+		var bdef: Dictionary = fc.boats[cls]
+		for slot in (Layout.FISH_BERTHS[cls] as Array).size():
+			var po2: Array = Layout.fish_path_out(cls, slot).pts
+			var lead2 := Vector2((po2[-1] as Vector3).x - (po2[-2] as Vector3).x, (po2[-1] as Vector3).z - (po2[-2] as Vector3).z).normalized()
+			var legs := {"back_g": [Layout.fish_path_back_g(Layout.fish_ground(cls, slot), lead2), float(bdef.back_g)],
+				"arrivée_g": [Layout.fish_path_back_g(Layout.fish_sea_entry(cls)), float(bdef.back_g)],
+				"g→fuel": [Layout.fish_path_node(cls, slot, "g", "fuel"), float(sc.approach)],
+				"g→h": [Layout.fish_path_node(cls, slot, "g", "h"), float(sc.hold_in)],
+				"h→fuel": [Layout.fish_path_node(cls, slot, "h", "fuel"), float(sc.hold_out)],
+				"fuel→wash": [Layout.fish_path_node(cls, slot, "fuel", "wash"), float(sc.move)],
+				"wash→ice": [Layout.fish_path_node(cls, slot, "wash", "ice"), float(sc.move)],
+				"g→b": [Layout.fish_path_node(cls, slot, "g", "b"), float(bdef.dock)],
+				"fuel→b": [Layout.fish_path_node(cls, slot, "fuel", "b"), float(bdef.dock)],
+				"wash→b": [Layout.fish_path_node(cls, slot, "wash", "b"), float(bdef.dock)],
+				"ice→b": [Layout.fish_path_node(cls, slot, "ice", "b"), float(bdef.dock)]}
+			for kn in legs:
+				var pth2: Dictionary = legs[kn][0]
+				var dur := float(legs[kn][1])
+				var wp := Layout.fish_weigh(pth2)
+				var vpk := float(wp.len) / dur * (1.0 / (1.0 - minf(0.25, Layout.FISH_RAMP_S / dur)))
+				if vpk > spd_max:
+					spd_max = vpk
+					spd_at = "%s %s %d" % [cls, kn, slot]
+				for cy in (pth2.get("crab_yaw", {}) as Dictionary):
+					if not (pth2.crab as Array).has(cy):
+						bad.append("%s %s : cap de glissement sans glissement" % [cls, kn])
+				for p in Layout.sample_path(pth2.pts, 0.8):
+					var p2 := Vector2(p.x, p.z)
+					if Layout.any_land(p2):
+						bad.append("%s %s %d à terre (%d, %d)" % [cls, kn, slot, int(p.x), int(p.z)])
+					if not Layout.in_cloud_hole(p2):
+						bad.append("%s %s %d sous les nuages" % [cls, kn, slot])
+					var at_post := false
+					for st in ["fuel", "wash", "ice", "h"]:
+						var sp2 := Layout.station_pos(st, cls)
+						if p2.distance_to(Vector2(sp2.x, sp2.z)) < 4.4 and absf(p2.x - sp2.x) < 0.05:
+							at_post = true
+					var bb := Layout.fish_berth(cls, slot)
+					if p2.distance_to(Vector2(bb.x, bb.z)) < 2.0:
+						at_post = true
+					for r in rects:
+						if r.grow(float(Layout.FISH_BEAM[cls]) - 0.05).has_point(p2) and not at_post:
+							bad.append("%s %s %d sur un ouvrage (%d, %d)" % [cls, kn, slot, int(p.x), int(p.z)])
+	check(bad.is_empty() and spd_max <= 6.0,
+		"H1 trajets du ponton de service : ni terre ni ouvrage ni nuages (%s), vitesse au plus %s u/s (%s)" % [str(bad.slice(0, 3)), Fmt.num(spd_max), spd_at])
+	# 7. sauvegarde v9 : aller-retour avec un bateau à une station et un autre à l'attente (même suite) ; une partie v8 (sans
+	# état des stations, bateaux dans les phases de G1) se charge et repart
+	var a := PortSim.new(db, 5)
+	a.begin_act0()
+	a.money = 1.0e5
+	a.buy_fish_places(8)
+	a.buy_fish_building("trawler")
+	a.buy_fish_services(3)
+	a.fishing.marcel_offered = true
+	a.hire_marcel()
+	var guard := 0
+	while guard < 4000 and not (a.fishing.hold >= 0 and not a.fishing.station_free("fuel")):
+		a.step(0.25)
+		guard += 1
+	var dd: Dictionary = JSON.parse_string(JSON.stringify({"sim": a.to_dict()})).sim
+	var b := PortSim.new(db)
+	b.from_dict(dd)
+	var same := b.fishing.hold == a.fishing.hold and b.fishing.station_boat("fuel") == a.fishing.station_boat("fuel") and int(dd.act0.v) == 9
+	for k in 400:
+		a.step(0.25)
+		b.step(0.25)
+	same = same and is_equal_approx(a.money, b.money) and a.fishing.served == b.fishing.served and a.fishing.landings == b.fishing.landings
+	var v8: Dictionary = JSON.parse_string(JSON.stringify(a.to_dict()))
+	var bl: Array = []
+	for bt in (v8.act0.boats as Array):
+		bl.append({"cls": bt.cls, "slot": bt.slot, "phase": mini(int(bt.phase), Fishing.Phase.WAIT) if int(bt.phase) <= Fishing.Phase.WAIT else Fishing.Phase.BACK, "t": bt.t, "dur": bt.dur, "paid": bt.paid, "amount": bt.amount})
+	v8.act0.boats = bl
+	v8.act0.v = 7
+	v8.act0.erase("occ")
+	v8.act0.erase("hold")
+	var c8 := PortSim.new(db)
+	c8.from_dict(v8)
+	var m8 := c8.money
+	for k in 800:
+		c8.step(0.25)
+	check(guard < 4000 and same and c8.fishing.hold <= 0 and c8.money > m8 and c8.fishing.served > 0,
+		"H1 sauvegarde v9 : aller-retour avec un bateau à la pompe et un à l'attente (même suite : %s) ; une partie v8 se charge, les stations repartent (%d services)" % [same, c8.fishing.served])

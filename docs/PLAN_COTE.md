@@ -170,18 +170,32 @@ restent au sud de z −35 : **≥ 40 u du mouillage et de l'arrivée des cargos*
 - **Quai des chalutiers** (50 $) : le long du cap, x −95,6, z 16…46 ; chalutiers (étrave au nord) en (−98 ; 40,5) et (−98 ; 31,5).
 - **Grande jetée** (90 $, `pier_long` 14 × 2,5, béton sur pieux) : axe z en (−96 ; 7), z 0…14 ; passerelle (`pontoon`) vers le
   flanc en (−92 ; 1) ; **thonier** sur son flanc ouest en (−99,5 ; 7), étrave au nord.
-- **Marina** (150 / 180 / 240 $, modules `marina_pontoon` 10 × 1,8, axe z, 8 anneaux) dans l'intérieur de la boucle des bateaux
-  (jamais traversé) : (−125 ; 36), puis (−125 ; 26), puis (−113 ; 36) ; voiliers (`sailboat_a` 3,5 u, `sailboat_b` 4,5 u) des deux
-  côtés, étrave au ponton (x ±3,5), 6 → 12 → 20.
+- **Marina** (150 / 180 / 240 $, modules `marina_pontoon` 10 × 1,8, axe z, 8 anneaux) — lot H1 : **de l'autre côté de l'anse**,
+  à l'ouest de la jetée de séparation (la plaisance ne croise jamais la boucle de pêche) : (−166,1 ; 15), puis (−166,1 ; 4), puis
+  (−178,1 ; −6) ; voiliers (`sailboat_a` 3,5 u, `sailboat_b` 4,5 u) des deux côtés, étrave au ponton (x ±3,5), 6 → 12 → 20.
+  (G1 : (−125 ; 36), (−125 ; 26), (−113 ; 36), dans l'intérieur de la boucle.)
+- **Jetée de séparation** (lot H1, bâtie avec le ponton carburant, Services niv. 3) : 4 segments `breakwater` (12,53 u, sans feu
+  vert), axe z, centre x −157,2, z −4 → 46,1 (racine sur la plage ouest). À l'est la pêche, à l'ouest la plaisance.
+- **Ponton de service** (lot H1, flottant, amarré au flanc est de la jetée) : radeau de 3 × 5 modules `pontoon` (axe z),
+  x −155,2…−150,4, z 14…44 ; passerelle (1 module) x −151,2, z 44,6…50,6 vers la plage ; un taquet par poste. Postes des bateaux
+  au flanc est, étrave au sud : **carburant z 23**, **lavage z 31**, **glace z 39**, x = −150,4 + 0,2 + demi-largeur (barque
+  −149,7, chalutier −149,1, thonier −148,8) ; **poste d'attente** sur la même ligne, z 14 (au nord du radeau, hors de la voie) ;
+  **point de décision** sur la voie ouest (−146 ; 14). Anneau du service au-dessus du bord du radeau (x −151, y 4, z du poste).
 - **Services à quai** (paliers nommés) : criée `fish_hall` en (−99 ; 55,5) (niveau 1) et sa **route du mareyeur** x −102…−96,
-  z 59…96 jusqu'à la rue du village ; pompe `fuel_pump` en (−107 ; 54) (niveau 3) ; aire de lavage `wash_bay` en (−118 ; 59,5)
-  (niveau 6) ; fabrique de glace `ice_plant` en (−88,5 ; 28), tournée de 90° (niveau 9). Cabane d'Odette `odette_hut` en
-  (−127 ; 62,5) (toujours là). Marcel (`marcel`, sinon `docker`) sur le ponton en (−133 ; 48,4). Camionnette `fish_van` garée en
-  (−97,5 ; 63,5).
+  z 59…96 jusqu'à la rue du village ; lot H1 : pompe `fuel_pump` **sur le radeau** en (−152,4 ; 23) (niveau 3) ; aire de lavage
+  `wash_bay` **sur le radeau** en (−152,8 ; 31), tournée de 90° (niveau 6) ; fabrique de glace `ice_plant` **à terre au pied de la
+  passerelle** en (−151 ; 58), goulotte vers le nord (niveau 9). (G1 : pompe (−107 ; 54) et lavage (−118 ; 59,5) sur l'herbe,
+  glace (−88,5 ; 28) sur le cap.) Cabane d'Odette `odette_hut` en (−127 ; 62,5) (toujours là). Marcel (`marcel`, sinon `docker`)
+  sur le ponton en (−133 ; 48,4). Camionnette `fish_van` garée en (−97,5 ; 63,5).
 - **Boucle des bateaux, à sens unique** (sens inverse des aiguilles d'une montre) : voie ouest **x −146** vers le sud, voie de la
   plage z 44 vers l'est (au nord des barques amarrées, ≥ 2 u), voie est x −102 vers le nord (le long des chalutiers), sortie au
   nord de z 16 (le thonier remonte la voie est jusqu'à z 7, sort au nord de z −2). Glissement latéral à la place, coins arrondis
   (rayon 4), aucune rotation sur place, ≤ 6 u/s.
+  Lot H1 — **retour par le ponton de service** (dès la pompe) : du coin de pêche au point de décision (−146 ; 14) ; là, la
+  première station libre (glissement vers l'ouest, étrave au sud, puis le long du radeau), sinon le poste d'attente, sinon le
+  bateau continue droit vers sa place (tour passé) ; d'une station à la suivante le long du radeau ; de la dernière, glissement
+  vers la voie ouest puis le retour habituel (plage, voie est). Un bateau ne part vers le point de décision que si la file a de
+  la place (au plus 3 bateaux en route, à l'attente ou à la première station) ; sinon il rentre droit, sans s'arrêter.
 - **Coins de pêche** (cercle de dérive de 1,6 u) : barques (−126 ; 14), (−116 ; 6), (−130 ; 2), (−120 ; −4), (−136 ; 10),
   (−112 ; −2), (−124 ; −10), (−134 ; −6), (−142 ; 2) ; chalutiers (−150 ; −14), (−138 ; −22) ; thonier (−160 ; −20). Arrivée d'un
   bateau neuf (en fondu, hors du cadrage) : barques (−148 ; −10), chalutiers (−152 ; −20), thonier (−160 ; −32).
@@ -193,7 +207,8 @@ restent au sud de z −35 : **≥ 40 u du mouillage et de l'arrivée des cargos*
   **trou** `CLOUD_HOLE` : la plage et l'anse x −200…−84, z 0…74 ; le large x −215…−84, z −80…0 ; la route du mareyeur x −106…−92,
   z 72…106. Sous les bancs, une **nappe continue** à y 6,5 (cellules de 12 u, découpées en 3 × 3 au bord du trou) : rien ne se
   voit entre les bancs à aucun zoom. Dissolution à la Concession (3,5 s, nappe comprise), jamais recréés.
-- **Caméra pendant la Crique** (`CameraRig.set_crique_bounds`) : centre x −128…−104, z 18…46 ; zoom ≤ 72. Cadrage d'intro
+- **Caméra pendant la Crique** (`CameraRig.set_crique_bounds`) : centre x −146…−104, z 10…46 (lot H1 ; G1 : x −128…−104,
+  z 18…46 — le ponton de service, la jetée et la marina sont à l'ouest) ; zoom ≤ 72. Cadrage d'intro
   (−116 ; 30), largeur 72 ; cadrage de la Crique `ANSE_LOOK` (−117 ; 40), largeur 62 ; annonce (−128 ; 18), largeur 72.
 - Scatter (bosquets) : rien dans x −142…−84 × z 44…72, x −96…−80 × z 14…48 ni x −100…−80 × z −2…16.
 

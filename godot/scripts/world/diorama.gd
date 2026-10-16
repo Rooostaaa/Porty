@@ -85,6 +85,7 @@ var sites: SiteWorks                  # chantiers en cours (présentation seule)
 # --- lot F3/G1 : l'anse des pêcheurs (FishingView), les nuages de la Crique (CloudLayer) et la bascule vers le T1 ---
 signal fish_popup(pos: Vector3, text: String, big: bool)      # loyer encaissé par Marcel (« +X $ »)
 signal fish_paid(pos: Vector3, amount: float)                 # lot G1 : loyer encaissé d'un toucher (pièces vers le compteur)
+signal fish_served(pos: Vector3, amount: float, station: String)   # lot H1 : service rendu au ponton (l'anneau éclate)
 var fishing_view: FishingView
 var fish_rents_shown := 0             # (tests) loyers encaissés d'un toucher
 var stamps_shown := 0                 # (tests, lot G2) tampons d'un toucher
@@ -162,6 +163,7 @@ func _ready() -> void:
 	fishing_view.dio = self
 	add_child(fishing_view)
 	fishing_view.popup.connect(func(p: Vector3, t: String, b: bool) -> void: fish_popup.emit(p, t, b))
+	fishing_view.served.connect(func(p: Vector3, a: float, st: String) -> void: fish_served.emit(p, a, st))
 
 
 func bind(s: PortSim) -> void:

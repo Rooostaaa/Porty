@@ -229,6 +229,7 @@ func _draw() -> void:
 func _draw_fishing(top_y: float) -> void:
 	var fv: FishingView = diorama.fishing_view
 	var sim := diorama.sim
+	_draw_stations(top_y)
 	var warn := float(sim.fishing.cfg.get("rent_warn", 6.0))
 	for i in fv.collectable():
 		var sp := _sp(fv.boat_pos(i) + Vector3(0, 2.5, 0))
@@ -239,6 +240,35 @@ func _draw_fishing(top_y: float) -> void:
 			if late:
 				txt += " · %d s" % ceili(left)
 			_pill_above(sp, txt, UI.BAD if late else UI.AMBER, "money", Color.WHITE if late else UI.TEXT, "fish_rent_%d" % i)
+
+
+## Lot H1 — l'anneau du service au ponton de service : il se remplit au-dessus de la station pendant que le bateau est servi
+## (carburant, lavage, glace), puis éclate (cercle qui s'agrandit et s'efface) quand le service est payé (« +X $ »).
+const STATION_RING := {"fuel": [Color("#F2994A"), "fuel"], "wash": [Color("#2D9CDB"), "wash"], "ice": [Color("#56CCF2"), "reefer"]}
+const STATION_R := 40.0
+
+
+func _draw_stations(top_y: float) -> void:
+	var fv: FishingView = diorama.fishing_view
+	for sv in fv.serving():
+		var sp := _sp(sv.p)
+		if sp.y < top_y + 40.0 or (useful.has_area() and not useful.grow(-10.0).has_point(sp)):
+			continue
+		var spec: Array = STATION_RING.get(String(sv.st), [UI.MONEY, "money"])
+		var col: Color = spec[0]
+		_ring(sp, STATION_R, float(sv.prog), col, Color.WHITE)
+		draw_texture_rect(UI.icon_tex(String(spec[1])), Rect2(sp - Vector2(24, 24), Vector2(48, 48)), false, col)
+		last_rects["ring_" + String(sv.st)] = Rect2(sp - Vector2(STATION_R + 6, STATION_R + 6), Vector2(STATION_R + 6, STATION_R + 6) * 2.0)
+		frame_rects["ring_" + String(sv.st)] = last_rects["ring_" + String(sv.st)]
+	for b in fv.bursts:
+		var sp2 := _sp(Layout.station_ring_point(String(b.st)))
+		if sp2.y < top_y + 40.0:
+			continue
+		var k := clampf(float(b.t) / 0.5, 0.0, 1.0)
+		var spec2: Array = STATION_RING.get(String(b.st), [UI.MONEY, "money"])
+		var c: Color = spec2[0]
+		c.a = 1.0 - k
+		draw_arc(sp2, STATION_R + 6.0 + 30.0 * k, 0.0, TAU, 48, c, 8.0 * (1.0 - k) + 1.0, true)
 
 
 ## Gains qui s'envolent : décalés s'ils chevauchent une bulle (« +2,9 $ » ne recouvre plus « File : 0 », revue D-UI).
