@@ -243,7 +243,7 @@ func _options() -> Array[Dictionary]:
 			for e in b.effects:
 				if e.type == "unlock_cargo":
 					g3 = maxf(g3, 1.0)
-				if (e.type == "berth_depth" or e.type == "customs_open" or (e.type == "stat_mult" and e.stat == "demand")) and key == "attract":
+				if (e.type == "berth_depth" or e.type == "deep_water" or e.type == "customs_open" or (e.type == "stat_mult" and e.stat == "demand")) and key == "attract":
 					g3 = maxf(g3, 1.0)
 				if e.type == "time_min" and key == "min_time":
 					g3 = maxf(g3, 0.8)

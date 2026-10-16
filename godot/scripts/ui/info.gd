@@ -21,7 +21,7 @@ const BUILDING_SHORT := {
 	"crane2": "DEUXIÈME GRUE", "dredge1": "DRAGAGE DU CHENAL", "gravel3": "EXTENSION DU PARC", "berth2": "QUAI N°2",
 	"repair": "ATELIER DE RÉPARATION", "asphalt": "PARC BITUMÉ", "gate2": "DEUXIÈME VOIE", "parking1": "AIRE D'ATTENTE",
 	"sts1": "GRANDE GRUE STS", "tug2": "DEUXIÈME REMORQUEUR", "reefer": "PÔLE FROID", "quickmoor": "BOLLARDS",
-	"parking2": "EXTENSION DE L'AIRE", "ewindow": "GUICHET UNIQUE", "scanner1": "SCANNER MOBILE", "berth3": "QUAI PROFOND N°3",
+	"parking2": "EXTENSION DE L'AIRE", "ewindow": "GUICHET UNIQUE", "scanner1": "SCANNER MOBILE", "berth3": "QUAI PROFOND N°3", "seawall": "DIGUE DU LARGE",
 	"lng": "SOUTAGE GNL", "imo": "ZONE IMO", "rail": "TERMINAL RAIL", "rtg": "PORTIQUES DE COUR", "berth4": "QUAI PROFOND N°4",
 	"oog": "AIRE HORS-GABARIT", "scanner2": "SCANNER À PORTIQUE", "rpilot": "PILOTAGE À DISTANCE", "vacmoor": "AMARRAGE AUTOMATIQUE",
 	"ecustoms": "DOUANE DÉMATÉRIALISÉE", "tos": "TOS",

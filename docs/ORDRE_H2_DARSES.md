@@ -334,3 +334,17 @@ F1) ; la teinte du brun clair à côté du violet des parcs ; les seuils de fond
 - **Q1 — postes** : on **garde 4 postes** (économie inchangée) ; les berges libres des darses sont des quais de service. 6 postes pourront venir plus tard comme un lot d'équilibrage.
 - **Q2 — parcelles** : **option A**, seul le **front du port** (darses, quais, parcs, douane, barrière) est découpé en parcelles à piquets et corde ; l'arrière-port (bureaux, parkings, gare) reste hors parcelles, ses bâtiments apparaissent sur leurs emplacements comme aujourd'hui. « On fait A pour le moment, après on verra. »
 - Style de délimitation : **(b) piquets et corde** ; forme : **darses en peigne** ; brume de la Crique : variante A, dense et animée.
+
+## Décisions de l'utilisateur sur H2-0 (16/10/2026, après les captures `h2_plan_*` / `h2_iso_*`)
+- **Brise-lames est → « Digue du large »** : on ne le supprime pas. Il est **reculé au large (z ≈ −60)**, les deux places du
+  mouillage qui le gênent sont déplacées, et il devient un **achat du T3** (`buildings.json`, chantier visible, prix calé par la
+  sonde, de l'ordre d'un achat T3 intermédiaire). Effets : (a) **prérequis des panamax à D3** (avant la digue, la passe est n'est
+  pas protégée : règle la plus simple compatible avec les 4 postes et `ShipRules`, sans casser la sonde) ; (b) **aléas météo
+  réduits** (arrêt « vent fort » et/ou brouillard ≈ −40 %), effet affiché dans la fiche. Au T1–T2 : pas de digue est. Coques
+  vérifiées par `h2_check` sur le nouveau tracé ; sonde dans les tolérances.
+- **Entrée en marche arrière** (arc + remorqueur, étrave au large, sortie en marche avant) : **validée**. Mesurer la durée à
+  l'écran ; au-delà du seuil de l'ordre, accélérer la manœuvre plutôt que la supprimer.
+- **Dézoom** : pas d'élargissement global. **Deux boutons de caméra** dans le HUD (petits, ronds, hors des cartes), visibles dès
+  la Concession : **« Vue du port »** (cadre tout le port ; le zoom maximal n'est dépassé que pendant ce cadrage) et
+  **« Parcelles »** (cadre la prochaine parcelle à débloquer ; nouveau toucher → la suivante, puis retour). Contrôles `ui_smoke`.
+  (En H2-a si possible, sinon H2-b.)

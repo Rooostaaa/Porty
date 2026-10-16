@@ -550,6 +550,20 @@ static func hull_poly(c: Vector2, fwd: Vector2, size: Vector2) -> PackedVector2A
 		c - fwd * hl - side * hw, c + fwd * (hl - hw) - side * hw])
 
 
+## Point dans un polygone (règle pair-impair, rayon horizontal, demi-ouvert : robuste aux sommets sur le rayon).
+static func inside(p: Vector2, pts: PackedVector2Array) -> bool:
+	var c := false
+	var n := pts.size()
+	for i in n:
+		var a := pts[i]
+		var b := pts[(i + 1) % n]
+		if (a.y > p.y) != (b.y > p.y):
+			var x := a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x)
+			if p.x < x:
+				c = not c
+	return c
+
+
 ## Distance signée d'un point aux obstacles (négative à l'intérieur).
 static func clearance(p: Vector2, obstacles: Array) -> float:
 	var best := 1e9
@@ -558,7 +572,7 @@ static func clearance(p: Vector2, obstacles: Array) -> float:
 		var d := 1e9
 		for i in pts.size():
 			d = minf(d, Geometry2D.get_closest_point_to_segment(p, pts[i], pts[(i + 1) % pts.size()]).distance_to(p))
-		if Geometry2D.is_point_in_polygon(p, pts):
+		if inside(p, pts):
 			d = -d
 		best = minf(best, d)
 	return best

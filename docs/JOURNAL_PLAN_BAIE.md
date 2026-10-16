@@ -2165,6 +2165,36 @@ Le reste des correspondances du script (Crique, anse, interface en pixels) ne bo
   contrôle recalé. Sonde : non relancée à ce palier (la simulation et le monde du jeu sont intacts par construction : le
   diff ne touche que `godot/tests/h2/`, les captures et ce journal) ; elle le sera à H2-a.
 - Prochain : **H2-a** après validation des captures par l'utilisateur.
+### H2 — Décisions de l'utilisateur sur H2-0 (commit `0b9800f`)
+Brise-lames est **reculé au large (z ≈ −60)** et transformé en achat T3 « **Digue du large** » (prérequis des panamax à D3,
+aléas météo réduits ≈ −40 %, deux places du mouillage déplacées) ; entrée en marche arrière **validée** (accélérer si trop
+longue) ; **deux boutons de caméra** « Vue du port » et « Parcelles » au lieu d'un dézoom global. Détail :
+`ORDRE_H2_DARSES.md` § « Décisions de l'utilisateur sur H2-0 ».
+
+### H2-a — Les darses en jeu (en cours)
+- État de reprise : voir les puces ci-dessous, dans l'ordre (chaque puce = étape faite).
+- Mesures avant H2-a (référence) : `tests/h2/timing.tscn` (ShipView seule, « envoi vers le poste → à quai », moyenne de 3
+  places du mouillage) : poste 1 mini 76,0 s, caboteur 78,3 s, feeder 84,8 s ; poste 2 feeder 95,7 s ; poste 3 panamax
+  140,3 s ; poste 4 panamax 130,7 s. Sonde de référence (4 graines) : `scratchpad/h2/probe_base_N.txt`.
+- `layout.gd` réécrit (darses, postes orientés, `dug`/`_dig`, digue du large `SEAWALL`, zones, cases, trajets, camions,
+  parcs « dir z », allées des engins, sols, décors, quais, rail) — fait.
+- Simulation : bâtiment `seawall` « Digue du large » (T3, après le quai profond n°3) ; effets `deep_water` (sans lui, les
+  postes de profondeur 4 sont ramenés à 3 : pas de panamax) et `weather` ×0,6 (durée de « vent fort » et « brouillard »,
+  marqués `"weather": true` dans `events.json`) ; une sauvegarde qui a `berth3` sans `seawall` la reçoit au chargement.
+  Bot : `deep_water` compte comme « attirer ». Sonde, digue à 240 M$ : moyenne fin +1,4 % mais g1 +23 % (1 h 17 → 1 h 35)
+  → essai à 150 M$.
+- Monde : `zones.gd`, `yard_view.gd` (conteneurs tournés, tabliers le long des quais), `traffic_view.gd` (engins par doigt,
+  arrêts devant les doigts, navette rail sur l'allée de F3), `ship_view.gd` (phase `BACK_IN` entre `INBOUND` et `CRAB_IN`,
+  remorqueur à la proue, sans sillage ; dernier tronçon du recul en biais cap tenu, glissement final 2 u), `ship_rules.gd`
+  (fenêtres « d1 », « d2 », « d3 »), `diorama.gd` (quais le long des darses, mur de fond, musoirs, bouchons, eau par état
+  de creusement, ouverture « dig » : bouchon qui recule par tranches de 6 u et pelleteuses, grues tournées, foule, attente
+  de darse et départs retenus tant qu'un autre navire manœuvre dans la darse), `site_works.gd` (palissades de quai en z).
+- Points d'attente revus (le point final devant la darse est sur la route de départ) : **attente de darse** D1 dans le
+  chenal, D2 sur la voie z −20 à x 25, D3 sur la voie z −26 à x 160 ; digue du large reculée à **z −72** (remorqueur à la
+  proue d'un panamax au point d'attente de D3). `REVERSE_V` 3,2 (accéléré, décision de l'utilisateur).
+- Durée à l'écran « envoi → à quai » (`tests/h2/timing.tscn`, avant → après) : P1 mini 76,0 → 71,5 s, caboteur 78,3 → 73,4,
+  feeder 84,8 → 78,8 ; P2 95,7 → 100,0 ; P3 140,3 → 140,4 ; P4 130,7 → 140,4 (+9,7 s, sous le seuil de +10 s).
+
 ### H1 — Échec intermittent `ui_smoke` « F1 : navires à l'écran au T3 » (vérification du chef de projet, 16/10)
 - Symptôme : 1 navire déchargé à quai (seuil ≥ 2), 1 encaissement, en lançant le test seul. Reproduit ici 1 fois sur 16 passages avec H1.
 - **Ce n'est pas une régression H1.** Le contrôle s'exécute **avant** tout le code H1 de `ui_smoke` (ligne 654, la Crique vient

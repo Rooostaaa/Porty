@@ -90,6 +90,10 @@ func _enclosure(s: Dictionary, r: Rect2, kind: String) -> void:
 			_hoard_line(s, Vector2(r.end.x, r.position.y), r.end)
 		"quay":
 			_hoard_line(s, Vector2(r.position.x, r.end.y + 0.6), Vector2(r.end.x, r.end.y + 0.6))
+		"quay_e":      # lot H2 : quai le long d'une darse, la terre à l'est
+			_hoard_line(s, Vector2(r.end.x + 0.6, r.position.y), Vector2(r.end.x + 0.6, r.end.y))
+		"quay_w":
+			_hoard_line(s, Vector2(r.position.x - 0.6, r.position.y), Vector2(r.position.x - 0.6, r.end.y))
 		"scaffold":
 			if not Assets.exists("scaffold"):
 				return
@@ -136,9 +140,9 @@ func _process(delta: float) -> void:
 			s.puff = t + PUFF_EVERY
 			var rk: Array = rects[int(t / PUFF_EVERY) % rects.size()]
 			var r: Rect2 = rk[0]
-			var wet := String(rk[1]) == "water" or String(rk[1]) == "quay"
+			var wet := String(rk[1]) == "water" or String(rk[1]).begins_with("quay")
 			var p := Vector2(randf_range(r.position.x, r.end.x), randf_range(r.position.y, r.end.y))
-			dust_fn.call(Vector3(p.x, Layout.WATER_Y + 0.6 if wet and not Layout.on_land(p, true) else Layout.ground_y(p), p.y), 12, SPLASH if wet else DUST)
+			dust_fn.call(Vector3(p.x, Layout.WATER_Y + 0.6 if wet and not Layout.on_land(p) else Layout.ground_y(p), p.y), 12, SPLASH if wet else DUST)
 		if t >= float(s.sound):
 			s.sound = t + SOUND_EVERY
 			Sfx.play("works", 0.6)

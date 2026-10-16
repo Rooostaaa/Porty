@@ -59,7 +59,7 @@ var sign_node: Node3D                   # pancarte de la zone prochaine (modèle
 var pass_lights: Array[Node3D] = []
 var _open_ids: Array[int] = []          # zones ouvertes à la dernière construction
 var _built_once := false                # la première construction d'une partie ne joue pas de séquence
-var _water_key := -1                    # terre-plein présent (1) ou non (0) dans la texture de distance actuelle
+var _water_key := ""                    # état de creusement de la texture de distance actuelle (Layout.dig_key)
 var water_field: PackedFloat32Array     # distance au rivage (tests)
 static var water_fields_built := 0      # champs de distance calculés depuis le lancement (tests)
 var _t := 0.0
@@ -347,23 +347,56 @@ func _build_water() -> void:
 ## Texture de distance au rivage (côte, brise-lames, terre-plein) transmise au shader de l'eau ; changée quand le
 ## terre-plein apparaît (la mer devient terre). Chaque état n'est calculé qu'une fois (cache : nouvelle concession, retour
 ## au T1 après un T3…, revue C7 D).
-static var _water_cache: Dictionary = {}      # 0 / 1 (terre-plein) -> [champ, texture]
+static var _water_cache: Dictionary = {}      # clé de creusement (Layout.dig_key) -> [champ, texture]
 
 
-func _update_water_land(reclaimed: bool) -> void:
-	var key := 1 if reclaimed else 0
+## Lot H2 : l'eau suit l'état de creusement des darses (fond de D1, D2, D3 creusées, digue du large) — au plus une poignée
+## d'états par partie, chacun calculé une fois.
+func _update_water_land(built: Array) -> void:
+	var key := Layout.dig_key(built)
 	if key == _water_key:
 		return
 	_water_key = key
 	if not _water_cache.has(key):
 		# (lot F2 : les rives du golfe aussi, pour l'écume ; elles sont loin de toutes les voies des navires)
-		var polys := Layout.land_polys(reclaimed)
+		var polys := Layout.land_polys(built)
 		polys.append_array(Layout.gulf_polys())
 		var f := Terrain.distance_field(polys)
 		_water_cache[key] = [f, Terrain.distance_texture(f)]
 		water_fields_built += 1
 	water_field = _water_cache[key][0]
 	water_mat.set_shader_parameter("dist_tex", _water_cache[key][1])
+
+
+## Lot H2 — module de quai (modèle « quay », 12 u de long, côté mer −z local) le long du bord d'eau a → b, tourné vers `sea`.
+func _quay_module(a: Vector2, b: Vector2, sea: Vector2) -> Node3D:
+	var q := Assets.instance("quay")
+	var c := (a + b) * 0.5 - sea * 3.0
+	q.position = Vector3(c.x, 0, c.y)
+	q.rotation.y = atan2(-sea.x, -sea.y)
+	q.scale.x = a.distance_to(b) / 12.0
+	if not is_equal_approx(q.scale.x, 1.0):
+		q.set_meta("rest_scale_x", q.scale.x)
+	return q
+
+
+## Lot H2 — bande d'écume le long d'un bord d'eau a → b (côté mer `sea`).
+func _foam_line(a: Vector2, b: Vector2, sea: Vector2) -> Node3D:
+	var m := MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(maxf(0.1, a.distance_to(b)), 1.6)
+	qm.orientation = PlaneMesh.FACE_Y
+	m.mesh = qm
+	var sm := ShaderMaterial.new()
+	sm.shader = load("res://assets/foam.gdshader")
+	sm.set_shader_parameter("foam", Assets.color("foam"))
+	m.material_override = sm
+	var c := (a + b) * 0.5 + sea * 0.8
+	m.position = Vector3(c.x, Layout.WATER_Y + 0.08, c.y)
+	m.rotation.y = -atan2(b.y - a.y, b.x - a.x)
+	m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	static_root.add_child(m)
+	return m
 
 
 func _foam_strip(x0: float, x1: float, z: float) -> Node3D:
@@ -455,6 +488,7 @@ func rebuild() -> void:
 	# passe : état final, narratrice, retour de la caméra) — revue C7 B1
 	if not opening.is_empty():
 		_finish_opening(false)
+	Layout.dug = vis_built()      # lot H2 : état de creusement des darses (navires, quais, eau)
 	for c in static_root.get_children():
 		c.queue_free()
 	zone_nodes.clear()
@@ -517,54 +551,71 @@ func rebuild() -> void:
 			tmi.set_meta("tiles", true)
 		else:
 			static_root.add_child(tmi)
-	# quais : segments pour chaque poste existant + musoirs (le segment de l'allongement appartient à sa zone) ; lot F2 : rien
-	# tant que le vieux quai n'est pas rebâti (friche : estacade ruinée, Layout.starter_before)
-	var nb := sim.berths.size() if grp_ok("quay1") else 0
-	var x_end := -36.0
-	for bi in nb:
-		var b: Dictionary = Layout.BERTHS[mini(bi, Layout.BERTHS.size() - 1)]
-		var x := float(b.x0)
-		# le vieux quai est court : l'allongement (bâtiment « quay_ext ») ajoute son dernier segment
-		var x1 := float(b.x1) - (12.0 if bi == 0 and not sim.built.has("quay_ext") else 0.0)
+	# quais (lot H2) : modules le long de chaque poste bâti (en z, tournés vers l'eau de la darse), du front au fond creusé ;
+	# quai de service du vieux port (berge ouest de D1) ; mur de fond d'une darse creusée jusqu'au bout ; musoirs en travers
+	# du bout des doigts. Le segment de l'allongement appartient à sa zone. Lot F2 : rien tant que le vieux quai n'est pas
+	# rebâti (friche : estacade ruinée, Layout.before_state).
+	var vb0 := vis_built()
+	var nb := vis_berths()
+	for bi in mini(nb, Layout.BERTHS.size()):
+		var head := Layout.berth_head(bi, vb0)
+		var qx := Layout.berth_quay_x(bi)
+		var sea := Layout.berth_sea(bi)
 		var zid := _berth_zone(bi)
-		while x < x1 - 0.1:
-			var q := Assets.instance("quay")
-			q.position = Vector3(x + 6.0, 0, Layout.QUAY_Z)
-			q.set_meta("site", "quay_ext" if (bi == 0 and x >= -12.1) else berth_key(bi))
-			_add(q, 2 if (bi == 0 and x >= -12.1) else zid)
-			x += 12.0
-		var fs := _foam_strip(float(b.x0), x1, Layout.SEA_EDGE_Z)
+		var z := Layout.FRONT_Z
+		while z < head - 0.1:
+			var seg := minf(12.0, head - z)
+			var q := _quay_module(Vector2(qx, z), Vector2(qx, z + seg), sea)
+			var ext := bi == 0 and z >= 13.9 and z < 25.9
+			q.set_meta("site", "quay_ext" if ext else berth_key(bi))
+			_add(q, 2 if ext else zid)
+			z += seg
+		var fs := _foam_line(Vector2(qx, Layout.FRONT_Z), Vector2(qx, head), sea)
 		fs.set_meta("site", berth_key(bi))
-		x_end = maxf(x_end, x1)
-	# musoirs et quais de liaison jusqu'au bord des terres **existantes** (revue C7 A4 : au palier 3, tant que le terre-plein
-	# n'est pas comblé, la côte s'arrête en x = 48 — plus de musoirs posés sur l'eau) ; lot F2 : ni sur la case d'un quai
-	# pas encore construit (l'allongement, le quai n°2 : la berge nue, état d'avant), ni sur la friche
-	var lx: Array = Layout.LAND_X[clampi(sim.tier, 1, 3)]
-	var land_end := float(lx[1])
-	if not Zones.reclaimed(sim):
-		land_end = minf(land_end, float(Layout.LAND_X[2][1]))
-	var x2 := x_end if grp_ok("quay1") else land_end
-	while x2 < land_end - 0.1:
-		var mx := x2 + 3.0
-		if (not sim.built.has("quay_ext") and mx > -12.0 and mx < 0.0) or (not sim.built.has("berth2") and mx > 0.0 and mx < 36.0):
-			x2 += 6.0
+	if grp_ok("quay1"):
+		# quai de service du vieux port (berge ouest de la darse n°1) : avitaillement, remorqueur n°2
+		var h0 := Layout.darse_head(0, vb0)
+		var z0 := Layout.FRONT_Z
+		while z0 < h0 - 0.1:
+			var seg0 := minf(12.0, h0 - z0)
+			var qs := _quay_module(Vector2(-36.0, z0), Vector2(-36.0, z0 + seg0), Vector2(1, 0))
+			qs.set_meta("site", "quay1")
+			static_root.add_child(qs)
+			z0 += seg0
+		_foam_line(Vector2(-36.0, Layout.FRONT_Z), Vector2(-36.0, h0), Vector2(1, 0))
+	# murs de fond des darses creusées jusqu'au bout, et écume au bord d'une darse en cours de creusement
+	for k in Layout.DARSES.size():
+		var d: Dictionary = Layout.DARSES[k]
+		var hk := Layout.darse_head(k, vb0)
+		if hk <= Layout.FRONT_Z:
 			continue
-		var qe := Assets.instance("quay_end")
-		qe.set_meta("quay_end", true)
-		qe.position = Vector3(x2 + 3.0, 0, Layout.QUAY_Z)
-		var qez := Zones.zone_at(qe.position)      # musoirs du terre-plein : ils surgissent avec sa zone
-		if not qez.is_empty() and String(qez.open) != "start" and _open_ids.has(int(qez.id)):
-			_add(qe, int(qez.id))
-		else:
-			if not qez.is_empty():
-				qe.set_meta("zone_id", int(qez.id))      # la suite du terre-plein attend l'asphalte pendant son ouverture
-			static_root.add_child(qe)
-		x2 += 6.0
-	for xw in ([-45.0, -39.0] if grp_ok("quay1") else []):
-		var qw := Assets.instance("quay_end")
-		qw.position = Vector3(xw, 0, Layout.QUAY_Z)
-		qw.set_meta("site", "quay1")
-		static_root.add_child(qw)
+		if hk >= Layout.HEAD_Z - 0.1:
+			var x := float(d.x0)
+			while x < float(d.x1) - 0.1:
+				var segx := minf(12.0, float(d.x1) - x)
+				var qh := _quay_module(Vector2(x, hk), Vector2(x + segx, hk), Vector2(0, -1))
+				_add(qh, int(Zones.zone_at(Vector3(x, 0, hk + 2.0)).get("id", 0)) if k > 0 else 0)
+				x += segx
+		_foam_line(Vector2(float(d.x0), hk), Vector2(float(d.x1), hk), Vector2(0, -1))
+	# musoirs : le bout de chaque doigt bâti, en travers (bord du front de mer)
+	if grp_ok("quay1"):
+		var tips: Array = [[-48.0, -36.0, 0], [-6.0, 34.0, 0]]
+		if sim.tier >= 2:
+			tips.append([66.0, 106.0, int(Layout.LOTS.berth2.zone)])
+		if sim.tier >= 3:
+			tips.append([140.0, 186.0, int(Layout.LOTS.berth3.zone)])
+		for tp in tips:
+			var x0 := float(tp[0])
+			while x0 < float(tp[1]) - 0.1:
+				var segt := minf(12.0, float(tp[1]) - x0)
+				var qt := _quay_module(Vector2(x0, Layout.FRONT_Z), Vector2(x0 + segt, Layout.FRONT_Z), Vector2(0, -1))
+				qt.set_meta("quay_end", true)
+				if int(tp[2]) > 0 and _open_ids.has(int(tp[2])):
+					_add(qt, int(tp[2]))
+				else:
+					static_root.add_child(qt)
+				x0 += segt
+			_foam_line(Vector2(float(tp[0]), Layout.FRONT_Z), Vector2(float(tp[1]), Layout.FRONT_Z), Vector2(0, -1))
 	# décor et bâtiments
 	for p in Layout.PROPS:
 		if not _cond_ok(String(p.cond)):
@@ -629,8 +680,9 @@ func rebuild() -> void:
 	traffic.walkers.clear()
 	if ready_bid("quay1"):
 		for i in 3:
-			var a := Vector3(-33.0 + i * 9.0, 0.8, -4.2)
-			_add_walker("docker", a, a + Vector3(5.0, 0, 0), 90.0)
+			# lot H2 : le long du quai n°1 (bord d'eau x −6), entre le bord et les grues
+			var a := Vector3(-4.6, 0.8, -3.0 + i * 5.0)
+			_add_walker("docker", a, a + Vector3(0, 0, 4.0), 0.0)
 		# docker sur le musoir du vieux port (lot F3 : ex-« pêcheur » — les pêcheurs sont dans l'anse, à l'ouest du cap)
 		_add_walker("docker", Vector3(-46.5, 0.8, -4.5), Vector3(-41.5, 0.8, -4.5), 90.0)
 	if sim.built.has("customs1"):
@@ -650,7 +702,7 @@ func rebuild() -> void:
 	_apply_sites()
 	yard.rebuild(sim)
 	_apply_bounds()
-	_update_water_land(Zones.reclaimed(sim))
+	_update_water_land(vis_built())
 	for id in newly:
 		if not opening_queue.has(id):
 			opening_queue.append(id)
@@ -675,17 +727,32 @@ const LAND_Y := -0.05
 const ZONE_Y := -0.025
 
 
-## Continent, brise-lames (polygone de repli si le modèle manque), terre-plein (au palier 3, une fois comblé).
+## Continent (découpé des trois darses), bouchons des darses pas encore creusées (lot H2), brise-lames (polygone de repli si
+## le modèle manque). Pendant l'ouverture d'une zone « dig », le bouchon de sa darse recule de l'entrée vers le fond
+## (`plug_nodes`, voir _process_opening).
+var plug_nodes: Dictionary = {}          # indice de darse -> bouchon (MeshInstance3D, origine au mur de fond)
+
+
 func _build_terrain() -> void:
 	var cont := Terrain.poly_mesh(Layout.COAST, Terrain.lin("grass"), LAND_Y, 2.4, null)
 	static_root.add_child(cont)
 	if not Assets.exists("breakwater"):
 		static_root.add_child(Terrain.poly_mesh(Layout.BREAKWATER, Terrain.lin("concrete_dark"), 0.2, 1.4, null))
-	if Zones.reclaimed(sim):
-		var rec := Terrain.poly_mesh(Layout.RECLAIM, Terrain.lin("sand"), LAND_Y, 2.4, Terrain.land_material.duplicate())
-		rec.set_meta("reclaim", true)
-		_add(rec, int(Layout.LOTS[Layout.RECLAIM_BUILDING].zone))
-		zone_nodes[int(Layout.LOTS[Layout.RECLAIM_BUILDING].zone)].reclaim = rec
+	plug_nodes.clear()
+	var vb := vis_built()
+	for k in Layout.DARSES.size():
+		var d: Dictionary = Layout.DARSES[k]
+		var h := Layout.darse_head(k, vb)
+		if h >= Layout.HEAD_Z - 0.01:
+			continue
+		# origine au mur de fond (z 42) : on raccourcit le bouchon vers le fond en réduisant scale.z
+		var poly := [Vector2(float(d.x0), h - Layout.HEAD_Z), Vector2(float(d.x1), h - Layout.HEAD_Z), Vector2(float(d.x1), 0.0),
+			Vector2(float(d.x0), 0.0)]
+		var pm := Terrain.poly_mesh(poly, Terrain.lin("grass"), LAND_Y, 2.4, null)
+		pm.position = Vector3(0, 0, Layout.HEAD_Z)
+		pm.set_meta("plug", k)
+		static_root.add_child(pm)
+		plug_nodes[k] = pm
 
 
 ## Zone grise « discrète » (sol d'herbe, pointillés pâles) : marquée « discreet » (pôle nautique, 2ᵉ voie de gate), ou d'un
@@ -1163,13 +1230,13 @@ func _build_multi(items: Array, zoned: bool = true) -> void:
 			static_root.add_child(mi)
 
 
-## Abscisse de la grue ci du poste bi : cases fixes pour le quai n°1 (Layout.CRANE_SLOTS), réparties ailleurs.
+## Position de la grue ci du poste bi (lot H2 : le long du quai de la darse, Layout.crane_pos ; abscisse : crane_x).
+static func crane_pos(bi: int, ci: int, n: int, kind: String) -> Vector3:
+	return Layout.crane_pos(bi, ci, n, kind)
+
+
 static func crane_x(bi: int, ci: int, n: int) -> float:
-	var slots: Array = Layout.CRANE_SLOTS.get(bi, [])
-	if ci < slots.size() and n <= slots.size():
-		return float(slots[ci])
-	var b: Dictionary = Layout.BERTHS[mini(bi, Layout.BERTHS.size() - 1)]
-	return float(b.x0) + (float(b.x1) - float(b.x0)) * (float(ci) + 0.5) / float(n)
+	return Layout.crane_pos(bi, ci, n, "mobile").x
 
 
 func _rebuild_cranes() -> void:
@@ -1190,10 +1257,11 @@ func _rebuild_cranes() -> void:
 			var kind := String(cr[ci].kind)
 			cv.setup(kind, bi)
 			cv.dropped.connect(_on_crane_drop)
-			cv.position = Vector3(crane_x(bi, ci, n), 0, Layout.QUAY_Z if kind == "sts" else -1.6)
+			cv.position = Layout.crane_pos(bi, ci, n, kind)
+			cv.rotation.y = Layout.crane_ry(bi)
 			crane_views.append(cv)
 			var zid := _berth_zone(bi)
-			if bi == 0 and cv.position.x > -12.0:
+			if bi == 0 and cv.position.z > 13.9:
 				zid = 2
 			if zone_nodes.has(zid):
 				(zone_nodes[zid].nodes as Array).append(cv)
@@ -1456,8 +1524,8 @@ func _on_site_finished(key: String) -> void:
 func _build_g2_ground() -> void:
 	if sim.built.has("platform") and (not sim.built.has("yard") or sites.hiding("yard")) and Assets.exists("ground_platform"):
 		var r: Rect2 = Layout.PLATFORM_RECT
-		var nx := 5
-		var nz := 3
+		var nx := maxi(1, roundi(r.size.x / 8.0))
+		var nz := maxi(1, roundi(r.size.y / 8.0))
 		var sx := r.size.x / float(nx)
 		var sz := r.size.y / float(nz)
 		for i in nx:
@@ -1725,20 +1793,22 @@ func _build_world_edge() -> void:
 ## Lance la prochaine ouverture en attente (une à la fois).
 ## Toutes les zones : chantier (cônes et poussière), pointillés qui s'effacent, vague de couleur, dalles et bâtiments qui
 ## surgissent, repère vertical en dernier. Terre-plein : des barges arrivent du large et déversent le sable, la bande de
-## sable avance d'ouest en est, puis l'asphalte, puis les quais et les portiques. Timings : Layout.OPENING / OPENING_RECLAIM.
+## (lot H2) darse : le bouchon recule de l'entrée vers le fond, puis les quais et les grues. Timings : Layout.OPENING / OPENING_DIG.
 func _start_opening(zid: int) -> void:
 	var z := Layout.zone_by_id(zid)
 	if z.is_empty():
 		return
-	var reclaim: bool = bool(z.get("reclaim", false)) and zone_nodes.has(zid) and (zone_nodes[zid] as Dictionary).has("reclaim")
-	var T: Dictionary = Layout.OPENING_RECLAIM if reclaim else Layout.OPENING
+	# lot H2 : une zone « dig » creuse sa darse (le bouchon recule de l'entrée vers le fond) ; plus de terre-plein comblé
+	var dig := int(z.get("dig", -1))
+	var reclaim := false
+	var T: Dictionary = Layout.OPENING_DIG if dig >= 0 else Layout.OPENING
 	var f := Zones.focus(z)
 	# vue à retrouver à la fin : celle du joueur, même si un recentrage provisoire (chapitre d'un service) est en cours
 	var home := rig.goal if view_home == Vector3.INF else view_home
 	view_home = Vector3.INF
-	opening = {"id": zid, "t": 0.0, "T": T, "reclaim": reclaim, "prev_goal": home, "prev_zoom": rig.zoom_goal,
+	opening = {"id": zid, "t": 0.0, "T": T, "reclaim": reclaim, "dig": dig, "prev_goal": home, "prev_zoom": rig.zoom_goal,
 		"popped": 0, "landmark_done": false, "barges": [], "dash": null, "center": f.center, "props": [], "late": [],
-		"next_puff": 0.0, "tiles_on": false}
+		"next_puff": 0.0, "tiles_on": false, "plug": null}
 	if not rig.locked:
 		rig.focus(f.p)
 		rig.zoom_goal = float(f.zoom)
@@ -1749,12 +1819,8 @@ func _start_opening(zid: int) -> void:
 		var m := fl.material_override as ShaderMaterial
 		m.set_shader_parameter("wave_center", Vector2(f.center.x, f.center.z))
 		m.set_shader_parameter("wave_r", 0.0)
-		if reclaim:
-			m.set_shader_parameter("reveal_from", Layout.RECLAIM_FROM)
-			m.set_shader_parameter("reveal_r", 0.0)
-		else:
-			m.set_shader_parameter("wave_desat", Terrain.ZONE_DESAT)
-			m.set_shader_parameter("veil", Terrain.ZONE_VEIL)
+		m.set_shader_parameter("wave_desat", Terrain.ZONE_DESAT)
+		m.set_shader_parameter("veil", Terrain.ZONE_VEIL)
 	var poly := Layout.zone_poly(z)
 	var water := bool(z.get("water", false))
 	if not poly.is_empty():
@@ -1787,37 +1853,25 @@ func _start_opening(zid: int) -> void:
 			cone.position = Vector3(p.x, 0.05, p.y)
 			add_child(cone)
 			(opening.props as Array).append(cone)
-	if reclaim:
-		var rec: MeshInstance3D = info.reclaim
-		var rm := rec.material_override as ShaderMaterial
-		rm.set_shader_parameter("reveal_from", Layout.RECLAIM_FROM)
-		rm.set_shader_parameter("reveal_r", 0.0)
-		# ce qui est posé sur la suite du terre-plein (sols gris, pointillés, empreintes, pancarte) attend l'asphalte
-		for n in static_root.get_children():
-			var nz := int((n as Node).get_meta("zone_id", 0))
-			if nz > 0 and bool(Layout.zone_by_id(nz).get("reclaim", false)) and (n as Node3D).visible and n != fl and not (info.nodes as Array).has(n):
-				(n as Node3D).visible = false
-				(opening.late as Array).append(n)
-		# barges chargées de sable qui arrivent de l'est, le long du futur bord du quai (repli : remorqueurs chargés si le
-		# modèle n'est pas livré) ; ni sur le mouillage ni sur la voie de départ (revue C7 C4)
-		for i in Layout.RECLAIM_BARGES.size():
-			var bname := "barge_sand" if Assets.exists("barge_sand") else "tug"
-			var bg := Assets.instance(bname)
-			bg.position = Vector3(float(Layout.RECLAIM_BARGE_X0[i]), Layout.WATER_Y, Layout.RECLAIM_BARGE_LANE_Z)
-			bg.rotation.y = PI          # étrave vers l'ouest
-			if bname == "tug":
-				var load_box := MeshInstance3D.new()
-				var bm := BoxMesh.new()
-				bm.size = Vector3(4.0, 1.4, 2.6)
-				load_box.mesh = bm
-				var sm := StandardMaterial3D.new()
-				sm.albedo_color = Assets.color("sand")
-				load_box.material_override = sm
-				load_box.position = Vector3(-1.0, 2.0, 0)
-				load_box.name = "sand"
-				bg.add_child(load_box)
-			add_child(bg)
-			(opening.barges as Array).append(bg)
+	if dig >= 0:
+		# le bouchon de la darse (toute sa longueur), deux pelleteuses dessus ; ce qui est posé dans la darse (navires exclus)
+		# n'apparaît qu'avec les quais
+		var d: Dictionary = Layout.DARSES[dig]
+		var ppoly := [Vector2(float(d.x0), Layout.FRONT_Z - Layout.HEAD_Z), Vector2(float(d.x1), Layout.FRONT_Z - Layout.HEAD_Z),
+			Vector2(float(d.x1), 0.0), Vector2(float(d.x0), 0.0)]
+		var pm := Terrain.poly_mesh(ppoly, Terrain.lin("earth"), LAND_Y + 0.02, 2.4, null)
+		pm.position = Vector3(0, 0, Layout.HEAD_Z)
+		add_child(pm)
+		opening.plug = pm
+		(opening.props as Array).append(pm)
+		for i in 2:
+			if Assets.exists("excavator"):
+				var ex := Assets.instance("excavator")
+				ex.position = Vector3(lerpf(float(d.x0), float(d.x1), 0.3 + 0.4 * float(i)), 0, 2.0 + 12.0 * float(i))
+				ex.rotation.y = PI * 0.5
+				add_child(ex)
+				(opening.props as Array).append(ex)
+				(opening.barges as Array).append(ex)
 	Sfx.play("bell", 0.2)
 
 
@@ -1858,35 +1912,28 @@ func _process_opening(delta: float) -> void:
 				if Geometry2D.is_point_in_polygon(p, PackedVector2Array(poly)):
 					_dust(Vector3(p.x, 0.0, p.y), 14)
 					break
-	if bool(opening.reclaim):
-		# barges : arrivée, déversement (le sable baisse, des nuages de sable), retour au large ; la bande de sable avance,
-		# puis l'asphalte
-		var kin := smoothstep(0.0, 1.0, _phase(T, "barge_in", t))
-		var kout := smoothstep(0.0, 1.0, _phase(T, "barge_out", t))
-		var pour := _phase(T, "pour", t)
-		var bi := 0
-		for bg in opening.barges:
-			if not is_instance_valid(bg):
-				bi += 1
-				continue
-			var b: Node3D = bg
-			var x0: float = float(Layout.RECLAIM_BARGE_X0[bi])
-			var x1: float = float(Layout.RECLAIM_BARGES[bi])
-			b.position.x = lerpf(lerpf(x0, x1, kin), x0, kout)
-			var sand := Assets.part(b, "sand")
-			if sand != null:
-				sand.scale.y = clampf(1.0 - pour, 0.02, 1.0)
-			if pour > 0.0 and pour < 1.0 and fmod(t + bi * 0.1, 0.3) < delta:
-				_dust(b.position + Vector3(0, 1.2, 4.0), 10, Assets.color("sand"))
-			bi += 1
-		var rec_v: Variant = info.get("reclaim")
-		if rec_v != null and is_instance_valid(rec_v):
-			var rec: MeshInstance3D = rec_v
-			(rec.material_override as ShaderMaterial).set_shader_parameter("reveal_r", _phase(T, "sand", t) * Layout.RECLAIM_REVEAL_R)
-		var fl2_v: Variant = info.get("floor")
-		if fl2_v != null and is_instance_valid(fl2_v) and (fl2_v as MeshInstance3D).material_override is ShaderMaterial:
-			var fl2: MeshInstance3D = fl2_v
-			(fl2.material_override as ShaderMaterial).set_shader_parameter("reveal_r", _phase(T, "asphalt", t) * Layout.RECLAIM_REVEAL_R)
+	if int(opening.get("dig", -1)) >= 0:
+		# lot H2 : le bouchon recule par tranches de DIG_SLICE u de l'entrée vers le fond, les pelleteuses suivent le front,
+		# la poussière monte au front ; puis la vague de couleur du sol de la zone
+		var total := Layout.HEAD_Z - Layout.FRONT_Z
+		var dug := floorf(_phase(T, "dig", t) * total / Layout.DIG_SLICE + 0.0001) * Layout.DIG_SLICE
+		var pl_v: Variant = opening.get("plug")
+		if pl_v != null and is_instance_valid(pl_v):
+			(pl_v as Node3D).scale.z = maxf(0.001, 1.0 - dug / total)
+			(pl_v as Node3D).visible = dug < total - 0.01
+		var d: Dictionary = Layout.DARSES[int(opening.dig)]
+		var front := Layout.FRONT_Z + dug
+		var ei := 0
+		for ex_v in opening.barges:
+			if is_instance_valid(ex_v):
+				(ex_v as Node3D).position.z = minf(Layout.HEAD_Z - 3.0, front + 3.0 + 6.0 * float(ei))
+			ei += 1
+		if _phase(T, "dig", t) > 0.0 and _phase(T, "dig", t) < 1.0 and fmod(t, 0.25) < delta:
+			_dust(Vector3(randf_range(float(d.x0) + 3.0, float(d.x1) - 3.0), 0.2, front + 1.0), 14, Assets.color("earth"))
+		var fl3_v: Variant = info.get("floor")
+		if fl3_v != null and is_instance_valid(fl3_v) and (fl3_v as MeshInstance3D).material_override is ShaderMaterial:
+			var w3 := clampf((t - float(T.wave_start)) / float(T.wave), 0.0, 1.0)
+			((fl3_v as MeshInstance3D).material_override as ShaderMaterial).set_shader_parameter("wave_r", w3 * 90.0)
 	else:
 		# vague de couleur sur le sol de la zone
 		var fl_v: Variant = info.get("floor")
@@ -1937,7 +1984,8 @@ func _process_opening(delta: float) -> void:
 
 ## Échelle de repos d'un nœud qui surgit (les barrières de la 2e voie sont réduites, voir PROPS « s »).
 func _rest_scale(n: Node3D) -> Vector3:
-	return Vector3.ONE * float(n.get_meta("rest_scale", 1.0))
+	var k := float(n.get_meta("rest_scale", 1.0))
+	return Vector3(k * float(n.get_meta("rest_scale_x", 1.0)), k, k)      # (lot H2 : un module de quai raccourci)
 
 
 ## Termine la séquence (fin normale, toucher, ou nouvelle partie) : tout prend son état final.
@@ -1958,9 +2006,6 @@ func _finish_opening(silent: bool) -> void:
 		fm.set_shader_parameter("wave_desat", 0.0)
 		fm.set_shader_parameter("wave_r", 1e6)
 		fm.set_shader_parameter("reveal_r", 1e6)
-	var rec_v: Variant = info.get("reclaim")
-	if rec_v != null and is_instance_valid(rec_v):
-		((rec_v as MeshInstance3D).material_override as ShaderMaterial).set_shader_parameter("reveal_r", 1e6)
 	for k in ["barges", "props"]:
 		for bg in opening.get(k, []):
 			if is_instance_valid(bg):
@@ -2057,7 +2102,7 @@ func _on_ship_state(s: Ship) -> void:
 		_berth_paid[s.berth] = float(_berth_paid.get(s.berth, 0.0)) + amount
 		return
 	ships_paid += 1
-	ship_paid.emit(Vector3(Layout.berth_center(s.berth), 6.0, Layout.SEA_EDGE_Z - 6.0), amount)
+	ship_paid.emit(Layout.berth_center_pos(s.berth) + Vector3(Layout.berth_sea(s.berth).x * 6.0, 6.0, 0.0), amount)
 
 
 # ---------------------------------------------------------------------------
@@ -2184,7 +2229,7 @@ func _bind_rade_ship(s: Ship) -> void:
 func inbound_count(bi: int) -> int:
 	var n := 0
 	for v in fleet:
-		if is_instance_valid(v) and v.berth_i == bi and v.phase == ShipView.Phase.INBOUND:
+		if is_instance_valid(v) and v.berth_i == bi and (v.phase == ShipView.Phase.INBOUND or v.phase == ShipView.Phase.BACK_IN):
 			n += 1
 	return n
 
@@ -2210,7 +2255,7 @@ func moored_views() -> Array[ShipView]:
 func berth_view(bi: int) -> ShipView:
 	for v in fleet:
 		if is_instance_valid(v) and v.berth_i == bi and (v.phase == ShipView.Phase.MOORED or v.phase == ShipView.Phase.CRAB_IN \
-				or v.phase == ShipView.Phase.INBOUND):
+				or v.phase == ShipView.Phase.INBOUND or v.phase == ShipView.Phase.BACK_IN):
 			return v
 	return null
 
@@ -2229,19 +2274,43 @@ func berth_ready(bi: int) -> bool:
 		return false
 	for v in fleet:
 		if is_instance_valid(v) and v.berth_i == bi:
-			if v.phase == ShipView.Phase.CRAB_IN or (v.phase == ShipView.Phase.MOORED and v.in_formalities()):
+			if v.phase == ShipView.Phase.BACK_IN or v.phase == ShipView.Phase.CRAB_IN or (v.phase == ShipView.Phase.MOORED and v.in_formalities()):
 				return false
 	return true
 
 
-## Le poste bi est-il libre à l'écran (personne à quai, en glissement, ni dans sa manœuvre de départ) ?
+## Le poste bi est-il libre à l'écran (personne à quai, en glissement, ni dans sa manœuvre de départ) ? Lot H2 : et sa darse
+## (aucun navire d'un autre poste de la darse en départ, en recul ou en glissement : un seul navire en mouvement dans une darse,
+## et le point d'attente final est sur la route de départ).
 func berth_clear(bi: int) -> bool:
+	var dk := Layout.berth_darse(bi)
+	for v in fleet + parting:
+		if not is_instance_valid(v) or v.berth_i < 0 or v.berth_i == bi or Layout.berth_darse(v.berth_i) != dk:
+			continue
+		if v.phase == ShipView.Phase.BACK_IN or v.phase == ShipView.Phase.CRAB_IN or v.phase == ShipView.Phase.CRAB_OUT:
+			return false
+		if v.phase == ShipView.Phase.OUTBOUND and v.in_depart_maneuver():
+			return false
+		if v.phase == ShipView.Phase.INBOUND and v.in_maneuver():
+			return false
 	for v in fleet + parting:
 		if not is_instance_valid(v) or v.berth_i != bi:
 			continue
-		if v.phase == ShipView.Phase.CRAB_IN or v.phase == ShipView.Phase.MOORED or v.phase == ShipView.Phase.CRAB_OUT:
+		if v.phase == ShipView.Phase.BACK_IN or v.phase == ShipView.Phase.CRAB_IN or v.phase == ShipView.Phase.MOORED or v.phase == ShipView.Phase.CRAB_OUT:
 			return false
 		if v.phase == ShipView.Phase.OUTBOUND and v.in_depart_maneuver():
+			return false
+	return true
+
+
+## Lot H2 — la darse du navire à quai `mv` est-elle calme (personne d'autre n'y entre : au-delà de l'attente de darse, en recul
+## ou en glissement) ? Sinon son départ attend.
+func darse_quiet(mv: ShipView) -> bool:
+	var dk := Layout.berth_darse(maxi(0, mv.berth_i))
+	for v in fleet:
+		if not is_instance_valid(v) or v == mv or v.berth_i < 0 or Layout.berth_darse(v.berth_i) != dk:
+			continue
+		if v.phase == ShipView.Phase.BACK_IN or v.phase == ShipView.Phase.CRAB_IN or (v.phase == ShipView.Phase.INBOUND and v.in_maneuver()):
 			return false
 	return true
 
@@ -2306,7 +2375,8 @@ func _direct_ships() -> void:
 	for v in fleet.duplicate():
 		if v.phase == ShipView.Phase.MOORED:
 			v.cranes_on = cranes_ok
-			if v.unload_done() or v.berth_i >= sim.berths.size():
+			# lot H2 : on ne sort pas d'une darse où un autre navire recule, glisse ou va au point d'attente final
+			if (v.unload_done() and darse_quiet(v)) or v.berth_i >= sim.berths.size():
 				v.depart()
 				fleet.erase(v)
 				parting.append(v)
@@ -2588,15 +2658,17 @@ func _crowd_route(c: Dictionary) -> void:
 	var k := int(c.k)
 	match String(c.kind):
 		"apron":
-			var bx := Layout.berth_center(int(c.berth))
+			# lot H2 : le long du quai de la darse (en z), devant le navire
+			var bi := int(c.berth)
+			var bc := Layout.berth_center_pos(bi)
 			var span := 12.0
 			var v: ShipView = _view_by_vid(int(c.ship))
 			if v != null:
 				span = v.length * 0.42
-			var x0 := bx - span + float(k) * (2.0 * span) / 5.0 + _crowd_rng.randf_range(0.0, 2.0)
-			var z := Layout.SEA_EDGE_Z + 1.2 + float(k % 2) * 0.7
-			c.a = Vector3(x0, 0.0, z)
-			c.b = Vector3(x0 + _crowd_rng.randf_range(4.0, 7.0), 0.0, z)
+			var z0 := bc.z - span + float(k) * (2.0 * span) / 5.0 + _crowd_rng.randf_range(0.0, 2.0)
+			var x := bc.x - Layout.berth_sea(bi).x * (1.2 + float(k % 2) * 0.7)
+			c.a = Vector3(x, 0.0, z0)
+			c.b = Vector3(x, 0.0, z0 + _crowd_rng.randf_range(4.0, 7.0))
 		"deck":
 			var v2: ShipView = _view_by_vid(int(c.ship))
 			var hl := 10.0 if v2 == null else v2.length * 0.32
@@ -2605,7 +2677,7 @@ func _crowd_route(c: Dictionary) -> void:
 			c.a = Vector3(lx, 0.0, hw)
 			c.b = Vector3(lx + _crowd_rng.randf_range(4.0, 6.5), 0.0, hw)
 		_:
-			var zc := 31.8 + float(k) * 1.5
+			var zc := 49.8 + float(k) * 1.5      # (lot H2 : enceinte reculée de 18 u)
 			var xa := -40.5 + float(k % 2) * 2.0
 			c.a = Vector3(xa, 0.0, zc)
 			c.b = Vector3(xa + _crowd_rng.randf_range(5.0, 8.0), 0.0, zc)
@@ -2929,7 +3001,7 @@ func _sync_marker(delta: float) -> void:
 	elif key == "berth_count":
 		var nb := sim.berths.size()
 		if nb < Layout.BERTHS.size():
-			p = Vector3(Layout.berth_center(nb), 0, Layout.QUAY_Z)
+			p = Layout.berth_center_pos(nb) - Vector3(Layout.berth_sea(nb).x * 4.0, 0, 0)
 	elif key == "yard_space":
 		p = Layout.YARD_CENTER
 	# l'anneau du goulot ne se montre que sur un service présenté qu'on peut améliorer tout de suite (comme la carte

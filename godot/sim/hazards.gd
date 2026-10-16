@@ -99,9 +99,11 @@ static func start(sim: PortSim, id: String) -> void:
 			sim.money = maxf(0.0, sim.money - fine)
 			sim.notify.emit("Contrôle surprise : politique trop laxiste, amende de %s." % Fmt.money(fine), "bad")
 		return
+	# lot H2 : la digue du large raccourcit les aléas météo (vent fort, brouillard)
+	var dur := float(e.duration) * (sim.weather_mult if bool(e.get("weather", false)) else 1.0)
 	var ev := {
 		"id": id, "name": e.name, "text": e.text, "icon": e.get("icon", ""),
-		"until": sim.time + float(e.duration), "start": sim.time, "paid": false, "kind": kind,
+		"until": sim.time + dur, "start": sim.time, "paid": false, "kind": kind,
 	}
 	if e.has("target_choices"):
 		var ch: Array = e.target_choices

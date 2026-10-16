@@ -112,6 +112,8 @@ var parking_slots: int = 0              # places de l'aire d'attente poids lourd
 var patience_mult: float = 1.0          # services aux navires (avitaillement…)
 var ship_fee: float = 0.0               # services facturés à chaque escale (part des droits de port)
 var time_min_mults: Dictionary = {}     # "pilot" | "moor" | "formal" -> multiplicateur du temps minimal
+var deep_water: bool = false            # lot H2 : la digue du large protège la passe est (postes de profondeur 4 ouverts)
+var weather_mult: float = 1.0           # lot H2 : durée des aléas météo (vent fort, brouillard), × (digue du large)
 var unlocked: PackedByteArray = PackedByteArray()
 var building_mults: Array[Dictionary] = []
 
@@ -272,6 +274,8 @@ func rebuild_infra() -> void:
 	patience_mult = 1.0
 	ship_fee = 0.0
 	customs_open = false
+	deep_water = false
+	weather_mult = 1.0
 	time_min_mults.clear()
 	unlocked = PackedByteArray()
 	unlocked.resize(NCARGO)
@@ -282,6 +286,11 @@ func rebuild_infra() -> void:
 		var b: Dictionary = db.building_by_id.get(bid, {})
 		for e in b.get("effects", []):
 			_apply_effect(e)
+	# lot H2 : sans la digue du large, la passe est n'est pas protégée — les postes de la darse profonde ne reçoivent que des
+	# feeders (profondeur 3) ; les Panamax attendent la digue
+	if not deep_water:
+		for b in berths:
+			b.depth = mini(int(b.depth), 3)
 	# réassocie les navires déjà à quai
 	for s in ships:
 		if s.berth >= 0 and s.berth < berths.size() and s.state >= Ship.State.PILOTING and s.state <= Ship.State.UNLOADING:
@@ -323,6 +332,10 @@ func _apply_effect(e: Dictionary) -> void:
 			has_hut = true
 		"gate_open":
 			has_gate = true
+		"deep_water":
+			deep_water = true
+		"weather":
+			weather_mult *= float(e.mult)
 		"time_min":
 			# raccourcit le temps minimal de pilotage / amarrage / formalités (le plancher qui plafonne le débit)
 			var k := String(e.kind)
@@ -2682,6 +2695,9 @@ func from_dict(d: Dictionary) -> void:
 	for b in d.get("built", []):
 		if db.building_by_id.has(b) and not built.has(String(b)):
 			built.append(String(b))
+	# lot H2 : une partie d'avant la digue du large qui a déjà son quai profond la reçoit (ses Panamax gardent leurs postes)
+	if built.has("berth3") and not built.has("seawall") and db.building_by_id.has("seawall"):
+		built.insert(built.find("berth3") + 1, "seawall")
 	if not g2d.is_empty():
 		var gg: Dictionary = g2d.get("gestures", {})
 		for k in gestures:

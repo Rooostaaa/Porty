@@ -65,13 +65,15 @@ func _moored() -> void:
 
 func _obstacles(bi: int, built: Array) -> Array:
 	var obs: Array = []
-	obs.append_array(H.land_polys(built))
+	obs.append_array(Layout.land_polys(built))
 	obs.append_array(H.moored_hulls(bi, built))
 	return obs
 
 
 func _maneuvers(tier: int) -> void:
 	var built := H.built_for(tier)
+	if tier >= 3:
+		built.append("seawall")
 	for bi in 4:
 		if not H.berth_built(bi, built):
 			continue
@@ -84,45 +86,63 @@ func _maneuvers_partial() -> void:
 	_maneuver(0, ["quay1", "quay_ext"], "T1 allongement")
 
 
+## Poses du recul (jeu : ShipView) : cap = sens inverse du trajet sur l'arc, tenu au nord sur le dernier tronçon droit.
+func _back_poses(path: Array) -> Array:
+	var poses := H.path_poses(path, 1.0, true)
+	var straight_from := Layout.path_length(path) - (path[-1] as Vector3).distance_to(path[-2])
+	var acc := 0.0
+	for i in poses.size():
+		if i > 0:
+			acc += (poses[i].c as Vector2).distance_to(poses[i - 1].c)
+		if acc >= straight_from - 0.01:
+			poses[i]["fwd"] = Vector2(0, -1)
+	return poses
+
+
 func _maneuver(bi: int, built: Array, tag: String) -> void:
 	var cls := H.berth_class(bi, built)
 	var sz := H.ship_size(cls)
 	var obs := _obstacles(bi, built)
 	var worst := 1e9
-	# (mouillage n°2 (16 ; −66) → postes 3–4 : le premier bord, inchangé depuis le lot D, longe la tête du brise-lames ouest ;
-	# hors du périmètre de H2, il n'est pas compté ici)
 	var ks := [0, 1, 4, 7] if bi < 2 else [0, 4, 7]
 	for k in ks:
-		var path := H.ship_path_pilot(k, bi)
+		var path := Layout.ship_path_pilot(k, bi)
 		var res := H.min_clearance(H.path_poses(path, 1.0, false), sz, obs)
 		worst = minf(worst, float(res.d))
 		if float(res.d) < 2.0:
 			print("       pilotage mouillage %d → poste %d : %.2f u en %s" % [k + 1, bi + 1, float(res.d), str(res.c)])
 	check(worst >= 2.0, "%s poste %d (%s) : arrivée, dégagement min %.2f u (≥ 2)" % [tag, bi + 1, cls, worst])
-	# fin de l'arrivée = point d'évitage, cap au nord
-	var path0 := H.ship_path_pilot(0, bi)
-	var last: Vector3 = path0[-1]
-	var g := H.berth_gate(bi)
-	var prev: Vector3 = path0[-2]
-	var head := Vector2(last.x - prev.x, last.z - prev.z).normalized()
-	check(last.distance_to(g) < 0.3 and head.dot(H.berth_gate_heading(bi)) > 0.97,
-		"%s poste %d : l'arrivée finit au point d'attente (%.1f ; %.1f), cap %s" % [tag, bi + 1, g.x, g.z,
-		"au nord" if H.berth_gate_heading(bi).y < 0.0 else "à l'est"])
-	var bposes := H.path_poses(H.ship_path_back_in(bi, built), 1.0, true)
+	var bpath := Layout.ship_path_back_in(bi, built, sz.y)
+	var bposes := _back_poses(bpath)
 	var back := H.min_clearance(bposes.slice(0, bposes.size() - 4), sz, obs)
 	var bend := H.min_clearance(bposes.slice(bposes.size() - 1), sz, obs)
-	check(float(back.d) >= 2.0 and float(bend.d) >= 1.0, "%s poste %d : recul, dégagement min %.2f u (≥ 2), %.2f u à l'arrivée sur l'axe (≥ 1)%s" % [tag,
+	check(float(back.d) >= 2.0 and float(bend.d) >= 1.0, "%s poste %d : recul, dégagement min %.2f u (≥ 2), %.2f u à l'arrivée (≥ 1)%s" % [tag,
 		bi + 1, float(back.d), float(bend.d), "" if float(back.d) >= 2.0 else " en " + str(back.c)])
-	var bpath := H.ship_path_back_in(bi, built)
-	var blen := L.path_length(bpath)
-	var crab := H.min_clearance(H.path_poses(H.ship_path_crab_in(bi, sz.y, built), 0.5, false, Vector2(0, -1)), sz, obs)
-	check(float(crab.d) >= 0.5, "%s poste %d : glissement au quai, dégagement min %.2f u (≥ 0,5 : 0,6 au quai)" % [tag, bi + 1, float(crab.d)])
-	var dep := H.ship_path_depart(bi, sz.y, built)
-	var fwd: Array = dep.slice(1)        # après le glissement vers l'axe : marche avant (au départ de l'axe, la marge du poste)
+	var dep := Layout.ship_path_depart(bi, sz.y, 3, built)
+	var fwd: Array = dep.slice(1)
 	var dres := H.min_clearance(H.path_poses(fwd, 1.0, false).slice(4), sz, obs)
 	check(float(dres.d) >= 2.0, "%s poste %d : départ en marche avant, dégagement min %.2f u (≥ 2)%s" % [tag, bi + 1,
 		float(dres.d), "" if float(dres.d) >= 2.0 else " en " + str(dres.c)])
-	print("       recul %.0f u : %.0f s à %.1f u/s" % [blen, blen / H.REVERSE_V, H.REVERSE_V])
+	# attente de darse : hors des trajets de départ des postes de la darse (coque au point d'attente contre coque au départ)
+	var hold := Layout.pilot_gates(bi)[1]
+	var ppath := Layout.ship_path_pilot(0 if bi < 2 else 4, bi)
+	var hp := H.path_poses(ppath, 1.0, false)
+	var hf := Vector2(0, -1)
+	for ps in hp:
+		if (ps.c as Vector2).distance_to(Vector2(hold.x, hold.z)) < 1.0:
+			hf = ps.fwd
+	var hull_hold := H.hull_poly(Vector2(hold.x, hold.z), hf, sz)
+	var dmin := 1e9
+	for bj in 4:
+		if Layout.berth_darse(bj) != Layout.berth_darse(bi) or not H.berth_built(bj, built):
+			continue
+		var dp := Layout.ship_path_depart(bj, sz.y, 3, built)
+		var mr := H.min_clearance(H.path_poses(dp.slice(1), 1.0, false), sz, [hull_hold])
+		if float(mr.d) < dmin:
+			dmin = float(mr.d)
+			print("       attente/départ %d : %.2f en %s, attente cap %s" % [bj + 1, dmin, str(mr.c), str(hf)])
+	check(dmin >= 2.0 or Layout.berth_darse(bi) == 0, "%s poste %d : attente de darse (%.0f ; %.0f) à %.2f u des départs de la darse (≥ 2)" % [tag, bi + 1, hold.x, hold.z, dmin])
+	print("       recul %.0f u" % Layout.path_length(bpath))
 
 
 func _parcels() -> void:

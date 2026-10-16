@@ -98,14 +98,14 @@ static func zone_of(bid: String) -> Dictionary:
 	return Layout.zone_by_id(int(Layout.LOTS[bid].zone))
 
 
-## Le terre-plein existe-t-il (la mer est devenue terre) ?
+## Lot H2 : la darse profonde est-elle creusée (anciennement : le terre-plein comblé) ?
 static func reclaimed(sim: PortSim) -> bool:
-	return sim.built.has(Layout.RECLAIM_BUILDING)
+	return sim.built.has("berth3")
 
 
-## Une zone bâtie sur le terre-plein n'a pas encore de sol : on ne voit que son contour tracé sur l'eau.
-static func on_water(sim: PortSim, z: Dictionary) -> bool:
-	return bool(z.get("reclaim", false)) and not reclaimed(sim)
+## (Lot H2 : plus de zone posée sur l'eau — toutes les zones du terminal sont sur les doigts.)
+static func on_water(_sim: PortSim, _z: Dictionary) -> bool:
+	return false
 
 
 ## Zone qui contient un point (x, z) du monde (décor apparu avec un palier), {} sinon.
@@ -121,7 +121,7 @@ static func zone_at(p: Vector3) -> Dictionary:
 static func zone_for_cond(cond: String, p: Vector3) -> int:
 	if Layout.LOTS.has(cond):
 		return int(Layout.LOTS[cond].zone)
-	if cond == "t2" or cond == "t3" or cond == Layout.RECLAIM_BUILDING:
+	if cond == "t2" or cond == "t3":
 		var z := zone_at(p)
 		return int(z.get("id", 0))
 	return 0

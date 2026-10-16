@@ -7,6 +7,8 @@ const BAY := 4.4
 const ROW := 1.5
 const TIER := 1.32
 const APRON_SLOTS := 8
+## Lot H2 : parcs « dir z » et tabliers le long des darses — tous les conteneurs sont tournés de 90° (longueur le long de z).
+const ROT := Basis(Vector3.UP, PI * 0.5)
 
 var zone_mm: Array[MultiMeshInstance3D] = []
 var zone_slots: Array = [[], [], [], []]
@@ -40,12 +42,7 @@ func rebuild(sim: PortSim) -> void:
 			continue
 		if String(b.b) == "" and not sim.built.has("platform"):
 			continue          # lot G2 : la friche (pas encore de plateforme)
-		var layer: Array = []
-		for k in int(b.tiers):
-			for i in int(b.bays):
-				for j in int(b.rows):
-					layer.append(Vector3(float(b.x) + 2.0 + i * BAY, k * TIER, float(b.z) + 0.65 + j * ROW))
-		zone_slots[int(b.zone)].append_array(layer)
+		zone_slots[int(b.zone)].append_array(Layout.block_slots(b, TIER))
 	# un remplissage « par étages » sur l'ensemble des blocs de la zone
 	for z in 4:
 		var arr: Array = zone_slots[z]
@@ -61,7 +58,7 @@ func rebuild(sim: PortSim) -> void:
 		mm.instance_count = arr.size()
 		mm.visible_instance_count = 0
 		for i in arr.size():
-			mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, arr[i]))
+			mm.set_instance_transform(i, Transform3D(ROT, arr[i]))
 			mm.set_instance_color(i, Color.WHITE)
 			mm.set_instance_custom_data(i, _slot_color(sim, z, i, 0.0))
 		zone_mm[z].multimesh = mm
@@ -71,11 +68,15 @@ func rebuild(sim: PortSim) -> void:
 	_empty_share = -1.0
 	# tablier : une rangée de conteneurs derrière chaque poste
 	apron_slots = []
-	for bi in sim.berths.size():
-		var b: Dictionary = Layout.BERTHS[mini(bi, Layout.BERTHS.size() - 1)]
+	var dig: Variant = sim.built if not sim.built.is_empty() else null
+	for bi in mini(sim.berths.size(), Layout.BERTHS.size()):
+		var x := Layout.berth_quay_x(bi) - Layout.berth_sea(bi).x * Layout.APRON_BOX_OFF
+		var zmax := Layout.berth_head(bi, dig) - 3.0
 		for k in 2:
 			for i in APRON_SLOTS:
-				apron_slots.append(Vector3(float(b.x0) + 3.0 + i * 4.3, k * TIER, 0.9))
+				var z := Layout.FRONT_Z + 4.0 + i * 5.2
+				if z <= zmax:
+					apron_slots.append(Vector3(x, k * TIER, z))
 	var am := MultiMesh.new()
 	am.transform_format = MultiMesh.TRANSFORM_3D
 	am.use_colors = true
@@ -84,7 +85,7 @@ func rebuild(sim: PortSim) -> void:
 	am.instance_count = apron_slots.size()
 	am.visible_instance_count = 0
 	for i in apron_slots.size():
-		am.set_instance_transform(i, Transform3D(Basis.IDENTITY, apron_slots[i]))
+		am.set_instance_transform(i, Transform3D(ROT, apron_slots[i]))
 		am.set_instance_color(i, Color.WHITE)
 		am.set_instance_custom_data(i, ShipView.cargo_color(sim, 0, i * 13 + 5))
 	apron_mm.multimesh = am
@@ -206,7 +207,7 @@ func _drop_new(k: int, mm: MultiMesh, slots: Array, from: int, to: int) -> void:
 		_drop_t[k][free] = 0.0
 		drops_started += 1
 		var p: Vector3 = slots[i]
-		mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, p + Vector3(-DROP_SLIDE, DROP_H, 0)))
+		mm.set_instance_transform(i, Transform3D(ROT, p + Vector3(0, DROP_H, -DROP_SLIDE)))
 
 
 func _drop_step(k: int, mm: MultiMesh, slots: Array, delta: float) -> void:
@@ -223,6 +224,6 @@ func _drop_step(k: int, mm: MultiMesh, slots: Array, delta: float) -> void:
 		_drop_t[k][s] = t
 		var e := 1.0 - (1.0 - t) * (1.0 - t)          # ralentit en se posant
 		var p: Vector3 = slots[i]
-		mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, p + Vector3(-DROP_SLIDE * (1.0 - e), DROP_H * (1.0 - e), 0)))
+		mm.set_instance_transform(i, Transform3D(ROT, p + Vector3(0, DROP_H * (1.0 - e), -DROP_SLIDE * (1.0 - e))))
 		if t >= 1.0:
 			_drop_i[k][s] = -1

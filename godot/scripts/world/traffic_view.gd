@@ -21,7 +21,7 @@ const STOP_GAP := 6.8           # écart minimal entre deux camions arrêtés le
 
 var queue: Array[Node3D] = []
 var trucks: Array[Dictionary] = []      # camions dans le port {node, route, phase, stop_x, t, container, loader}
-var vehicles: Array[Dictionary] = []    # engins du parc {node, route, task, carry, x_slot, x_apron, truck}
+var vehicles: Array[Dictionary] = []    # engins du parc {node, route, task, carry, slot, apron, truck, berth, finger}
 var cars: Array[Dictionary] = []        # voitures civiles {node, dir, speed}
 var barriers: Array[Node3D] = []
 var _out_cool := 0.0
@@ -164,7 +164,7 @@ func _assign(t: Node3D, target: Vector3) -> void:
 
 ## Le camion est-il dans l'aire d'attente (à l'est de la route d'accès) ?
 static func _in_lot(p: Vector3) -> bool:
-	return p.x > -14.0 and p.z > 50.0 and p.z < Layout.HIGHWAY_Z0 - 1.0
+	return p.x > -14.0 and p.z > Layout.LOT_ROW0 - 8.0 and p.z < Layout.HIGHWAY_Z0 - 1.0
 
 
 ## Itinéraire par les routes depuis `from` (autoroute, voie d'entrée ou aire d'attente) jusqu'à la place `target` de la
@@ -247,12 +247,13 @@ func _pick_stop() -> float:
 	if yard != null:
 		for p in yard.visible_slots(0):
 			var v: Vector3 = p
-			if v.x >= x0 and v.x <= x1 and _stop_free(v.x):
+			# lot H2 : seulement devant un doigt (jamais devant un fond de darse) ; un même x une seule fois
+			if v.x >= x0 and v.x <= x1 and Layout.stop_ok(v.x, _tier, _gate2) and _stop_free(v.x) and not cands.has(v.x):
 				cands.append(v.x)
 	if cands.is_empty():
 		var x := x0
 		while x <= x1:
-			if _stop_free(x):
+			if Layout.stop_ok(x, _tier, _gate2) and _stop_free(x):
 				cands.append(x)
 			x += 4.4
 	if cands.is_empty():
@@ -360,10 +361,13 @@ func _sync_trucks(sim: PortSim, delta: float) -> void:
 func _call_loader(tk: Dictionary, sim: PortSim) -> void:
 	var best := -1
 	var best_d := INF
+	var fi := Layout.finger_at(float(tk.stop_x))
 	for i in vehicles.size():
 		var v: Dictionary = vehicles[i]
 		if String(v.task) != "idle" and String(v.task) != "to_block":
 			continue
+		if int(v.finger) != fi:
+			continue          # lot H2 : un engin ne quitte jamais son doigt
 		var d := absf((v.node as Node3D).position.x - float(tk.stop_x))
 		if d < best_d:
 			best_d = d
@@ -373,16 +377,13 @@ func _call_loader(tk: Dictionary, sim: PortSim) -> void:
 	var v2: Dictionary = vehicles[best]
 	v2.task = "to_truck"
 	v2.truck = tk
-	v2.x_slot = float(tk.stop_x)
 	var n: Node3D = v2.node
-	# il rejoint l'allée transversale par le chemin le plus court des allées, puis le bord du parc
-	var r: Array = []
-	if absf(n.position.z - Layout.YARD_AISLE_Z) > 0.5:
-		var ax := Layout.aisle_x(n.position.x)
-		r.append(Vector3(ax, 0, n.position.z))
-		r.append(Vector3(ax, 0, Layout.YARD_AISLE_Z))
-	r.append(Vector3(float(tk.stop_x), 0, Layout.YARD_AISLE_Z))
-	r.append_array(Layout.engine_route_to_truck(float(tk.stop_x)).slice(1))
+	# lot H2 : l'engin prend un conteneur dans un bloc de son doigt (au plus près du camion), par les allées, puis le bord de
+	# chargement devant le camion
+	var slot := _slot_pos(Layout.finger_at(float(tk.stop_x)), float(tk.stop_x))
+	v2.slot = slot
+	var r: Array = _aisle_path(n.position, slot)
+	r.append_array(Layout.engine_route_to_truck(slot, float(tk.stop_x)).slice(1))
 	v2.route = r
 	_carry(v2, sim, true)      # il prend le conteneur au bloc en passant
 	tk.loader = best
@@ -406,7 +407,8 @@ func _start_transfer(tk: Dictionary, sim: PortSim, from_vehicle: bool) -> void:
 		v.task = "back"
 		v.truck = null
 		# retour au tablier par les allées, depuis là où il est (au bord du parc, ou encore en chemin)
-		v.route = Layout.engine_route_home((v.node as Node3D).position, _apron_x(sim))
+		v.apron = _apron_pt(int(v.berth))
+		v.route = Layout.engine_route_home((v.node as Node3D).position, v.apron)
 	n.add_child(c)
 	c.global_position = start
 	var tw := c.create_tween()
@@ -534,13 +536,17 @@ func _sync_vehicles(sim: PortSim, delta: float) -> void:
 		_vehicle_kind = kind
 		for tk in trucks:
 			tk.loader = -1
-	while vehicles.size() < count:
+	var bl := _ready_berths(sim)
+	while vehicles.size() < count and not bl.is_empty():
 		var n := Assets.instance(kind)
 		add_child(n)
 		_add_beacon(n, kind)
-		var xa := _apron_x(sim)
-		n.position = Vector3(xa, 0, Layout.APRON_LANE_Z)
-		vehicles.append({"node": n, "route": [], "task": "idle", "carry": null, "x_slot": 0.0, "x_apron": xa, "truck": null})
+		# lot H2 : chaque engin sert un poste (tour à tour) et reste sur le doigt de ce poste
+		var bi: int = bl[vehicles.size() % bl.size()]
+		var ap := _apron_pt(bi)
+		n.position = ap
+		vehicles.append({"node": n, "route": [], "task": "idle", "carry": null, "slot": ap, "apron": ap, "truck": null,
+			"berth": bi, "finger": Layout.berth_finger(bi)})
 	while vehicles.size() > count:
 		var v: Dictionary = vehicles.pop_back()
 		(v.node as Node3D).queue_free()
@@ -566,17 +572,17 @@ func _sync_vehicles(sim: PortSim, delta: float) -> void:
 					if not active:
 						v.task = "idle"       # rien à transporter : il attend au tablier (revue C7 A7)
 						continue
-					# au tablier : il prend un conteneur au pied d'une grue et l'emporte vers une travée réelle du parc
-					var xs := _slot_x()
-					v.x_slot = xs
-					v.route = Layout.engine_route_to_block(n.position.x, xs).slice(1)
+					# au tablier : il prend un conteneur au pied d'une grue et l'emporte vers une travée réelle de son doigt
+					var slot := _slot_pos(int(v.finger), INF)
+					v.slot = slot
+					v.route = Layout.engine_route_to_block(n.position, slot).slice(1)
 					v.task = "to_block"
 					_carry(v, sim, true)
 				"to_block":
-					# conteneur posé dans le bloc ; retour au tablier
+					# conteneur posé dans le bloc ; retour au tablier (au pied d'une grue de son poste)
 					_carry(v, sim, false)
-					var xa := _apron_x(sim)
-					var back := Layout.engine_route_to_block(xa, float(v.x_slot))
+					v.apron = _apron_pt(int(v.berth))
+					var back := Layout.engine_route_to_block(v.apron, v.slot)
 					back.reverse()
 					v.route = back.slice(1)
 					v.task = "back"
@@ -594,24 +600,59 @@ func _carry(v: Dictionary, sim: PortSim, on: bool) -> void:
 		v.carry = null
 
 
-## Abscisse d'une travée réelle du parc (un emplacement de conteneur visible), sinon d'un bloc.
-func _slot_x() -> float:
+## Lot H2 — emplacement réel d'un conteneur dans un bloc du doigt `fi` (le plus proche de `near_x` si donné, sinon au hasard) ;
+## à défaut, un bloc bâti du doigt, sinon l'allée centrale.
+func _slot_pos(fi: int, near_x: float) -> Vector3:
+	var cands: Array = []
 	if yard != null:
-		var vs := yard.visible_slots(0)
-		if not vs.is_empty():
-			return (vs[rng.randi_range(0, vs.size() - 1)] as Vector3).x
-		var all := yard.zone_slots[0] as Array
-		if not all.is_empty():
-			return (all[rng.randi_range(0, all.size() - 1)] as Vector3).x
-	return Layout.YARD_CENTER.x
+		for p in yard.visible_slots(0):
+			if Layout.finger_at((p as Vector3).x) == fi:
+				cands.append(p)
+		if cands.is_empty():
+			for p in (yard.zone_slots[0] as Array):
+				if Layout.finger_at((p as Vector3).x) == fi:
+					cands.append(p)
+	if cands.is_empty():
+		var f: Dictionary = Layout.FINGERS[maxi(0, fi)]
+		return Vector3(float(f.xc) - 4.0, 0, 20.0)
+	if near_x != INF:
+		var best: Vector3 = cands[0]
+		for p in cands:
+			if absf((p as Vector3).x - near_x) + absf((p as Vector3).z - 30.0) * 0.2 < absf(best.x - near_x) + absf(best.z - 30.0) * 0.2:
+				best = p
+		return Vector3(best.x, 0, best.z)
+	var q: Vector3 = cands[rng.randi_range(0, cands.size() - 1)]
+	return Vector3(q.x, 0, q.z)
 
 
-## Point du tablier au pied d'une grue (là où elle pose ses conteneurs).
-func _apron_x(sim: PortSim) -> float:
-	var bi := rng.randi_range(0, sim.berths.size() - 1)
-	var b: Dictionary = Layout.BERTHS[mini(bi, Layout.BERTHS.size() - 1)]
-	var x1 := float(b.x1) - (12.0 if bi == 0 and not sim.built.has("quay_ext") else 0.0)
-	return rng.randf_range(float(b.x0) + 3.0, x1 - 3.0)
+## Chemin par les allées d'un point d'allée (allée centrale, de tête, de tablier ou bord de chargement) au bord du bloc de `slot`.
+static func _aisle_path(p: Vector3, slot: Vector3) -> Array:
+	var xc := Layout.aisle_x(slot.x)
+	var r: Array = []
+	if absf(p.x - xc) > 0.5:
+		var z := p.z
+		if absf(z - Layout.HEAD_AISLE_Z) > 0.5 and absf(z - Layout.LOAD_EDGE_Z) > 0.5:
+			z = Layout.HEAD_AISLE_Z          # sur l'allée de tablier : on passe par l'allée de tête
+			r.append(Vector3(p.x, 0, z))
+		r.append(Vector3(xc, 0, z))
+	r.append(Vector3(xc, 0, slot.z))
+	r.append(Layout.block_edge(slot))
+	return r
+
+
+## Postes dont le quai et le parc sont debout (un engin ne sert qu'eux).
+func _ready_berths(sim: PortSim) -> Array:
+	var out: Array = []
+	for bi in mini(sim.berths.size(), Layout.BERTHS.size()):
+		if _ready_k(Diorama.berth_key(bi)):
+			out.append(bi)
+	return out
+
+
+## Point du tablier au pied d'une grue du poste bi (là où elle pose ses conteneurs), sur l'allée de tablier.
+func _apron_pt(bi: int) -> Vector3:
+	var h := Layout.berth_head(bi)
+	return Vector3(Layout.apron_lane(bi), 0, rng.randf_range(Layout.FRONT_Z + 4.0, maxf(Layout.FRONT_Z + 4.5, h - 4.0)))
 
 
 ## Train (gare, T3) : il sort du tunnel est, s'arrête au quai de la gare (Layout.TRAIN_DWELL s), puis repart vers l'est.
@@ -641,7 +682,7 @@ static func train_x_hidden() -> float:
 
 
 static func train_x_stop() -> float:
-	return (Layout.LOTS.rail.p as Vector3).x - 6.0
+	return (Layout.LOTS.rail.p as Vector3).x - 26.0      # lot H2 : toute la rame (≈ 48 u) hors du tunnel, le long du quai
 
 
 func _train_run() -> float:
@@ -728,7 +769,7 @@ func crossing_clear() -> bool:
 
 
 func _sync_shuttle(sim: PortSim, delta: float) -> void:
-	if not sim.built.has("rail") or not sim.built.has(Layout.RECLAIM_BUILDING) or not _ready_k("rail") or not _ready_k(Layout.RECLAIM_BUILDING):
+	if not sim.built.has("rail") or not sim.built.has("berth3") or not _ready_k("rail") or not _ready_k("berth3"):
 		if tractor != null:
 			tractor.queue_free()
 			tractor = null

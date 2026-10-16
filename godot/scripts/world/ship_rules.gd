@@ -195,10 +195,14 @@ static func ship_streams(state: int, berth: int) -> Dictionary:
 	var east := berth >= Layout.EAST_BERTH0
 	var arr := state == Ship.State.PILOTING or state == Ship.State.MOORING
 	var dep := state == Ship.State.DEPARTING
+	var io := "in" if arr else ("out" if dep else "")
+	# lot H2 : une fenêtre par darse — l'entrée (recul, glissement) contre la sortie d'un poste de cette darse
+	var dk := Layout.berth_darse(berth) if berth >= 0 else -1
 	return {"large": ship_stream(state, berth),
-		"ouest": ("in" if arr else ("out" if dep else "")) if west else "",
-		"chenal": ("in" if arr else ("out" if dep else "")) if west else "",
-		"est": ("in" if arr else ("out" if dep else "")) if east else ""}
+		"ouest": io if west else "",
+		"chenal": io if west else "",
+		"est": io if east else "",
+		"d1": io if dk == 0 else "", "d2": io if dk == 1 else "", "d3": io if dk == 2 else ""}
 
 
 ## Croisements (Layout.SHIP_CROSSINGS) : un navire qui va entrer dans une fenêtre attend qu'aucun navire de l'autre courant

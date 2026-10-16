@@ -1,9 +1,9 @@
 [
-  {"id": "wind", "name": "Vent fort", "icon": "wind", "weight": 1.0, "tier": 1, "duration": 25,
+  {"id": "wind", "name": "Vent fort", "icon": "wind", "weight": 1.0, "tier": 1, "duration": 25, "weather": true,
    "text": "Rafales à 70 km/h : les grues sont mises en sécurité.",
    "mods": [{"stat": "crane_rate", "mult": 0.0}],
    "pay": {"label": "Sécuriser et continuer", "income_seconds": 25, "mods": [{"stat": "crane_rate", "mult": 0.6}]}},
-  {"id": "fog", "name": "Brouillard", "icon": "fog", "weight": 0.9, "tier": 1, "duration": 30,
+  {"id": "fog", "name": "Brouillard", "icon": "fog", "weight": 0.9, "tier": 1, "duration": 30, "weather": true,
    "text": "Purée de pois sur la rade : le pilotage est suspendu.",
    "mods": [{"stat": "pilot_speed", "mult": 0.0}]},
   {"id": "breakdown", "name": "Panne d'équipement", "icon": "wrench", "weight": 1.0, "tier": 1, "duration": 60,

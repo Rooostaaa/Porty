@@ -151,7 +151,7 @@ func _ready() -> void:
 			"shippaid":       # encaissement d'un navire au poste n°1 (captures, débogage seulement)
 				if DebugArgs.allowed() and diorama.has_signal("ship_paid"):
 					var amount := GameState.sim.avg_value_per_evp() * 400.0
-					diorama.emit_signal("ship_paid", Vector3(Layout.berth_center(0), 8.0, Layout.QUAY_Z), amount)
+					diorama.emit_signal("ship_paid", Layout.berth_center_pos(0) + Vector3(0, 8.0, 0), amount)
 	Capture.schedule(self)
 
 

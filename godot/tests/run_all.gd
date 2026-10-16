@@ -3,6 +3,7 @@ extends SceneTree
 ##   godot --headless --path godot --script res://tests/run_all.gd
 
 const Bot := preload("res://tests/bot.gd")
+const Hulls := preload("res://tests/h2/hulls.gd")
 
 var failures := 0
 var passes := 0
@@ -85,6 +86,7 @@ func _part3(db: DataDB) -> void:
 	test_f3(db)
 	test_g2(db)
 	test_h1(db)
+	test_h2a(db)
 
 
 func test_format() -> void:
@@ -699,9 +701,10 @@ func test_lot_b(db: DataDB) -> void:
 	ghost.free()
 	ghost2.free()
 	# les accessoires attendus de Blender sont déjà placés (bollards tous les 4 u le long du quai n°1)
-	var qp := Layout.quay_props(1, true, 1)
+	# (lot H2, recalé 9 → 8 : le quai n°1 allongé longe la darse n°1 de z −6 à 26, 32 u)
+	var qp := Layout.quay_props(1, true, 1, ["quay1", "quay_ext"])
 	var bollards := qp.filter(func(it: Dictionary) -> bool: return it.m == "bollard")
-	check(bollards.size() == 9 and qp.any(func(it: Dictionary) -> bool: return it.m == "ladder")
+	check(bollards.size() == 8 and qp.any(func(it: Dictionary) -> bool: return it.m == "ladder")
 		and Layout.street_props(1, []).any(func(it: Dictionary) -> bool: return it.m == "sidewalk"),
 		"emplacements préparés : %d bollards sur le quai n°1, échelles, trottoirs" % bollards.size())
 	# la bulle d'un bâtiment est au-dessus de son anchor_y (boîte englobante + 0,4 tant que assets_meta.json ne le donne pas)
@@ -740,7 +743,9 @@ func test_plan_baie(db: DataDB) -> void:
 		var in_zone := not poly.is_empty() and Geometry2D.is_point_in_polygon(Vector2(p.x, p.z), PackedVector2Array(poly))
 		var ok := in_zone
 		if bool(l.get("water", false)):
-			ok = not Layout.on_land(Vector2(p.x, p.z), true) and (in_zone or int(l.zone) == 1)
+			# (lot H2 : la digue du large est à flot avant d'être bâtie ; les cases à flot du vieux port sont dans la darse n°1)
+			ok = not Layout.on_land(Vector2(p.x, p.z), ["quay1", "quay_ext", "dredge1", "berth2", "berth3"]) \
+				and (in_zone or int(l.zone) == 1 or bid == Layout.SEAWALL)
 		if not ok:
 			outside.append(bid)
 	check(missing.is_empty() and Layout.LOTS.size() == db.buildings.size(), "chaque bâtiment a une case (%d/%d, manquent %s)" % [Layout.LOTS.size(), db.buildings.size(), str(missing)])
@@ -766,16 +771,18 @@ func test_plan_baie(db: DataDB) -> void:
 		if Geometry2D.triangulate_polygon(PackedVector2Array(Layout.zone_poly(z))).is_empty():
 			bad_zone += 1
 	check(bad_zone == 0, "zones cohérentes (bâtiment clé dans sa zone, polygone valide)")
-	# texture de distance : négative sur la terre, positive sur l'eau ; le terre-plein la change
-	var f0 := Terrain.distance_field(Layout.land_polys(false))
+	# texture de distance : négative sur la terre, positive sur l'eau ; (lot H2) creuser une darse change la terre en eau
+	# (recalé : « le terre-plein change l'eau en terre » — le terre-plein n'existe plus)
+	var f0 := Terrain.distance_field(Layout.land_polys(["quay1"]))
 	var f1 := Terrain.distance_field(Layout.land_polys(true))
-	var land_pts := [Vector2(-43, 6), Vector2(-80, 100), Vector2(-74, -30), Vector2(20, 20), Vector2(19, -44)]
-	var sea_pts := [Vector2(-56, -57), Vector2(-30, -60), Vector2(-26, -22), Vector2(100, -40), Vector2(-150, -100), Vector2(100, 10)]
+	var land_pts := [Vector2(-43, 6), Vector2(-80, 100), Vector2(-74, -30), Vector2(20, 20), Vector2(19, -44), Vector2(86, 20)]
+	var sea_pts := [Vector2(-56, -57), Vector2(-30, -60), Vector2(-26, -22), Vector2(100, -40), Vector2(-150, -100), Vector2(-21, 4)]
 	var neg := land_pts.all(func(p: Vector2) -> bool: return Terrain.field_at(f0, p) < 0.0)
 	var pos := sea_pts.all(func(p: Vector2) -> bool: return Terrain.field_at(f0, p) > 0.0)
 	check(neg and pos, "distance au rivage : négative sur la terre, positive sur l'eau")
-	check(Terrain.field_at(f0, Vector2(100, 10)) > 0.0 and Terrain.field_at(f1, Vector2(100, 10)) < 0.0 and Terrain.field_at(f1, Vector2(100, -30)) > 0.0,
-		"le terre-plein change l'eau en terre (et seulement lui)")
+	check(Terrain.field_at(f0, Vector2(50, 20)) < 0.0 and Terrain.field_at(f1, Vector2(50, 20)) > 0.0 and Terrain.field_at(f1, Vector2(86, 20)) < 0.0
+		and Terrain.field_at(f0, Vector2(-21, 30)) < 0.0 and Terrain.field_at(f1, Vector2(-21, 30)) > 0.0,
+		"creuser une darse change la terre en eau (et seulement elle)")
 	# une seule zone prochaine à tout instant, états cohérents avec les bâtiments, sur 4 parties de bot jusqu'à la fin
 	var worst_next := 0
 	var incoherent := 0
@@ -845,6 +852,8 @@ func test_trajets() -> void:
 		var paths := {"arrivée": Layout.ship_path_arrive(k), "départ furieux": Layout.ship_path_leave(Layout.anchor_pos(k))}
 		for bi in 4:
 			paths["pilotage %d" % bi] = Layout.ship_path_pilot(k, bi)
+			# (lot H2) le recul dans la darse, du point d'attente final à la hauteur du poste (axe, puis biais vers le quai)
+			paths["recul %d" % bi] = Layout.ship_path_back_in(bi, true, 8.6 if bi >= 2 else 7.6)
 		for key in paths:
 			for p in Layout.sample_path(paths[key], 1.5):
 				if Terrain.field_at(field, Vector2(p.x, p.z)) < 2.5:
@@ -859,13 +868,17 @@ func test_trajets() -> void:
 					if Terrain.field_at(field if tr >= 3 else field_t1, Vector2(pts[i].x, pts[i].z)) < 2.5:
 						ship_bad.append("départ %d T%d (%d, %d)" % [bi, tr, int(pts[i].x), int(pts[i].z)])
 						break
-		# un navire qui va au poste bi ne traverse jamais un autre poste occupé
+		# un navire qui va au poste bi ne traverse jamais un autre poste occupé (lot H2, recalé : il n'entre dans aucune darse avant
+		# son point d'attente final ; il recule ensuite dans la sienne seulement)
 		for k in 12:
 			for p in Layout.sample_path(Layout.ship_path_pilot(k, bi), 1.5):
-				for bj in 4:
-					var b: Dictionary = Layout.BERTHS[bj]
-					if bj != bi and p.x > float(b.x0) and p.x < float(b.x1) and p.z > Layout.SEA_EDGE_Z - 11.0:
-						ship_bad.append("pilotage %d traverse le poste %d" % [bi, bj])
+				for dk in Layout.DARSES.size():
+					if Layout.darse_rect(dk, true).grow(-0.5).has_point(Vector2(p.x, p.z)):
+						ship_bad.append("pilotage %d entre dans la darse %d" % [bi, dk + 1])
+			for p in Layout.sample_path(Layout.ship_path_back_in(bi, true, 8.6), 1.5):
+				for dk in Layout.DARSES.size():
+					if dk != Layout.berth_darse(bi) and Layout.darse_rect(dk, true).has_point(Vector2(p.x, p.z)):
+						ship_bad.append("recul %d entre dans la darse %d" % [bi, dk + 1])
 	check(ship_bad.is_empty(), "navires : jamais sur la terre, le brise-lames ni un autre poste (%s)" % str(ship_bad.slice(0, 4)))
 	# revue du 13/10 (décision 2) : aux paliers 1–2, les navires repartent par la passe, sur la voie de sortie du chenal,
 	# sans croiser la voie d'entrée (≥ 4 u entre les deux dans le chenal), et ne vont jamais à l'est ; au palier 3, par l'est
@@ -875,7 +888,7 @@ func test_trajets() -> void:
 		var dep := Layout.sample_path(Layout.ship_path_depart(bi, 8.0, 1), 1.0)
 		var crossed_pass := false
 		for p in dep:
-			if p.x > 60.0:
+			if p.x > 70.0:      # (lot H2, recalé 60 → 70 : le poste 2 borde la darse n°2, x 66)
 				lane_bad.append("départ T1 à l'est (%d, %d)" % [int(p.x), int(p.z)])
 				break
 			if p.z < Layout.PASS_Z - 1.0 and p.z > Layout.PASS_Z - 3.0 and p.x < bw_x0 and p.x > float(Layout.LIGHT_GREEN.x):
@@ -900,7 +913,7 @@ func test_trajets() -> void:
 	for bid in Layout.LOTS:
 		var l: Dictionary = Layout.LOTS[bid]
 		# (lot G2, recalé : la plateforme, le quai n°1 et la piste sont des sols, pas des murs)
-		if l.has("on") or bool(l.get("portal", false)) or bool(l.get("water", false)) or bool(l.get("ground", false)) or bid in ["gravel2", "gravel3", "asphalt", "rtg", "parking1", "parking2", "quay_ext", "berth2", "berth3", "berth4", "dredge1"]:
+		if l.has("on") or bool(l.get("portal", false)) or bool(l.get("water", false)) or bool(l.get("ground", false)) or bid in ["gravel2", "gravel3", "asphalt", "rtg", "parking1", "parking2", "quay_ext", "berth2", "berth3", "berth4", "dredge1", "imo", "oog"]:
 			continue
 		walls.append(Layout.lot_rect(bid))
 	for m in ["harbor_office", "hangar", "control_tower"]:
@@ -924,6 +937,9 @@ func test_trajets() -> void:
 			var rg := Layout.stop_range(tier, gate2)
 			var x: float = rg[0]
 			while x <= float(rg[1]) + 0.01:
+				if not Layout.stop_ok(x, tier, gate2):      # (lot H2 : seulement devant un doigt)
+					x += 4.4
+					continue
 				var routes := [Layout.truck_route_in(in_x, x)]
 				for lane in ([0, 1] if gate2 else [0]):
 					routes.append(Layout.truck_route_out(x, tier, gate2, lane))
@@ -953,25 +969,36 @@ func test_trajets() -> void:
 				if Terrain.field_at(field_t1, Vector2(p.x, p.z)) > 0.0:
 					truck_bad.append("eau (%d, %d)" % [int(p.x), int(p.z)])
 	check(truck_bad.is_empty() and no_portal == 0, "camions : sur la terre, hors des bâtiments, du tunnel ouest au tunnel est ; chaque voie de sortie sous un portique (%d sans) (%s)" % [no_portal, str(truck_bad.slice(0, 4))])
-	# engins : du tablier aux blocs réels, des blocs au bord du parc, retour
+	# engins : du tablier aux blocs réels, des blocs au bord du parc, retour (lot H2, recalé : par doigt — allée de tablier, allée
+	# de tête, allée centrale, bord de chargement ; chaque poste est servi par le parc de son doigt)
 	var eng_pts: Array[Vector3] = []
 	var eng_bad: Array[String] = []
 	for b in Layout.BLOCKS:
 		if int(b.zone) != 0:
 			continue
-		for i in int(b.bays):
-			var xs := float(b.x) + 2.0 + i * 4.4
-			for xa in [-30.0, -10.0, 10.0, 30.0, 70.0, 120.0]:
-				for r in [Layout.engine_route_to_block(xa, xs), Layout.engine_route_to_truck(xs), Layout.engine_route_back(xs, xa)]:
-					for p in Layout.sample_path(r, 1.5):
-						eng_pts.append(p)
-						if p.z > Layout.LANE_BAND[0] - 0.6:
-							eng_bad.append("voie des camions (%d, %d)" % [int(p.x), int(p.z)])
-						if Terrain.field_at(field, Vector2(p.x, p.z)) > 0.0:
-							eng_bad.append("eau (%d, %d)" % [int(p.x), int(p.z)])
-						for w in walls:
-							if w.has_point(Vector2(p.x, p.z)):
-								eng_bad.append("bâtiment (%d, %d)" % [int(p.x), int(p.z)])
+		var fi := Layout.finger_at(Layout.block_rect(b).get_center().x)
+		for slot in Layout.block_slots(b):
+			if slot.y > 0.1:
+				continue
+			for bi in 4:
+				if Layout.berth_finger(bi) != fi:
+					continue
+				for za in [-2.0, 10.0, 30.0]:
+					var ap := Vector3(Layout.apron_lane(bi), 0, za)
+					var xstop := clampf(slot.x, float(Layout.FINGERS[fi].x0) + 5.0, float(Layout.FINGERS[fi].x1) - 5.0)
+					var tr := Layout.engine_route_to_truck(slot, xstop)
+					for r in [Layout.engine_route_to_block(ap, slot), tr, Layout.engine_route_home(tr[-1], ap)]:
+						for p in Layout.sample_path(r, 1.5):
+							eng_pts.append(p)
+							if p.z > Layout.LANE_BAND[0] - 0.6:
+								eng_bad.append("voie des camions (%d, %d)" % [int(p.x), int(p.z)])
+							if Terrain.field_at(field, Vector2(p.x, p.z)) > 0.0:
+								eng_bad.append("eau (%d, %d)" % [int(p.x), int(p.z)])
+							if Layout.finger_at(p.x) != fi:
+								eng_bad.append("hors du doigt (%d, %d)" % [int(p.x), int(p.z)])
+							for w in walls:
+								if w.has_point(Vector2(p.x, p.z)):
+									eng_bad.append("bâtiment (%d, %d)" % [int(p.x), int(p.z)])
 	var tgrid := _grid_of(truck_pts)
 	var egrid := _grid_of(eng_pts)
 	var near := INF
@@ -981,8 +1008,8 @@ func test_trajets() -> void:
 	# personnages : aucun sur le trajet d'un camion ou d'un engin
 	var walks: Array = []
 	for i in 3:
-		var a := Vector3(-33.0 + i * 9.0, 0.8, -4.2)
-		walks.append([a, a + Vector3(5, 0, 0)])
+		var a := Vector3(-4.6, 0.8, -3.0 + i * 5.0)      # (lot H2 : le long du quai n°1, comme Diorama)
+		walks.append([a, a + Vector3(0, 0, 4)])
 	walks.append([Vector3(-46.5, 0.8, -4.5), Vector3(-41.5, 0.8, -4.5)])
 	walks.append([Layout.CUSTOMS_HUT + Vector3(2, 0, 4.2), Layout.CUSTOMS_HUT + Vector3(-2, 0, 4.2)])
 	for d in PortSim.DEPTS:
@@ -1310,7 +1337,8 @@ func test_revue2_baie(_db: DataDB) -> void:
 		var hs2: Vector2 = pair[2]
 		var b1 := Layout.berth_ship_pos(int(pair[0]), hs2.y * 2.0)
 		var b2 := Layout.berth_ship_pos(int(pair[1]), hs2.y * 2.0)
-		var g2 := _hulls_gap(Vector2(b1.x, b1.z), Vector2(1, 0), hs2.x, hs2.y, Vector2(b2.x, b2.z), Vector2(1, 0), hs2.x, hs2.y)
+		# (lot H2, recalé : les navires à quai sont étrave au nord, le long des darses ; postes 3 et 4 face à face dans la darse n°3)
+		var g2 := _hulls_gap(Vector2(b1.x, b1.z), Vector2(0, -1), hs2.x, hs2.y, Vector2(b2.x, b2.z), Vector2(0, -1), hs2.x, hs2.y)
 		if g2 < 2.0:
 			gaps.append("postes %d/%d (%s u)" % [int(pair[0]), int(pair[1]), Fmt.num(g2)])
 	var lane_gap := Layout.CHANNEL_LANE_IN + Layout.CHANNEL_LANE_OUT - 2.0 * fd.y
@@ -1395,7 +1423,7 @@ func test_c7(db: DataDB) -> void:
 	# C3 : terrain rendu une face : chaque triangle (dessus et flancs, polygone dans les deux sens) est tourné vers sa normale
 	var wrong := 0
 	var tris := 0
-	for poly in [Layout.COAST, Layout.RECLAIM, Layout.zone_by_id(9).poly, Layout.BREAKWATER]:
+	for poly in [Layout.COAST, Layout.BREAKWATER_E, Layout.zone_by_id(9).poly, Layout.BREAKWATER]:      # (lot H2 : digue du large au lieu du terre-plein)
 		for rev in [false, true]:
 			var pa: Array = (poly as Array).duplicate()
 			if rev:
@@ -1519,27 +1547,29 @@ func test_c7(db: DataDB) -> void:
 			z_ok = false
 		zs.built.append(bid)
 	check(is_same(sc1, sc2) and sc1.size() > 50 and z_ok, "C7 D : végétation en cache (%d éléments), prochain achat et zone prochaine en cache et justes" % sc1.size())
-	# C4 : barges du terre-plein — couloir le long du futur bord du quai, loin des places de mouillage et de la voie de départ
-	# du palier 3 (avant C7 : elles descendaient du large à travers le mouillage n°5)
+	# C4 (lot H2, recalé : plus de barges du terre-plein) : la digue du large est sur l'eau, loin des places de mouillage (une
+	# coque de panamax au mouillage à ≥ 8 u) et des voies de départ (D3 : ≥ 8 u ; D2 : ≥ 8 u)
+	var sw := PackedVector2Array(Layout.BREAKWATER_E)
 	var near_anchor := INF
 	var near_lane := INF
 	var on_land_b := false
-	for i in Layout.RECLAIM_BARGES.size():
-		var a2 := Vector2(float(Layout.RECLAIM_BARGE_X0[i]), Layout.RECLAIM_BARGE_LANE_Z)
-		var b2 := Vector2(float(Layout.RECLAIM_BARGES[i]), Layout.RECLAIM_BARGE_LANE_Z)
-		for k in 30:
-			var ap := Layout.anchor_pos(k)
-			var q2 := Vector2(ap.x, ap.z)
-			near_anchor = minf(near_anchor, Geometry2D.get_closest_point_to_segment(q2, a2, b2).distance_to(q2))
-		for bi in 2:          # (les quais n°3 et 4 n'existent pas encore pendant le comblement)
-			for pp in Layout.sample_path(Layout.ship_path_depart(bi, 8.0, 3), 1.0):
-				var q3 := Vector2(pp.x, pp.z)
-				near_lane = minf(near_lane, Geometry2D.get_closest_point_to_segment(q3, a2, b2).distance_to(q3))
-		for t in 21:
-			if Layout.on_land(a2.lerp(b2, t / 20.0), false):
-				on_land_b = true
-	check(near_anchor > 30.0 and near_lane > 8.0 and not on_land_b,
-		"C7 C4 : barges à %.0f u du mouillage le plus proche, à %.1f u de la voie de départ T3, jamais sur la terre" % [near_anchor, near_lane])
+	var pmh := _ship_half("panamax")
+	var ay := Vector2(cos(Layout.ANCHOR_YAW), -sin(Layout.ANCHOR_YAW))
+	for k in 30:
+		var ap := Layout.anchor_pos(k)
+		var ac := Vector2(ap.x, ap.z)
+		for su: float in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+			for sgn: float in [-1.0, 1.0]:
+				var hq: Vector2 = ac + ay * pmh.x * su + Vector2(-ay.y, ay.x) * pmh.y * sgn
+				near_anchor = minf(near_anchor, _poly_dist(hq, sw))
+	for bi in [1, 2, 3]:
+		for pp in Layout.sample_path(Layout.ship_path_depart(bi, 8.0, 3), 1.0):
+			near_lane = minf(near_lane, _poly_dist(Vector2(pp.x, pp.z), sw))
+	for qsw in sw:
+		if Layout.on_land(qsw, ["quay1", "quay_ext", "dredge1", "berth2", "berth3", "berth4"]):
+			on_land_b = true
+	check(near_anchor > 6.0 and near_lane > 8.0 and not on_land_b,
+		"C7 C4 (lot H2) : digue du large à %.1f u de la coque d'un panamax au mouillage le plus proche, à %.1f u des voies de départ, sur l'eau" % [near_anchor, near_lane])
 
 
 # ---------------------------------------------------------------------------
@@ -1630,9 +1660,10 @@ func test_d_monde(db: DataDB) -> void:
 	for g in Layout.GROUNDS:
 		if String(g.cond) == "rail" and String(g.type) == "road_z" and float(g.r[1]) <= float(Layout.LANE_BAND[1]) and float(g.r[3]) >= Layout.lot_rect("rail").position.y - 3.0:
 			link = true
-	check(r12.position.y >= 38.0 and r12.end.y <= 82.0 and Layout.RAIL_Z > 50.0 and Layout.RAIL_Z < 62.0 and link
-		and Layout.lot_rect("rail").position.y > 46.0,
-		"D I2 : gare contre le terre-plein (zone z %d–%d, voie z %d), reliée à la voie des camions du terre-plein" % [int(r12.position.y), int(r12.end.y), int(Layout.RAIL_Z)])
+	# (lot H2, recalé : la gare au bout du terminal, derrière la voie des camions reculée, z 56–82)
+	check(r12.position.y >= 54.0 and r12.end.y <= 84.0 and Layout.RAIL_Z > 60.0 and Layout.RAIL_Z < 82.0 and link
+		and Layout.lot_rect("rail").position.y > Layout.LANE_BAND[1],
+		"D I2 : gare au bout du terminal (zone z %d–%d, voie z %d), reliée à la voie des camions" % [int(r12.position.y), int(r12.end.y), int(Layout.RAIL_Z)])
 	# I3 : brise-lames est et passe est — les navires des postes 3–4 arrivent et repartent par l'est, ceux des postes 1–2
 	# par la passe ouest ; aucun trajet ne coupe un brise-lames ni la terre (2,5 u), coques à ≥ 1,5 u des feux de la passe est
 	var f1 := Terrain.distance_field(Layout.land_polys(true))
@@ -1674,14 +1705,18 @@ func test_d_monde(db: DataDB) -> void:
 	var west_t3 := true
 	for bi in [0, 1]:
 		for p in Layout.sample_path(Layout.ship_path_depart(bi, 8.0, 3), 1.0):
-			if p.x > 60.0:
+			if p.x > 70.0:      # (lot H2, recalé 60 → 70 : le poste 2 borde la darse n°2, x 66)
 				west_t3 = false
-	check(east_bad.is_empty() and west_t3 and worst >= 1.5 and Layout.land_polys(true).size() == 4,
+	# (lot H2, recalé 4 → 3 polygones : continent découpé des darses, brise-lames ouest, digue du large — tout creusé)
+	check(east_bad.is_empty() and west_t3 and worst >= 1.5 and Layout.land_polys(true).size() == 3,
 		"D I3 : postes 3–4 par la passe est (coques à %.1f u des feux au plus près), postes 1–2 par la passe ouest au T3, aucun brise-lames coupé (%s)" % [worst, str(east_bad.slice(0, 3))])
 	# cosmétiques : touchers Quais / Portiques séparés ; IMO décalée du GNL ; GNL avec son appontement au bord du terre-plein ;
 	# repère du quai n°2 cohérent avec sa zone (pas le portique du quai n°1)
 	var dq := Layout.dept_pos("berths", 1).distance_to(Layout.dept_pos("cranes", 1))
-	var gap_imo := Layout.lot_rect("lng").position.x - Layout.lot_rect("imo").end.x
+	# (lot H2, recalé : IMO et GNL l'un derrière l'autre au bout du doigt F3 — écart entre les deux cases, en x ou en z)
+	var lr := Layout.lot_rect("lng")
+	var ir := Layout.lot_rect("imo")
+	var gap_imo := maxf(maxf(lr.position.x - ir.end.x, ir.position.x - lr.end.x), maxf(lr.position.y - ir.end.y, ir.position.y - lr.end.y))
 	var jet_ok := false
 	for j in Layout.JETTIES:
 		var c: Vector2 = j.c
@@ -2058,15 +2093,15 @@ func test_e_flux(_db: DataDB) -> void:
 	check(worst_turn < 30.0, "E7 : camions au chargement — de l'arrivée à l'arrêt (face à l'ouest) puis au départ, le cap change de %.1f° au plus (%s) : plus de pivot sur place" % [worst_turn, turn_at])
 	# E8 : demi-tour par groupe de blocs — au T3, un camion d'un bloc du T1 fait moins de 450 u (gate → tunnel est)
 	var in_x0 := Layout.road_in_x(true)
-	var stop_t1 := -12.0
+	var stop_t1 := 10.0      # (lot H2, recalé −12 → 10 : un arrêt devant le doigt F1)
 	var len_now := Layout.path_length(Layout.truck_route_in(in_x0, stop_t1)) + Layout.path_length(Layout.truck_route_out(stop_t1, 3, true, 0))
 	var len_before := Layout.path_length(Layout.truck_route_in(in_x0, stop_t1, 3)) + Layout.path_length(Layout.truck_route_out(stop_t1, 3, true, 0))
 	var turns_ok := true
-	for xs in [-12.0, 20.0, 100.0]:
+	for xs in [10.0, 80.0, 160.0]:      # (lot H2 : un arrêt devant chaque doigt)
 		var r := Layout.truck_route_in(in_x0, xs)
 		if not is_equal_approx((r[3] as Vector3).x, Layout.lane_end_x(Layout.tier_for_stop(xs))):
 			turns_ok = false
-	check(len_now < 450.0 and turns_ok and Layout.crossover_xs(3) == [-2.0, 45.0] and Layout.crossover_xs(1).is_empty(),
+	check(len_now < 450.0 and turns_ok and Layout.crossover_xs(3) == [29.0, 101.0] and Layout.crossover_xs(1).is_empty(),
 		"E8 : au T3, camion d'un bloc du T1 : %d u (avant : %d u) ; demi-tour au bout de son groupe de blocs, passages dessinés en x %s" % [
 		int(len_now), int(len_before), str(Layout.crossover_xs(3))])
 	# E9 : passe est naviguée à droite (arrivée au nord, départ au sud) ; le départ quitte la passe à l'est de la ligne
@@ -2084,8 +2119,21 @@ func test_e_flux(_db: DataDB) -> void:
 			if Geometry2D.segment_intersects_segment(a0, a1, Vector2(dep[j].x, dep[j].z), Vector2(dep[j + 1].x, dep[j + 1].z)) != null:
 				cross_east = true
 	var lanes_gap := absf(Layout.DEPART_E_Z - Layout.ARRIVE_E_Z) - 2.0 * pm.y
-	check(Layout.ARRIVE_E_Z < Layout.DEPART_E_Z and not cross_east and lanes_gap >= 2.0 and (Layout.DEPART_EAST[0] as Vector3).x > (Layout.EAST_APPROACH_E[1] as Vector3).x,
-		"E9 : passe est à droite (arrivée z %s au nord, départ z %s au sud), départ à l'est de la ligne d'arrivée, aucun croisement au large ; deux panamax à %s u (N10)" % [
+	# (lot H2, recalé : D3 s'aborde cap au nord — arrivée au sud (z −26), départ au nord (z −46) ; ils se croisent forcément,
+	# le mouillage étant à l'ouest et la sortie à l'est : chaque croisement est dans la fenêtre « est », qui le règle)
+	var est_r := Rect2()
+	for w in Layout.SHIP_CROSSINGS:
+		if String(w.id) == "est":
+			est_r = w.rect
+	var cross_out := false
+	for i in arr.size() - 1:
+		for j in dep.size() - 1:
+			var x0: Variant = Geometry2D.segment_intersects_segment(Vector2(arr[i].x, arr[i].z), Vector2(arr[i + 1].x, arr[i + 1].z),
+				Vector2(dep[j].x, dep[j].z), Vector2(dep[j + 1].x, dep[j + 1].z))
+			if x0 != null and not est_r.grow(0.5).has_point(x0):
+				cross_out = true
+	check(not cross_out and lanes_gap >= 2.0 and (Layout.DEPART_EAST[0] as Vector3).x < (Layout.EAST_APPROACH_E[0] as Vector3).x,
+		"E9 (lot H2) : passe est, arrivée z %s et départ z %s, deux panamax à %s u (N10) ; tout croisement au large dans la fenêtre « est »" % [
 		Fmt.num(Layout.ARRIVE_E_Z), Fmt.num(Layout.DEPART_E_Z), Fmt.num(lanes_gap)])
 	# règle d'attente du croisement balisé : l'autre courant attend, à égalité le plus petit identifiant passe ; même courant
 	# (suivi) : pas de règle de croisement
@@ -2172,7 +2220,7 @@ func test_e_flux(_db: DataDB) -> void:
 	# voie et aux parkings, discrète ; crique : rien d'autre que la cale et son bateau à moins de 4 u de la cale
 	var lng := Layout.lot_rect("lng")
 	var b4 := Layout.lot_rect("berth4")
-	var gap_lng := lng.position.y - b4.end.y
+	var gap_lng := lng.position.x - b4.end.x      # (lot H2, recalé : le GNL au bout du doigt F3, à l'est du tablier du poste 4)
 	var gap_rtg := Layout.lot_rect("imo").position.x - Layout.lot_rect("rtg").end.x
 	var roof := Layout.PROPS.filter(func(p: Dictionary) -> bool: return String(p.cond) == "rpilot" and p.has("roof")).size() == 1
 	var z8 := Layout.zone_by_id(8)
@@ -2211,7 +2259,9 @@ func _ef_crossings() -> Dictionary:
 		for bi in 4:
 			var hp: Vector2 = pm if bi >= 2 else fd
 			var pil := Layout.ship_path_pilot(k, bi)
-			pil.append(Layout.berth_ship_pos(bi, hp.y * 2.0))          # puis l'accostage
+			# puis l'accostage (lot H2 : le recul dans la darse, puis le glissement au poste)
+			pil.append_array(Layout.ship_path_back_in(bi, null, hp.y * 2.0).slice(1))
+			pil.append(Layout.berth_ship_pos(bi, hp.y * 2.0))
 			P.append({"name": "pilotage %d→%d" % [k, bi], "p": pil, "stream": "ew" if bi >= 2 else "ns",
 				"h": pm if bi >= 2 else fd, "anchor": k, "berth": bi, "yaw0": 0.35, "leave": 40.0,
 				"streams": ShipRules.ship_streams(Ship.State.PILOTING, bi)})
@@ -2390,8 +2440,8 @@ func test_f2(db: DataDB) -> void:
 		pts.append_array(Layout.sample_path(Layout.ship_path_leave(Layout.anchor_pos(k)), 4.0))
 	for bi in 4:
 		pts.append_array(Layout.sample_path(Layout.ship_path_depart(bi, 8.0, 3), 4.0))
-	for i in Layout.RECLAIM_BARGE_X0.size():
-		pts.append(Vector3(float(Layout.RECLAIM_BARGE_X0[i]), 0, Layout.RECLAIM_BARGE_LANE_Z))
+	for bi in [2, 3]:          # (lot H2 : au lieu des barges du terre-plein, les arrivées par la passe est)
+		pts.append_array(Layout.sample_path(Layout.ship_path_pilot(4, bi), 4.0))
 	var near_ship := INF
 	for p in pts:
 		for poly in Layout.gulf_polys():
@@ -2469,7 +2519,7 @@ func test_f2(db: DataDB) -> void:
 	var grp_ok := grps.keys().all(func(k: String) -> bool: return ids.has(k)) and grps.has("quay1") and grps.has("yard") and grps.has("track")
 	var dur_ok := ids.all(func(bid: String) -> bool: return float(Layout.site_spec(bid).get("dur", 0.0)) >= 3.0 and float(Layout.site_spec(bid).get("dur", 0.0)) <= 6.0)
 	var jetty := Layout.before_state("quay1").filter(func(it: Dictionary) -> bool: return String(it.m) == "jetty_ruin")
-	var jetty_ok := jetty.size() == 1 and (jetty[0].p as Vector3).z < Layout.SEA_EDGE_Z and (jetty[0].p as Vector3).x > -36.0 and (jetty[0].p as Vector3).x < -12.0
+	var jetty_ok := jetty.size() == 1 and (jetty[0].p as Vector3).z < Layout.SEA_EDGE_Z and (jetty[0].p as Vector3).x > -36.0 and (jetty[0].p as Vector3).x < -4.0      # (lot H2 : sur la future ligne du quai n°1, x −8)
 	var yard_ok := Layout.before_state("track").all(func(it: Dictionary) -> bool: return Layout.on_land(Vector2((it.p as Vector3).x, (it.p as Vector3).z), false)) \
 		and Layout.STARTER.is_empty()
 	check(ids == PortSim.STARTERS and grp_ok and dur_ok and jetty_ok and yard_ok,
@@ -2505,8 +2555,8 @@ func test_f2(db: DataDB) -> void:
 	for p in Layout.sample_path(fp, 1.5):
 		if Terrain.field_at(field, Vector2(p.x, p.z)) < 2.5:
 			fp_land += 1
-	check(fp.size() > 4 and fp[0].distance_to(Layout.channel_lane(Layout.FIRST_SHIP_LANE, 1)) < 0.01 and fp[-1].distance_to(Vector3(Layout.berth_center(0), 0, Layout.APPROACH_Z)) < 0.01 and fp_land == 0,
-		"F2 : premier navire — du chenal (%d, %d) à la voie d'approche du poste n°1, jamais à moins de 2,5 u de la terre (%d)" % [int(fp[0].x), int(fp[0].z), fp_land])
+	check(fp.size() > 4 and fp[0].distance_to(Layout.channel_lane(Layout.FIRST_SHIP_LANE, 1)) < 0.01 and fp[-1].distance_to(Layout.berth_gate(0)) < 0.01 and fp_land == 0,
+		"F2 : premier navire — du chenal (%d, %d) au point d'attente du poste n°1 (lot H2), jamais à moins de 2,5 u de la terre (%d)" % [int(fp[0].x), int(fp[0].z), fp_land])
 	# 8. intro : trois cartes de la narratrice (palier 0, « La Crique ») — la lettre du notaire, la crique et les voisins, le
 	# vieux quai à rebâtir ; ton de l'univers (Odette, golfe d'Ambre), lisibles (≤ 280 caractères)
 	var cards: Array = db.tier_def(0).get("intro", [])
@@ -3350,3 +3400,169 @@ func test_h1(db: DataDB) -> void:
 		c8.step(0.25)
 	check(guard < 4000 and same and c8.fishing.hold <= 0 and c8.money > m8 and c8.fishing.served > 0,
 		"H1 sauvegarde v9 : aller-retour avec un bateau à la pompe et un à l'attente (même suite : %s) ; une partie v8 se charge, les stations repartent (%d services)" % [same, c8.fishing.served])
+
+
+# ---------------------------------------------------------------------------
+# Lot H2-a — les darses en peigne (docs/ORDRE_H2_DARSES.md § 4.1) : géométrie des darses et des postes orientés, manœuvres
+# des navires (arrivée, recul, glissement, départ) coque par coque, attentes de darse, digue du large (simulation)
+# ---------------------------------------------------------------------------
+
+func test_h2a(db: DataDB) -> void:
+	print("[lot H2-a : darses en peigne, postes orientés, recul, digue du large]")
+	# fond de la darse n°1 selon les bâtiments ; bouchons des darses pas encore creusées
+	check(Layout.darse_head(0, ["quay1"]) == 14.0 and Layout.darse_head(0, ["quay1", "quay_ext"]) == 26.0
+		and Layout.darse_head(0, ["quay1", "quay_ext", "dredge1"]) == 42.0 and Layout.darse_head(0, []) == Layout.FRONT_Z
+		and Layout.plugs([]).size() == 3 and Layout.plugs(true).is_empty()
+		and not Layout.on_land(Vector2(-21, 10), ["quay1"]) and Layout.on_land(Vector2(-21, 20), ["quay1"]),
+		"H2 : fond de la darse n°1 à 14 / 26 / 42 (quai n°1, allongement, dragage) ; bouchons des darses à creuser")
+	# chaque poste à pleine profondeur contient son plus grand navire ; deux panamax face à face dans la darse n°3
+	var all := ["quay1", "quay_ext", "dredge1", "berth2", "berth3", "berth4", Layout.SEAWALL]
+	var fit: Array[String] = []
+	for bi in 4:
+		var sz := Hulls.ship_size(Hulls.berth_class(bi, all))
+		var p := Layout.berth_ship_pos(bi, sz.y, all)
+		var r := Layout.darse_rect(Layout.berth_darse(bi), all)
+		var hull := Rect2(p.x - sz.y * 0.5, p.z - sz.x * 0.5, sz.y, sz.x)
+		if hull.position.y - r.position.y < 1.0 or r.end.y - hull.end.y < 1.0 or not r.encloses(hull):
+			fit.append("poste %d" % (bi + 1))
+	var pm := Hulls.ship_size("panamax")
+	var gap := (Layout.berth_ship_pos(3, pm.y, all).x - pm.y * 0.5) - (Layout.berth_ship_pos(2, pm.y, all).x + pm.y * 0.5)
+	check(fit.is_empty() and gap >= pm.y + 2.0 * ShipRules.SWEEP_SIDE,
+		"H2 : chaque poste contient son plus grand navire (≥ 1 u au fond et à l'entrée) %s ; deux panamax dans la darse n°3 à %s u (≥ largeur + 2 × balayage)" % [str(fit), Fmt.num(gap)])
+	# manœuvres, coque par coque : arrivée (3–4 places du mouillage), recul, glissement, départ en marche avant ; obstacles : la
+	# terre selon ce qui est creusé, la digue du large, les navires amarrés aux autres postes de la darse
+	var cases := [[0, ["quay1"]], [0, ["quay1", "quay_ext"]], [0, ["quay1", "quay_ext", "dredge1"]],
+		[1, ["quay1", "quay_ext", "dredge1", "berth2"]], [2, all], [3, all],
+		[2, ["quay1", "quay_ext", "dredge1", "berth2", "berth3"]]]
+	var bad: Array[String] = []
+	var worst := {"arr": INF, "back": INF, "crab": INF, "dep": INF}
+	for c in cases:
+		var bi: int = c[0]
+		var built: Array = c[1]
+		var sz := Hulls.ship_size(Hulls.berth_class(bi, built))
+		var obs: Array = []
+		obs.append_array(Layout.land_polys(built))
+		obs.append_array(Hulls.moored_hulls(bi, built))
+		for k in ([0, 1, 4, 7] if bi < 2 else [0, 4, 7]):
+			var d := float(Hulls.min_clearance(Hulls.path_poses(Layout.ship_path_pilot(k, bi), 1.0, false), sz, obs).d)
+			worst.arr = minf(float(worst.arr), d)
+			if d < 2.0:
+				bad.append("arrivée %d→%d %.1f" % [k + 1, bi + 1, d])
+		var bp := Hulls.back_poses(Layout.ship_path_back_in(bi, built, sz.y))
+		var db2 := float(Hulls.min_clearance(bp.slice(0, bp.size() - 4), sz, obs).d)
+		var de := float(Hulls.min_clearance(bp.slice(bp.size() - 1), sz, obs).d)
+		worst.back = minf(float(worst.back), db2)
+		if db2 < 2.0 or de < 1.0:
+			bad.append("recul %d %.1f/%.1f" % [bi + 1, db2, de])
+		var dc := float(Hulls.min_clearance(Hulls.path_poses(Layout.ship_path_crab_in(bi, sz.y, built), 0.5, false, 0.0), sz, obs).d)
+		worst.crab = minf(float(worst.crab), dc)
+		if dc < 0.5:
+			bad.append("glissement %d %.1f" % [bi + 1, dc])
+		var dep := Layout.ship_path_depart(bi, sz.y, 3, built)
+		var dd := float(Hulls.min_clearance(Hulls.path_poses(dep.slice(1), 1.0, false).slice(4), sz, obs).d)
+		worst.dep = minf(float(worst.dep), dd)
+		if dd < 2.0:
+			bad.append("départ %d %.1f" % [bi + 1, dd])
+	check(bad.is_empty(), "H2 : manœuvres coque par coque — arrivée %s u, recul %s u, glissement %s u (0,6 au quai), départ %s u (≥ 2) %s" % [
+		Fmt.num(float(worst.arr)), Fmt.num(float(worst.back)), Fmt.num(float(worst.crab)), Fmt.num(float(worst.dep)), str(bad.slice(0, 4))])
+	# l'arrivée finit au point d'attente final au bon cap ; recul ≤ REVERSE_V, lacet dans l'arc ≤ le plafond de ShipView
+	var heads_ok := true
+	for bi in 4:
+		var pp := Layout.ship_path_pilot(0, bi)
+		var hd := Vector2(pp[-1].x - pp[-2].x, pp[-1].z - pp[-2].z).normalized()
+		if (pp[-1] as Vector3).distance_to(Layout.berth_gate(bi)) > 0.3 or hd.dot(Layout.berth_gate_heading(bi)) < 0.97:
+			heads_ok = false
+	# plafond lu dans la source de ShipView (le script de vue dépend de l'autoload Sim, absent en --script)
+	var yaw_cap := 0.0
+	for ln in FileAccess.get_file_as_string("res://scripts/world/ship_view.gd").split("\n"):
+		if ln.begins_with("const MAX_YAW_RATE"):
+			yaw_cap = ln.split("=")[1].split("#")[0].strip_edges().to_float()
+	check(yaw_cap > 0.0 and heads_ok and Layout.REVERSE_V <= 3.2 and Layout.REVERSE_V / Layout.REV_R <= yaw_cap + 0.001,
+		"H2 : arrivée au point d'attente final, cap à l'est (darses 1–2) ou au nord (darse 3) ; recul à %s u/s au plus, lacet %s rad/s dans l'arc (≤ %s)" % [
+		Fmt.num(Layout.REVERSE_V), Fmt.num(Layout.REVERSE_V / Layout.REV_R), Fmt.num(yaw_cap)])
+	# attente de darse hors des routes de départ de la darse (darses 2 et 3) ; un navire qui y attend gêne-t-il un départ ?
+	var hold_bad: Array[String] = []
+	for bi in [1, 2, 3]:
+		var built2: Array = all
+		var sz2 := Hulls.ship_size(Hulls.berth_class(bi, built2))
+		var hold := Layout.pilot_gates(bi)[1]
+		var hf := Vector2(0, -1)
+		for ps in Hulls.path_poses(Layout.ship_path_pilot(0 if bi < 2 else 4, bi), 1.0, false):
+			if (ps.c as Vector2).distance_to(Vector2(hold.x, hold.z)) < 1.0:
+				hf = ps.fwd
+		var hh := [Hulls.hull_poly(Vector2(hold.x, hold.z), hf, sz2)]
+		for bj in 4:
+			if Layout.berth_darse(bj) == Layout.berth_darse(bi):
+				var dj := float(Hulls.min_clearance(Hulls.path_poses(Layout.ship_path_depart(bj, sz2.y, 3, built2).slice(1), 1.0, false), sz2, hh).d)
+				if dj < 2.0:
+					hold_bad.append("attente %d / départ %d (%.1f)" % [bi + 1, bj + 1, dj])
+	check(hold_bad.is_empty(), "H2 : attentes de darse (darse n°2 x %d, darse n°3 au large) hors des routes de départ de leur darse %s" % [
+		int(Layout.HOLD_D2.x), str(hold_bad)])
+	# fenêtre de darse : un seul navire en mouvement dans une darse (entrée contre sortie)
+	var r3: Rect2 = Rect2()
+	for w in Layout.SHIP_CROSSINGS:
+		if String(w.id) == "d3":
+			r3 = w.rect
+	var c3 := r3.get_center()
+	var it_in := {"id": 4, "p": c3, "dir": Vector2(0, 1), "len": 45.0, "w": 8.6, "streams": ShipRules.ship_streams(Ship.State.PILOTING, 2), "ahead": [c3 + Vector2(0, 8)]}
+	var it_out := {"id": 9, "p": c3 + Vector2(0, -r3.size.y), "dir": Vector2(0, 1), "len": 45.0, "w": 8.6,
+		"streams": ShipRules.ship_streams(Ship.State.DEPARTING, 3), "ahead": [c3 + Vector2(0, -r3.size.y * 0.3)]}
+	var held := ShipRules.crossing_holds([it_in, it_out])
+	check(held.has(9) and not held.has(4) and String(ShipRules.ship_streams(Ship.State.DEPARTING, 3).d3) == "out"
+		and String(ShipRules.ship_streams(Ship.State.PILOTING, 0).d1) == "in",
+		"H2 : fenêtre de la darse n°3 — le départ du poste 4 attend le navire qui entre au poste 3 (%s)" % str(held.keys()))
+	# camions seulement devant un doigt ; engins par doigt (allée de tablier, de tête, centrale) hors des blocs
+	var stop_bad := 0
+	for t in [1, 2, 3]:
+		var rg := Layout.stop_range(t, false)
+		var x: float = rg[0]
+		while x <= float(rg[1]):
+			if Layout.stop_ok(x, t, false) and Layout.finger_at(x) < 0:
+				stop_bad += 1
+			for dk in Layout.DARSES.size():
+				var d: Dictionary = Layout.DARSES[dk]
+				if Layout.stop_ok(x, t, false) and x > float(d.x0) and x < float(d.x1):
+					stop_bad += 1
+			x += 0.5
+	var lane_bad := 0
+	for bi in 4:
+		var xa := Layout.apron_lane(bi)
+		var xc := Layout.aisle_x(xa)
+		for b in Layout.BLOCKS:
+			var r := Layout.block_rect(b)
+			if Layout.finger_at(r.get_center().x) != Layout.berth_finger(bi):
+				continue
+			if (xa > r.position.x - 1.2 and xa < r.end.x + 1.2) or (xc > r.position.x - 1.2 and xc < r.end.x + 1.2):
+				lane_bad += 1
+	check(stop_bad == 0 and lane_bad == 0, "H2 : arrêts des camions seulement devant un doigt (%d hors) ; allées de tablier et centrales hors des blocs (%d)" % [stop_bad, lane_bad])
+	# digue du large (simulation) : sans elle, les postes de la darse profonde n'ont que la profondeur 3 (pas de panamax) ;
+	# vent fort et brouillard 40 % plus courts ; une partie d'avant la digue qui a le quai profond la reçoit au chargement
+	var s0 := PortSim.new(db, 3)
+	s0.built.assign(["platform", "quay1", "hut", "track", "crane_mobile", "yard", "berth2", "berth3"])
+	s0.rebuild_infra()
+	var d_without := s0.max_depth()
+	s0.built.append(Layout.SEAWALL)
+	s0.rebuild_infra()
+	var d_with := s0.max_depth()
+	s0.tier = 3
+	Hazards.start(s0, "wind")
+	var wind_d := float(s0.active_event.until) - float(s0.active_event.start)
+	Hazards.end_event(s0)
+	var sv := s0.to_dict()
+	(sv.built as Array).erase(Layout.SEAWALL)
+	var s1 := PortSim.new(db, 3)
+	s1.from_dict(sv)
+	var sw_b: Dictionary = db.building_by_id.get(Layout.SEAWALL, {})
+	check(d_without == 3 and d_with == 4 and absf(wind_d - 25.0 * 0.6) < 0.01 and s1.built.has(Layout.SEAWALL) and s1.max_depth() == 4
+		and int(sw_b.get("tier", 0)) == 3 and String(sw_b.get("desc", "")).contains("40"),
+		"H2 : digue du large — profondeur %d sans, %d avec ; vent fort %s s ; ancienne partie au quai profond : digue reçue (%s)" % [
+		d_without, d_with, Fmt.num(wind_d), str(s1.built.has(Layout.SEAWALL))])
+	# sauvegarde v9 du T3 (fixture) : chargée sur le nouveau plan, la digue reçue, rien de perdu
+	var f3 := _fixture(db, "bot_t3")
+	var lost := false
+	var raw: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://tests/fixtures/bot_t3.json"))
+	for b in raw.sim.get("built", []):
+		if not f3.built.has(String(b)):
+			lost = true
+	check(not lost and f3.tier == 3 and (not f3.built.has("berth3") or f3.built.has(Layout.SEAWALL)),
+		"H2 : la partie du T3 (fixture) se charge sur le nouveau plan sans perte (%d bâtiments, digue %s)" % [f3.built.size(), str(f3.built.has(Layout.SEAWALL))])

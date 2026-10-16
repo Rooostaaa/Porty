@@ -193,7 +193,7 @@ func _draw() -> void:
 	# tablier : alerte dessinée après la jauge du parc, qu'elle chevauche en dézoom
 	var af := sim.apron_stock() / maxf(1.0, sim.apron_capacity())
 	if af > 0.92:
-		_pill(_sp(Vector3(-18, 3, 1)), "Tablier plein", UI.BAD, "yard")
+		_pill(_sp(Vector3(-1.6, 3, 8)), "Tablier plein", UI.BAD, "yard")      # (lot H2 : tablier du quai n°1)
 	# pancarte du prochain achat : sur la pancarte de la zone prochaine, ou au-dessus de l'empreinte dans sa case ;
 	# elle rebondit quand l'achat devient abordable (même signal que la pastille d'achats abordables)
 	_draw_next_sign(sim, top_y)
@@ -396,7 +396,7 @@ func _gauge(center: Vector2, fill: float, small_yard: bool = false) -> void:
 
 
 ## Pastille de l'aire d'attente (centre du parking poids lourds).
-const PARKING_PILL := Vector3(-3, 5, 64)
+const PARKING_PILL := Vector3(-3, 5, 82)
 
 
 ## Pancarte du prochain achat (nom et prix dessinés ici, jamais en texte 3D) ; elle rebondit quand l'achat est abordable.

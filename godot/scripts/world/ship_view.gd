@@ -11,7 +11,8 @@ extends Node3D
 
 const BOX_COLORS := ["box_red", "box_blue", "box_green", "box_yellow", "box_orange", "box_teal", "box_purple", "box_brown"]
 
-enum Phase { ARRIVE, ANCHOR, INBOUND, CRAB_IN, MOORED, CRAB_OUT, OUTBOUND, LEAVE, DONE }
+## Lot H2 : BACK_IN — marche arrière dans la darse (du point d'attente à la hauteur du poste, remorqueur à la proue).
+enum Phase { ARRIVE, ANCHOR, INBOUND, BACK_IN, CRAB_IN, MOORED, CRAB_OUT, OUTBOUND, LEAVE, DONE }
 
 ## Vitesse de croisière par classe (u/s). Un navire ne la dépasse jamais.
 const CRUISE := {"mini": 7.5, "coaster": 7.0, "feeder": 6.0, "panamax": 5.0}
@@ -33,7 +34,10 @@ const UNLOAD_PER_SLOT := 0.3      # s de déchargement à l'écran par emplaceme
 const UNLOAD_MIN := 8.0           # … entre 8 et 20 s par navire
 const UNLOAD_MAX := 20.0
 const LINGER := 1.5               # s à quai, vide, avant de demander le départ
-const SEA := Vector3(0, 0, -1)    # côté large d'un poste (les quais bordent la mer au nord)
+## Lot H2 : vitesse de manœuvre sur les MAN_LEAD derniers mètres avant le point d'attente final ; marche arrière (remorqueur à
+## la proue) : prise de vitesse plus vive, vitesse Layout.REVERSE_V.
+const MAN_LEAD := 18.0
+const REVERSE_ACCEL := 0.9
 const TUG_SPEED := 11.0
 const TUG_TURN := 2.5             # rad/s
 ## Remorqueur : base dans la crique (à côté du remorqueur du pôle nautique), rendez-vous à l'entrée du chenal (postes 1–2) ou
@@ -105,6 +109,7 @@ var _tug_meet := Vector3.ZERO
 var _tug_wait := 0.0
 var _tug_side := -1.0                # côté de la poussée à la hanche (−1 bâbord, +1 tribord)
 var max_yaw_rate_seen := 0.0         # (tests) plus grande vitesse de rotation observée, rad/s
+var _straight_from := INF            # lot H2 : abscisse du tronçon droit de la marche arrière (cap tenu)
 
 
 func setup(s: Ship, sim: PortSim) -> void:
@@ -287,10 +292,13 @@ func dispatch(bi: int) -> void:
 	var g1 := _abscissa(p, g[0])
 	var g2 := _abscissa(p, g[1])
 	_gates = [g1, g2]
+	# lot H2 : vitesse du port jusqu'aux dernières encablures avant le point d'attente final (l'attente de darse est loin de la
+	# darse), puis vitesse de manœuvre
+	var man := maxf(g2, _len - MAN_LEAD)
 	if bi < Layout.EAST_BERTH0:
-		_zones = [Vector2(0.0, _cruise), Vector2(g1, _vh), Vector2(g2, _vman)]
+		_zones = [Vector2(0.0, _cruise), Vector2(g1, _vh), Vector2(man, _vman)]
 	else:
-		_zones = [Vector2(0.0, _cruise), Vector2(g2, _vman)]
+		_zones = [Vector2(0.0, _cruise), Vector2(man, _vman)]      # (passe est : au large jusqu'à la darse, comme avant H2)
 	gate_level = 0
 	cargo_frac = 1.0
 	_horn_done = false
@@ -309,7 +317,7 @@ func dispatch_on(bi: int, p: Array[Vector3]) -> void:
 	var g1 := _abscissa(p, g[0])
 	var g2 := _abscissa(p, g[1])
 	_gates = [g1, g2]
-	_zones = [Vector2(0.0, _cruise), Vector2(g1, _vh), Vector2(g2, _vman)]
+	_zones = [Vector2(0.0, _cruise), Vector2(g1, _vh), Vector2(maxf(g2, _len - MAN_LEAD), _vman)]
 	gate_level = 0
 	cargo_frac = 1.0
 	_horn_done = false
@@ -463,7 +471,7 @@ func rule_state() -> int:
 			return Ship.State.ARRIVING
 		Phase.ANCHOR:
 			return Ship.State.ANCHORED
-		Phase.INBOUND, Phase.CRAB_IN:
+		Phase.INBOUND, Phase.BACK_IN, Phase.CRAB_IN:
 			return Ship.State.PILOTING
 		Phase.MOORED:
 			return Ship.State.UNLOADING
@@ -538,7 +546,7 @@ func _move(dt: float) -> void:
 		if _tug_wait < TUG_WAIT_MAX:
 			return          # le remorqueur n'est pas encore à poste
 	var vlim := _speed_limit(crab)
-	var rate := (CRAB_ACCEL if crab else ACCEL) if vlim > _v else maxf(DECEL * 2.0, CRAB_ACCEL)
+	var rate := (CRAB_ACCEL if crab else (REVERSE_ACCEL if phase == Phase.BACK_IN else ACCEL)) if vlim > _v else maxf(DECEL * 2.0, CRAB_ACCEL)
 	if hold and not crab:
 		vlim = 0.0
 		rate = HOLD_DECEL
@@ -596,6 +604,13 @@ func _path_done() -> void:
 			phase = Phase.ANCHOR
 			_v = 0.0
 		Phase.INBOUND:
+			# lot H2 : au point d'attente final, le navire recule dans la darse (≤ REVERSE_V, le remorqueur à la proue)
+			_v = 0.0
+			_start(Phase.BACK_IN, Layout.ship_path_back_in(berth_i, null, width))
+			_zones = [Vector2(0.0, Layout.REVERSE_V)]
+			# dernier tronçon (droit, vers le poste) : cap tenu au nord, le navire se rapproche du quai en reculant
+			_straight_from = _len - (_path[-1] as Vector3).distance_to(_path[-2])
+		Phase.BACK_IN:
 			_v = 0.0
 			_start(Phase.CRAB_IN, [_path[-1], Layout.berth_ship_pos(berth_i, width)])
 		Phase.CRAB_IN:
@@ -638,7 +653,7 @@ func in_depart_maneuver() -> bool:
 
 ## Le navire est-il dans sa manœuvre d'arrivée (au-delà du dernier point d'attente : évitage, approche) ?
 func in_maneuver() -> bool:
-	return phase == Phase.INBOUND and not _gates.is_empty() and _d >= float(_gates[-1]) + 0.5
+	return phase == Phase.BACK_IN or (phase == Phase.INBOUND and not _gates.is_empty() and _d >= float(_gates[-1]) + 0.5)
 
 
 ## Cap = corde entre l'étrave et la poupe posées sur le trajet : la coque suit les virages sans balayer les bouées
@@ -650,6 +665,8 @@ func _chord_yaw() -> float:
 	var pb: Vector3 = Layout.polyline_at(_path, (_d - hl) / _len)[0]
 	if pa.distance_to(pb) > 0.5:
 		yaw_goal = atan2(-(pa.z - pb.z), pa.x - pb.x)
+	if phase == Phase.BACK_IN:
+		yaw_goal = wrapf(yaw_goal + PI, -PI, PI)      # lot H2 : en marche arrière, la poupe va devant
 	if _d < hl and hl > 0.01:
 		# (E-Flux) tant que la poupe n'est pas sur le trajet, le cap passe peu à peu du cap de départ (à quai, au mouillage, ou
 		# celui du trajet précédent) à la corde : le navire tourne en avançant au lieu de pivoter d'un coup vers sa route
@@ -703,7 +720,7 @@ func shown_path() -> Array[Vector3]:
 func _pose(dt: float) -> void:
 	var prev := position
 	var at_path: Vector3 = Layout.polyline_at(_path, _frac())[0]
-	var on_lane := phase == Phase.ARRIVE or phase == Phase.INBOUND or phase == Phase.OUTBOUND or phase == Phase.LEAVE or phase == Phase.DONE
+	var on_lane := phase == Phase.ARRIVE or phase == Phase.INBOUND or phase == Phase.BACK_IN or phase == Phase.OUTBOUND or phase == Phase.LEAVE or phase == Phase.DONE
 	var goal_off := hull_center() - at_path if on_lane else Vector3.ZERO
 	if not hold:
 		_off = _off.lerp(goal_off, 1.0 - exp(-dt * 4.0))
@@ -727,8 +744,12 @@ func _pose(dt: float) -> void:
 			if _len > 1.0 and _v > 0.05:
 				target = _chord_yaw()          # (navire arrêté : il ne tourne pas — jamais de pivot sur place)
 			if phase == Phase.INBOUND and _v > 0.05:
-				# fin de l'approche : le cap rejoint celui du quai avant le glissement latéral (jamais de pivot sur place)
-				target = lerp_angle(target, Layout.berth_yaw(berth_i), smoothstep(_len - BLEND_LEN, _len, _d))
+				# fin de l'approche : le cap rejoint celui du point d'attente final (lot H2 : cap à l'est devant D1–D2, au nord
+				# devant D3) avant la marche arrière (jamais de pivot sur place)
+				var gh := Layout.berth_gate_heading(berth_i)
+				target = lerp_angle(target, atan2(-gh.y, gh.x), smoothstep(_len - BLEND_LEN, _len, _d))
+			if phase == Phase.BACK_IN and _d >= _straight_from - 0.01:
+				target = Layout.berth_yaw(berth_i)
 	var prev_yaw := _yaw
 	var diff := angle_difference(_yaw, target)
 	_yaw += clampf(diff * (1.0 - exp(-dt * 3.0)), -rate * dt, rate * dt)
@@ -743,7 +764,7 @@ func _pose(dt: float) -> void:
 	_bob += dt
 	rotation = Vector3(sin(_bob * 1.3 + ship_id) * 0.015, _yaw, cos(_bob * 1.1 + ship_id) * 0.012)
 	position.y = Layout.WATER_Y + sin(_bob * 1.6 + ship_id) * 0.08
-	_sync_wake(spd, dt)
+	_sync_wake(0.0 if phase == Phase.BACK_IN else spd, dt)      # (lot H2 : en marche arrière, pas de sillage en V)
 
 
 func _sync_cargo() -> void:
@@ -816,16 +837,22 @@ func _tug_station() -> Array:
 	var here := Vector3(position.x, Layout.WATER_Y, position.z)
 	if absf(_turn) > 0.04:
 		_tug_side = 1.0 if _turn < 0.0 else -1.0      # virage à gauche (cap qui croît) : bâbord ; à droite : tribord
-	var sea_yaw := atan2(-SEA.z, SEA.x)                 # cap tourné vers le large
+	# lot H2 : côté eau du poste (vers l'axe de la darse) ; le remorqueur pousse depuis l'axe, tire vers l'axe
+	var s2 := Layout.berth_sea(maxi(0, berth_i))
+	var sea := Vector3(s2.x, 0, s2.y)
+	var sea_yaw := atan2(-sea.z, sea.x)
 	match phase:
 		Phase.INBOUND:
 			if _gates.size() >= 2 and _d < float(_gates[1]) - 30.0:
 				return [here + fwd * (length * 0.5 + 7.0), _yaw]
 			return [here - fwd * (length * 0.32) + side * (hw * _tug_side), _yaw - PI * 0.5 * _tug_side]
+		Phase.BACK_IN:
+			# à la proue (côté large), face au navire : il retient et oriente l'étrave pendant le recul
+			return [here + fwd * (length * 0.5 + 6.0), _yaw + PI]
 		Phase.CRAB_IN:
-			return [here + fwd * (length * 0.22) + SEA * hw, sea_yaw + PI]
+			return [here + fwd * (length * 0.22) + sea * hw, sea_yaw + PI]
 		Phase.CRAB_OUT, Phase.MOORED:
-			return [here + fwd * (length * 0.2) + SEA * (width * 0.5 + 6.0), sea_yaw]
+			return [here + fwd * (length * 0.2) + sea * (width * 0.5 + 6.0), sea_yaw]
 		Phase.OUTBOUND:
 			return [here - fwd * (length * 0.32) + side * (hw * _tug_side), _yaw - PI * 0.5 * _tug_side]
 	return [here + fwd * (length * 0.5 + 7.0), _yaw]

@@ -2490,13 +2490,13 @@ func _g2_first_frames() -> void:
 			_frame(G2_GESTURE_LOOK, G2_GESTURE_ZOOM)
 
 
-const G2_GESTURE_LOOK := Vector3(-24.0, 0.0, 20.0)      # quai (z −3), plateforme, cabane (z 40,5) et barrière (z 44)
-const G2_GESTURE_ZOOM := 66.0
+const G2_GESTURE_LOOK := Vector3(-10.0, 0.0, 28.0)      # lot H2 : quai n°1 (x −6, z −6…14), plateforme, cabane (z 58,5), barrière (z 62)
+const G2_GESTURE_ZOOM := 86.0
 
 
 ## Lot G2 : cadrage de la friche après la Concession (le quai, la plateforme, la cabane et la barrière à venir).
-const G2_FRICHE_LOOK := Vector3(-24.0, 0.0, 14.0)
-const G2_FRICHE_ZOOM := 72.0
+const G2_FRICHE_LOOK := Vector3(-10.0, 0.0, 22.0)
+const G2_FRICHE_ZOOM := 84.0
 
 
 func _bascule_ceremony() -> void:

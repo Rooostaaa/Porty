@@ -79,6 +79,7 @@
   {"id": "berth3", "tier": 3, "name": "Quai profond n°3", "icon": "berth", "cost": 2.0e8, "hint": "Construis le quai profond : les Panamax arriveront.",
    "desc": "Un quai de 15 m de tirant d'eau avec portique STS : les Panamax arrivent.",
    "effects": [{"type": "add_berth", "depth": 4, "cranes": [{"factor": 2.5, "kind": "sts"}]}]},
+  {"id": "seawall", "tier": 3, "name": "Digue du large", "icon": "berth", "cost": 150000000.0, "hint": "Une digue au large de la darse profonde : la passe est est protégée, les Panamax peuvent accoster, et les tempêtes durent moins longtemps.", "desc": "Digue du large : les Panamax entrent dans la darse profonde (sans elle, seulement les feeders) ; vent fort et brouillard durent 40 % de moins.", "effects": [{"type": "deep_water"}, {"type": "weather", "mult": 0.6}]},
   {"id": "lng", "tier": 3, "name": "Station de soutage GNL", "icon": "harbor", "cost": 2.8e8, "hint": "Une station de soutage GNL : les grands armateurs feront le plein chez toi.",
    "desc": "Carburant propre pour les navires récents : trafic +25 %, chaque escale rapporte 50 % de droits en plus.",
    "effects": [{"type": "stat_mult", "stat": "demand", "mult": 1.25, "label": "Soutage GNL"}, {"type": "ship_fee", "amount": 0.5}]},
